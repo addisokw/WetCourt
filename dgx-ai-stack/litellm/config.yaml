@@ -1,0 +1,29 @@
+model_list:
+  - model_name: qwen3.6-35b-a3b
+    litellm_params:
+      model: openai/qwen3.6-35b-a3b
+      api_base: http://llama-server:8000/v1
+      api_key: dummy
+
+  - model_name: kokoro-tts
+    litellm_params:
+      model: openai/kokoro
+      api_base: http://kokoro:8880/v1
+      api_key: dummy
+    model_info:
+      mode: audio_speech
+
+  - model_name: whisper-1
+    litellm_params:
+      model: openai/whisper-1
+      api_base: http://parakeet:8082/v1
+      api_key: dummy
+    model_info:
+      mode: audio_transcription
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

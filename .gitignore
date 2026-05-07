@@ -1,0 +1,29 @@
+# Local secrets — keep .env.example as the template
+.env
+*.env.local
+
+# Virtualenv
+.venv/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Generated audio from benchmarks / sample exchanges
+*.wav
+*.mp3
+*.flac
+*.opus
+# ...except the test fixture the benchmark depends on
+!sample_plea.wav
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Plan files / claude state
+.claude/

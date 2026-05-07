@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Wrapper around `docker compose` on the Spark, runnable from the Mac.
+# Usage:
+#   ./ai-stack             # bring everything up (detached)
+#   ./ai-stack down        # stop and remove containers
+#   ./ai-stack status      # show service health
+#   ./ai-stack logs        # follow combined logs
+#   ./ai-stack logs llama-server   # follow one service
+#   ./ai-stack restart kokoro      # restart one service
+#   ./ai-stack ssh         # drop into the ai-stack dir on the Spark
+set -euo pipefail
+
+# Pick up AI_STACK_HOST / AI_STACK_DIR from the gitignored .env if set there.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$SCRIPT_DIR/.env" ] && set -a && . "$SCRIPT_DIR/.env" && set +a
+
+HOST="${AI_STACK_HOST:?set AI_STACK_HOST=user@host in dgx-ai-stack/.env}"
+DIR="${AI_STACK_DIR:-/home/${HOST%@*}/ai-stack}"
+
+run() { ssh -t "$HOST" "cd $DIR && docker compose $*"; }
+
+cmd="${1:-up}"; shift || true
+case "$cmd" in
+  up)       run up -d "$@" ;;
+  down)     run down "$@" ;;
+  status|ps) run ps ;;
+  logs)     run logs -f --tail=50 "$@" ;;
+  restart)  run restart "$@" ;;
+  pull)     run pull "$@" ;;
+  ssh)      ssh -t "$HOST" "cd $DIR && exec \$SHELL" ;;
+  *)        run "$cmd" "$@" ;;
+esac

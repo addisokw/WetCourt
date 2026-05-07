@@ -1,0 +1,87 @@
+name: ai-stack
+
+x-gpu: &gpu
+  runtime: nvidia
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+networks:
+  ai:
+    driver: bridge
+
+volumes:
+  parakeet-cache: {}
+
+services:
+  llama-server:
+    image: local/llama.cpp:server-cuda-fresh
+    build:
+      context: ${LLAMA_BUILD_CONTEXT}
+      dockerfile: ${PWD:-.}/llama-cpp/Dockerfile
+    container_name: llama-server
+    restart: unless-stopped
+    networks: [ai]
+    <<: *gpu
+    volumes:
+      - ${LLAMA_MODEL_DIR}:/models:ro
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --jinja
+      - --flash-attn
+      - "on"
+      - --n-gpu-layers
+      - "${LLAMA_NGL}"
+      - --ctx-size
+      - "${LLAMA_CTX}"
+      - --alias
+      - qwen3.6-35b-a3b
+      - -m
+      - /models/${LLAMA_MODEL_FILE}
+
+  parakeet:
+    image: local/parakeet:latest
+    container_name: parakeet
+    restart: unless-stopped
+    networks: [ai]
+    <<: *gpu
+    ipc: host
+    environment:
+      HF_HOME: /hf-cache
+    volumes:
+      - parakeet-cache:/hf-cache
+
+  kokoro:
+    image: kokoro-tts-arm64:latest
+    container_name: kokoro
+    restart: unless-stopped
+    networks: [ai]
+    <<: *gpu
+    environment:
+      USE_GPU: "true"
+      DEVICE: cuda
+
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    restart: unless-stopped
+    networks: [ai]
+    depends_on:
+      - llama-server
+      - parakeet
+      - kokoro
+    ports:
+      - "0.0.0.0:${LITELLM_PORT}:4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
