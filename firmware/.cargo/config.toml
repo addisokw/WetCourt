@@ -1,5 +1,8 @@
 [build]
 target = "riscv32imac-esp-espidf"
+# ESP-IDF's build refuses output paths > ~10 chars deep on Windows. Redirect
+# the target dir out of the long project path. Adjust if you prefer elsewhere.
+target-dir = "C:/wcfw"
 
 [target.riscv32imac-esp-espidf]
 linker = "ldproxy"
@@ -12,3 +15,4 @@ build-std = ["std", "panic_abort"]
 [env]
 MCU = "esp32c6"
 ESP_IDF_VERSION = "v5.2.2"
+ESP_IDF_SDKCONFIG_DEFAULTS = { value = "sdkconfig.defaults", relative = true }

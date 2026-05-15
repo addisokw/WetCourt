@@ -69,3 +69,33 @@ ack_timeout_ms = 3000
 
 Start the orchestrator, then power up the NanoC6 — the MCU will dial in and
 the orchestrator logs `tcp_hw: MCU connected from <ip>`.
+
+## Known issue (2026-05-15)
+
+The firmware builds and flashes cleanly, but boots into a panic loop:
+
+```
+assert failed: mmu_hal_map_region /IDF/components/hal/mmu_hal.c:84 (paddr % page_size_in_bytes == 0)
+```
+
+The chip *did* briefly connect to the orchestrator once after a full
+erase + bootloader + partition table + app flash, before crashing — so
+WiFi + TCP + the protocol all work in principle. The panic is in the
+ESP-IDF early-boot path, not our `main` body.
+
+Most likely cause: bootloader / partition-table / app version mismatch
+from using plain `espflash flash` (writes app only, leaves stale
+bootloader). Next session should:
+
+1. Install `cargo-espflash` (`cargo install cargo-espflash`), which
+   bundles the bootloader + partition table + app from the same
+   ESP-IDF build in one image, and use `cargo espflash flash --monitor`
+   instead of `cargo run`.
+2. If that still panics, suspect ESP_IDF_VERSION pinning: the runtime
+   boot log reported `v5.5.1` even though `.cargo/config.toml` requests
+   `v5.2.2`. Embuild may be ignoring the pin.
+
+The toolchain wrestling to get here is captured in commit history
+(rust-toolchain.toml pinned to `nightly-2025-09-15`, esp-idf-svc bumped
+to 0.52, ws2812 driver dropped due to `links =` conflict, USB-Serial-JTAG
+console enabled via `sdkconfig.defaults`).
