@@ -19,6 +19,7 @@ import os
 import re
 import time
 import argparse
+import queue
 import statistics
 import subprocess
 import threading
@@ -73,6 +74,41 @@ Never break character. Never explain yourself outside the response. Never apolog
 
 
 VERDICT_RE = re.compile(r"VERDICT:\s*(GUILTY|ACQUITTED)", re.IGNORECASE)
+
+# Sentence boundary: punctuation followed by whitespace. Used by the pipelined
+# path to chunk LLM output into TTS-sized pieces as it streams.
+SENT_END_RE = re.compile(r"([.!?])(\s+)")
+MIN_SENTENCE_CHARS = 25  # below this, prepend to the next sentence (Kokoro clips short utterances)
+
+
+def split_complete_sentences(buf):
+    """Return (list_of_complete_sentences, remainder_buffer).
+
+    Honors MIN_SENTENCE_CHARS by gluing tiny sentences ("Indeed.") onto the
+    next one, which avoids Kokoro producing prosody-less stubs.
+    """
+    pieces = []
+    i = 0
+    for m in SENT_END_RE.finditer(buf):
+        end = m.end(1)  # include punctuation, drop trailing whitespace
+        pieces.append(buf[i:end].strip())
+        i = m.end()
+    remainder = buf[i:]
+
+    sentences = []
+    pending = ""
+    for p in pieces:
+        candidate = (pending + " " + p).strip() if pending else p
+        if len(candidate) < MIN_SENTENCE_CHARS:
+            pending = candidate
+        else:
+            sentences.append(candidate)
+            pending = ""
+    # Whatever didn't reach min length goes back into the remainder so it picks
+    # up the next sentence too.
+    if pending:
+        remainder = pending + (" " + remainder if remainder else "")
+    return sentences, remainder
 
 
 def parse_verdict(response_text):
@@ -211,6 +247,183 @@ def docker_mem_snapshot(ssh_host, names):
     return snap
 
 
+SENTINEL_DONE = object()
+
+
+def run_pipeline_pipelined(client, audio_path, charge, verbose=True, monitor=None, no_think=False):
+    """Pipelined STT -> (LLM stream + TTS-per-sentence) -> playback.
+
+    Measures time-to-first-audio-byte (TTFA) — the realistic "judge starts
+    talking" latency from operator press to the first speakable PCM byte.
+    """
+    timings = {}
+    t_total_start = time.perf_counter()
+    timings["t_start"] = t_total_start
+
+    # Stage 1: STT (same as the baseline path)
+    with StageTimer("STT", verbose) as t:
+        with open(audio_path, "rb") as f:
+            transcript = client.audio.transcriptions.create(model=STT_MODEL, file=f)
+    timings["stt"] = t.elapsed
+    plea_text = transcript.text.strip() or "[the defendant said nothing]"
+    if verbose:
+        print(f"  Transcribed plea: {plea_text!r}")
+
+    user_msg = f"CHARGE: {charge}\n\nPLEA: {plea_text}"
+    messages = [
+        {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_msg},
+    ]
+    extra_body = {"chat_template_kwargs": {"enable_thinking": False}} if no_think else {}
+
+    sentence_q = queue.Queue(maxsize=8)
+    first_audio_t = [None]      # mutated by worker; list-as-cell for closure
+    audio_total_bytes = [0]
+    tts_done = threading.Event()
+    worker_exc = [None]
+
+    def tts_worker():
+        try:
+            while True:
+                item = sentence_q.get()
+                if item is SENTINEL_DONE:
+                    return
+                # Streaming TTS: PCM (24kHz s16le) so chunks are immediately playable.
+                with client.audio.speech.with_streaming_response.create(
+                    model=TTS_MODEL,
+                    voice=TTS_VOICE,
+                    input=item,
+                    response_format="pcm",
+                ) as resp:
+                    for chunk in resp.iter_bytes():
+                        if not chunk:
+                            continue
+                        if first_audio_t[0] is None:
+                            first_audio_t[0] = time.perf_counter()
+                        audio_total_bytes[0] += len(chunk)
+        except Exception as e:
+            worker_exc[0] = e
+        finally:
+            tts_done.set()
+
+    worker = threading.Thread(target=tts_worker, daemon=True)
+    worker.start()
+
+    # Stage 2: LLM stream -> sentence buffer -> TTS queue.
+    llm_start = time.perf_counter()
+    ttft = None
+    buf = ""
+    full_text = []
+    saw_verdict = False
+    usage = None
+
+    stream = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=messages,
+        stream=True,
+        stream_options={"include_usage": True},
+        max_tokens=LLM_MAX_TOKENS,
+        temperature=0.9,
+        extra_body=extra_body,
+    )
+    for chunk in stream:
+        if chunk.usage is not None:
+            usage = chunk.usage
+        if not chunk.choices:
+            continue
+        content = chunk.choices[0].delta.content
+        if not content:
+            continue
+        if ttft is None:
+            ttft = time.perf_counter() - llm_start
+        full_text.append(content)
+        buf += content
+
+        # Once VERDICT: appears, stop feeding TTS — but keep draining the LLM
+        # so we get the final usage block.
+        if not saw_verdict and "VERDICT:" in buf:
+            saw_verdict = True
+            head, _, _ = buf.partition("VERDICT:")
+            sentences, _ = split_complete_sentences(head)
+            for s in sentences:
+                sentence_q.put(s)
+            # remainder of any sentence before VERDICT is dropped: short tail won't
+            # change time-to-first-word and avoids TTSing a fragment.
+            buf = ""
+            continue
+
+        if saw_verdict:
+            continue
+
+        sentences, buf = split_complete_sentences(buf)
+        for s in sentences:
+            sentence_q.put(s)
+
+    # Flush any tail sentence the LLM produced before VERDICT (and before EOF).
+    if not saw_verdict and buf.strip():
+        # Force a final synthesis even without trailing punctuation.
+        tail = buf.strip()
+        if len(tail) >= MIN_SENTENCE_CHARS:
+            sentence_q.put(tail)
+
+    sentence_q.put(SENTINEL_DONE)
+    llm_elapsed = time.perf_counter() - llm_start
+    timings["llm_total"] = llm_elapsed
+    timings["llm_ttft"] = ttft
+
+    # Wait for TTS to finish all queued work.
+    tts_done.wait(timeout=60)
+    if worker_exc[0]:
+        raise worker_exc[0]
+
+    t_total_end = time.perf_counter()
+    ruling_response = "".join(full_text)
+    paragraph, verdict = parse_verdict(ruling_response)
+    if not paragraph:
+        paragraph = "The bench remains silent. Defendant's reasoning is overruled."
+
+    timings["verdict"] = verdict
+    timings["paragraph"] = paragraph
+    timings["total"] = t_total_end - t_total_start
+    timings["t_end"] = t_total_end
+    timings["ttfa"] = (first_audio_t[0] - t_total_start) if first_audio_t[0] else None
+    timings["tts_bytes"] = audio_total_bytes[0]
+
+    if usage is not None:
+        timings["prompt_tokens"] = usage.prompt_tokens
+        timings["completion_tokens"] = usage.completion_tokens
+        details = getattr(usage, "completion_tokens_details", None)
+        timings["reasoning_tokens"] = getattr(details, "reasoning_tokens", None) if details else None
+        if llm_elapsed > 0:
+            timings["llm_tps"] = usage.completion_tokens / llm_elapsed
+
+    if verbose:
+        if ttft is not None:
+            print(f"  [LLM TTFT] {ttft*1000:.0f} ms")
+        if usage is not None:
+            extra = f" (reasoning {timings.get('reasoning_tokens')})" if timings.get("reasoning_tokens") else ""
+            print(f"  [LLM tok] in={usage.prompt_tokens} out={usage.completion_tokens}{extra} "
+                  f"@ {timings.get('llm_tps', 0):.1f} tok/s")
+        if timings["ttfa"] is not None:
+            print(f"  [TTFA]    {timings['ttfa']*1000:.0f} ms  (first audio byte from operator press)")
+        else:
+            print("  [TTFA]    no audio produced")
+        print(f"  [TTS]     {timings['tts_bytes']} bytes total")
+
+    if monitor is not None:
+        gpu = monitor.window(t_total_start, t_total_end)
+        timings["gpu"] = gpu
+        if verbose and gpu:
+            p = gpu["power_w"]; u = gpu["util_pct"]; tp = gpu["temp_c"]
+            line_bits = []
+            if p: line_bits.append(f"power {p['mean']:.1f}W avg / {p['max']:.1f}W peak")
+            if u: line_bits.append(f"util {u['mean']:.0f}% avg / {u['max']:.0f}% peak")
+            if tp: line_bits.append(f"temp {tp['max']:.0f}C peak")
+            print("  [GPU]   " + ", ".join(line_bits) + f" (n={gpu['n']})")
+
+    return timings, ruling_response
+
+
 def run_pipeline(client, audio_path, charge, stream_llm=True, verbose=True, monitor=None, no_think=False):
     """Execute one full STT -> LLM -> TTS pass and return per-stage timings."""
     timings = {}
@@ -346,7 +559,7 @@ def print_aggregate(all_timings, idle_baseline=None, mem_snapshot=None):
     print("=" * 70)
     print("AGGREGATE RESULTS")
     print("=" * 70)
-    for stage in ["stt", "llm_ttft", "llm_total", "tts", "total"]:
+    for stage in ["stt", "llm_ttft", "llm_total", "tts", "ttfa", "total"]:
         values = [t[stage] for t in all_timings if t.get(stage) is not None]
         if not values:
             continue
@@ -435,6 +648,10 @@ def main():
                         help="Skip the warmup run")
     parser.add_argument("--no-think", action="store_true",
                         help="Disable Qwen3 thinking via chat_template_kwargs (massive speedup)")
+    parser.add_argument("--pipeline-tts", action="store_true",
+                        help="Pipeline LLM stream into per-sentence TTS calls and "
+                             "report time-to-first-audio (TTFA) — the realistic "
+                             "'judge starts talking' latency. Disables --no-stream.")
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST,
                         help="user@host for nvidia-smi sampling. "
                              "Pass empty string to disable GPU monitoring.")
@@ -466,9 +683,13 @@ def main():
     if not args.no_warmup:
         print("--- Warmup run (not counted) ---")
         try:
-            run_pipeline(client, args.audio, args.charge,
-                         stream_llm=not args.no_stream, monitor=monitor,
-                         no_think=args.no_think)
+            if args.pipeline_tts:
+                run_pipeline_pipelined(client, args.audio, args.charge,
+                                       monitor=monitor, no_think=args.no_think)
+            else:
+                run_pipeline(client, args.audio, args.charge,
+                             stream_llm=not args.no_stream, monitor=monitor,
+                             no_think=args.no_think)
         except Exception as e:
             print(f"  Warmup failed: {e}")
         print()
@@ -480,11 +701,17 @@ def main():
     for i in range(args.runs):
         print(f"--- Run {i+1}/{args.runs} ---")
         try:
-            timings, response = run_pipeline(
-                client, args.audio, args.charge,
-                stream_llm=not args.no_stream, monitor=monitor,
-                no_think=args.no_think,
-            )
+            if args.pipeline_tts:
+                timings, response = run_pipeline_pipelined(
+                    client, args.audio, args.charge,
+                    monitor=monitor, no_think=args.no_think,
+                )
+            else:
+                timings, response = run_pipeline(
+                    client, args.audio, args.charge,
+                    stream_llm=not args.no_stream, monitor=monitor,
+                    no_think=args.no_think,
+                )
         except Exception as e:
             print(f"  Run failed: {e}\n")
             continue

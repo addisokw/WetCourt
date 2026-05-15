@@ -24,76 +24,83 @@ This document captures architectural decisions and is intended to inform an impl
 ### Design principles
 
 - **Deterministic state machine drives everything.** The LLM is consulted at well-defined points; it never controls flow or hardware directly.
-- **Every LLM call has a fallback.** Network down, model malformed output, timeout — the trial completes regardless.
-- **Hardware actions are timing-critical and isolated.** A microcontroller owns the squirt valve, gavel servo, and lights. The Mac/Linux host never directly drives a solenoid.
+- **Every LLM/STT/TTS call has a fallback.** Network down, model malformed output, timeout — the trial completes regardless.
+- **Hardware actions are timing-critical and isolated.** A microcontroller owns the squirt valve, gavel servo, and lights. The host never directly drives a solenoid.
 - **The browser is part of the architecture.** It handles display, mic capture, and audio playback. This sidesteps native audio I/O integration in the backend.
-- **Single deployable artifact preferred.** Rust static binary + ML model files + microcontroller firmware + frontend assets (embedded).
+- **Inference is a service, not a library.** STT, LLM, and TTS run as containerized services behind a single OpenAI-compatible endpoint (LiteLLM). The orchestrator is just an HTTP client. This trades the "single static binary" ideal for a clean separation that matches what's already running on the DGX Spark.
+- **The orchestrator's location is a config knob, not an architectural assumption.** Production: orchestrator runs as a fifth container on the Spark, talking to LiteLLM over the private docker network. Dev: orchestrator runs on the developer's laptop with `cargo run`, talking to the Spark's LiteLLM over LAN at `http://dgx-spark.local:4000`. Same binary, same code path, different `inference.base_url`. The microcontroller and kiosk follow the orchestrator (whichever machine has the USB cable plugged in is the one running the orchestrator).
 
 ---
 
 ## 2. System Architecture
 
+The booth is built around a **DGX Spark** (Grace Blackwell, 121 GiB unified memory, Ubuntu 24.04 aarch64). The Spark is a small desktop-form-factor machine and lives at the booth itself. It runs the entire software stack as a single docker-compose deployment, has the microcontroller plugged in via USB, and drives the kiosk display directly.
+
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│                            HOST MACHINE                            │
-│                                                                    │
-│   ┌──────────────────────────────────────────────────┐            │
-│   │             Rust Orchestrator (single binary)     │            │
-│   │                                                   │            │
-│   │   ┌─────────────┐    State Machine               │            │
-│   │   │   Tokio     │      ▲    ▲    ▲               │            │
-│   │   │   runtime   │      │    │    │               │            │
-│   │   └─────────────┘      │    │    │               │            │
-│   │                        │    │    │               │            │
-│   │   ┌─────┬───────┬──────┴────┴────┴──────┬─────┐  │            │
-│   │   │ STT │  TTS  │  LLM      Display     │ HW  │  │            │
-│   │   │ task│  task │  task     server      │ task│  │            │
-│   │   └──┬──┴───┬───┴────┬─────────┬────────┴──┬──┘  │            │
-│   │      │      │        │         │           │     │            │
-│   └──────┼──────┼────────┼─────────┼───────────┼─────┘            │
-│          │      │        │         │           │                  │
-│          │      │        │         │           │                  │
-│          │      │        ▼         ▼           ▼                  │
-│          │      │     ┌───────┐  ┌───────┐  ┌───────┐             │
-│          │      │     │Ollama │  │Browser│  │Serial │             │
-│          │      │     │daemon │  │kiosk  │  │ port  │             │
-│          │      │     └───────┘  └───┬───┘  └───┬───┘             │
-│          │      │                    │          │                 │
-│          │ ┌────┘                    │          │                 │
-│          │ │ Audio (PCM bytes        │          │                 │
-│          │ │ via WebSocket binary)   │          │                 │
-│          │ │                         │          │                 │
-│   (in-process model inference)       │          │                 │
-└──────────────────────────────────────┼──────────┼─────────────────┘
-                                       │          │
-                                       ▼          ▼
-                                 ┌───────────┐ ┌──────────────┐
-                                 │  Big LED  │ │Microcontroller│
-                                 │  display  │ │ (ESP32/Arduino)│
-                                 │ + speaker │ │      USB      │
-                                 │  + mic    │ └──────┬───────┘
-                                 │           │        │
-                                 └───────────┘        ▼
-                                                ┌───────────────┐
-                                                │ Squirt valve  │
-                                                │ Gavel servo   │
-                                                │ Splash lights │
-                                                │ Eye gimbal    │
-                                                │ Thermal       │
-                                                │ printer, etc. │
-                                                └───────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    DGX SPARK (booth host) — docker compose               │
+│                                                                          │
+│   ┌────────────────────────────┐   ┌──────────────────────────────────┐ │
+│   │  orchestrator (Rust)       │   │  litellm  (router :4000 LAN)     │ │
+│   │                            │   │                                  │ │
+│   │  ┌──────────────────────┐  │   │  /v1/chat/completions ──┐        │ │
+│   │  │  State Machine       │  │   │  /v1/audio/speech     ──┼─┐      │ │
+│   │  │  (tokio tasks)       │  │   │  /v1/audio/transcripts──┼─┼─┐    │ │
+│   │  └──┬───────────┬───────┘  │◄─►│  /v1/models             │ │ │    │ │
+│   │     │           │          │   └─────────────────────────┼─┼─┼────┘ │
+│   │  display ws    hw task     │                             │ │ │      │
+│   │  :8080         (serial)    │                             ▼ ▼ ▼      │
+│   │     │           │          │   ┌──────────┐ ┌────────┐ ┌─────────┐  │
+│   └─────┼───────────┼──────────┘   │llama-srv │ │kokoro  │ │parakeet │  │
+│         │           │              │  :8000   │ │ :8880  │ │  :8082  │  │
+│         │           │              │ Qwen3.6- │ │  TTS   │ │  STT    │  │
+│         │           │              │ 35B-A3B  │ │        │ │         │  │
+│         │           │              └──────────┘ └────────┘ └─────────┘  │
+│         │           │                  (private "ai" docker network)    │
+└─────────┼───────────┼────────────────────────────────────────────────────┘
+          │           │
+          │ WebSocket │ USB-serial (CDC, 115200)
+          ▼           ▼
+   ┌───────────┐  ┌────────────────┐
+   │ Browser   │  │ Microcontroller│
+   │ (Chrome   │  │  (ESP32)       │
+   │  kiosk on │  └───────┬────────┘
+   │  Spark or │          │
+   │  attached │          ▼
+   │  display) │   ┌──────────────┐
+   │ + speaker │   │Squirt valve  │
+   │ + mic     │   │Gavel servo   │
+   └───────────┘   │Splash lights │
+                   │Eye gimbal    │
+                   │Thermal print │
+                   └──────────────┘
 ```
 
 ### Process inventory
 
-| Process | Role | Lifecycle |
-|---|---|---|
-| Rust orchestrator | State machine, ML inference, comms | Started by launch script |
-| Ollama daemon | LLM inference | Started by launch script (or already running) |
-| Browser (Chrome kiosk) | Display, mic, speakers | Started by launch script with `--kiosk --app=http://localhost:8080` |
-| Microcontroller | Realtime hardware control | Always-on once powered |
+All processes run as containers on the Spark via the existing `dgx-ai-stack/docker-compose.yml`, with the orchestrator added as a fifth service.
 
-Launch script (`run.sh`) starts these in order: Ollama → Rust binary → Chrome kiosk.
+| Service | Role | Lifecycle |
+|---|---|---|
+| `orchestrator` | Rust state machine, WS server, serial owner | `docker compose up -d` |
+| `litellm` | OpenAI-compatible router on `:4000` (LAN-exposed) | `restart: unless-stopped` |
+| `llama-server` | Qwen3.6-35B-A3B chat (`/v1/chat/completions`) | `restart: unless-stopped` |
+| `parakeet` | NeMo Parakeet TDT 0.6B v2 STT (`/v1/audio/transcriptions`) | `restart: unless-stopped` |
+| `kokoro` | Kokoro-FastAPI TTS, 67 voices (`/v1/audio/speech`) | `restart: unless-stopped` |
+| Browser (Chrome kiosk) | Display, mic, speakers | Launched outside compose by a small `kiosk.service` systemd unit on the Spark's display |
+| Microcontroller | Realtime hardware control | Always-on once powered; appears at `/dev/ttyUSB0` and is passed into the orchestrator container via `devices:` |
+
+The orchestrator does **no in-process model inference**. It speaks HTTP to LiteLLM at a configurable `inference.base_url`. In production that's `http://litellm:4000` over the private `ai` docker network; in dev it's `http://dgx-spark.local:4000` over the LAN, with the orchestrator running outside Docker (`cargo run`) on the developer's machine. Either way the orchestrator is the only thing besides litellm that the browser kiosk talks to (WebSocket on `:8080`).
+
+### Deployment modes
+
+| Mode | Where orchestrator runs | Inference URL | MCU plugged into | Kiosk points at |
+|---|---|---|---|---|
+| Production | Container on the Spark | `http://litellm:4000` | Spark USB | `http://localhost:8080` |
+| Dev (laptop) | `cargo run` on dev machine | `http://dgx-spark.local:4000` | Dev machine USB (or mocked) | `http://localhost:8080` |
+| Dev (no MCU) | `cargo run` on dev machine | `http://dgx-spark.local:4000` | none — `mock` driver in config | `http://localhost:8080` |
+
+The `hardware` section of `config.toml` accepts a `driver` field — `serial` (real MCU) or `mock` (logs commands, fakes acks) — so a developer with no MCU on hand can still exercise the full state machine against the live AI stack.
 
 ---
 
@@ -183,15 +190,13 @@ src/
 │   ├── states.rs        // State enum
 │   ├── events.rs        // Event enum
 │   └── transitions.rs   // (state, event) -> (state, commands)
-├── llm/
-│   ├── mod.rs           // task wrapper
-│   ├── client.rs        // Ollama HTTP client
+├── inference/
+│   ├── mod.rs           // task wrappers
+│   ├── client.rs        // shared OpenAI-compatible HTTP client (LiteLLM)
 │   ├── charge.rs        // charge-generation prompt + schema
-│   └── verdict.rs       // verdict prompt + schema
-├── stt/
-│   └── mod.rs           // whisper-rs integration
-├── tts/
-│   └── mod.rs           // ort + Kokoro ONNX
+│   ├── verdict.rs       // verdict prompt + schema
+│   ├── stt.rs           // multipart upload to /v1/audio/transcriptions
+│   └── tts.rs           // /v1/audio/speech, returns wav bytes
 ├── hardware/
 │   ├── mod.rs           // task wrapper
 │   └── protocol.rs      // serial command/response types
@@ -213,14 +218,12 @@ src/
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
-reqwest = { version = "0.12", features = ["stream", "json"] }
+reqwest = { version = "0.12", features = ["stream", "json", "multipart"] }
+eventsource-stream = "0.2"   # for SSE streaming from /v1/chat/completions
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "0.8"
 tokio-serial = "5"
-whisper-rs = "0.13"
-ort = "2"
-ndarray = "0.16"
 rust-embed = "8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -251,9 +254,9 @@ Subsystems are dumb: they receive a command, do the thing, emit completion event
 
 #### Stack
 
-Vanilla TypeScript or a small framework — Svelte, Solid, or Preact all work. Keep it simple; this is mostly text rendering and audio handling. Avoid SPA frameworks with heavy build tooling unless you're already comfortable with one.
+**SolidJS + TypeScript**, built with Vite. Solid's fine-grained reactivity is a good match for a screen that's mostly streaming text (deliberation tokens) and swapping between a handful of view states (idle, charge, plea timer, verdict) — no virtual DOM diffing overhead, no SPA-router weight. Build output is bundled into static files served by the Rust binary via `rust-embed`. The frontend connects to `ws://localhost:8080/ws` on load.
 
-Bundled into static files served by the Rust binary via `rust-embed`. Connect to `ws://localhost:8080/ws` on load.
+A single top-level `createSignal<ViewState>()` mirrors the backend state machine; the WebSocket handler is the only writer. Components subscribe to the slices they care about.
 
 #### Audio capture
 
@@ -275,25 +278,33 @@ Send audio over the WebSocket as binary frames. The backend converts to f32 PCM 
 
 TTS audio arrives as a binary blob (WAV or raw PCM). Decode via `AudioContext.decodeAudioData` and play via `BufferSource`. Notify backend with `{ type: 'tts_finished' }` on `onended`.
 
-### 4.3 Ollama (LLM)
+### 4.3 Inference Stack (LiteLLM + llama-server + Parakeet + Kokoro)
 
-Runs as a separate daemon. The orchestrator talks to it via HTTP at `http://localhost:11434`.
+All model inference runs as containers on the Spark behind a single OpenAI-compatible router. The orchestrator hits one base URL (`http://litellm:4000` from inside the docker network) and authenticates with a bearer token from `LITELLM_MASTER_KEY`.
 
-#### Model selection (configurable)
+| Endpoint | Backend container | Model |
+|---|---|---|
+| `/v1/chat/completions` | `llama-server` (`local/llama.cpp:server-cuda-fresh`) | Qwen3.6-35B-A3B (UD-Q4_K_M GGUF) |
+| `/v1/audio/speech` | `kokoro` (`kokoro-tts-arm64`) | Kokoro 82M, voice `bm_george` (default judge) |
+| `/v1/audio/transcriptions` | `parakeet` (NeMo on NGC pytorch:25.11) | Parakeet TDT 0.6B v2, exposed as `whisper-1` |
+| `/v1/models` | litellm | lists the three above |
 
-Defaults by host RAM:
-- 24GB: `qwen3:8b` or `qwen3:14b` at Q4_K_M
-- 32GB: `qwen3.6:35b-a3b` (MoE) — sweet spot
-- 48GB+: `qwen3.6:27b` dense at Q5/Q6
+This is exactly the stack documented in [`dgx-ai-stack/README.md`](dgx-ai-stack/README.md) — the orchestrator is just a client.
 
-Model name read from config. Both calls (charge + verdict) use the same model.
+#### Chat API usage
 
-#### API usage
+`POST /v1/chat/completions` with:
+- `model: "qwen3.6-35b-a3b"`
+- `chat_template_kwargs: {"enable_thinking": false}` — **booth default**. With thinking on, expect 30+ s while the model reasons silently before producing any output. The booth needs <8 s end-to-end.
+- `response_format: {"type": "json_schema", "json_schema": …}` for structured charge/verdict output. llama-server honors JSON Schema via grammar-constrained decoding through the OpenAI-compat path.
+- `stream: true` for the verdict deliberation (so the frontend can render tokens live via SSE).
+- `stream: false` for charge generation.
 
-Use the `/api/chat` endpoint with:
-- `format` set to a JSON schema for structured output
-- `stream: true` for the verdict deliberation (so frontend can render tokens live)
-- `stream: false` for charge generation (just want the result)
+Throughput on the Spark: ~65 tokens/sec decode, ~2 s for a typical short reply with thinking off.
+
+#### Why not Ollama
+
+Earlier drafts assumed Ollama. The Spark stack uses llama-server directly because (a) it's already running and tuned for Qwen3.6 MoE on Blackwell, (b) LiteLLM gives us OpenAI compatibility for free, and (c) putting STT and TTS behind the same router means one client, one auth model.
 
 ### 4.4 Microcontroller
 
@@ -398,7 +409,9 @@ The host should:
 - Treat `ESTOP` as an `OperatorEmergencyStop` event regardless of state.
 - Time out commands at 3s and treat as `HardwareError`.
 
-### 5.3 Ollama Prompts and Schemas
+### 5.3 LLM Prompts and Schemas
+
+Both calls go to `POST $LITELLM_BASE/v1/chat/completions` with `Authorization: Bearer $LITELLM_MASTER_KEY` and `model: "qwen3.6-35b-a3b"`. JSON Schema is passed via `response_format` (OpenAI-style); `enable_thinking: false` is set in `chat_template_kwargs` for both calls.
 
 #### Charge generation
 
@@ -421,7 +434,7 @@ Examples:
 
 User message: `"Generate the next charge."`
 
-Output schema (passed via `format` parameter):
+Output schema (passed via `response_format.json_schema`):
 ```json
 {
   "type": "object",
@@ -509,36 +522,54 @@ These are tuning parameters in config.
 
 ## 6. Subsystem Implementation Notes
 
-### 6.1 STT (whisper-rs)
+### 6.1 STT (Parakeet via LiteLLM)
 
-- Model: `whisper-large-v3-turbo` GGML, quantized to Q5_0. ~1.6GB.
-- Initialize once on startup, reuse across trials.
-- Input: f32 PCM at 16kHz, mono. Frontend captures at 16kHz directly to avoid resampling.
-- Run inference on a `tokio::task::spawn_blocking` since whisper-rs is sync.
-- Whisper-rs handles Metal acceleration on Mac and CUDA on Linux automatically.
+- Backend: NVIDIA Parakeet TDT 0.6B v2, served by the `parakeet` container, routed as model id `whisper-1` for OpenAI compatibility.
+- Orchestrator collects PCM/webm from the browser, repackages it as a multipart upload, and POSTs to `/v1/audio/transcriptions` with `model=whisper-1`. Parakeet accepts standard audio formats so no client-side conversion is required.
+- Latency: ~220 ms warm for a 25 s clip. First call after container start is ~1.2 s (model warm-up); the orchestrator should warm the endpoint on its own startup with a one-shot transcription of a tiny silent clip.
+- Choice of Parakeet over whisper.cpp: faster *and* meaningfully more accurate on accents and partial words. A whisper.cpp container is kept in the repo as a fallback for multilingual cases but is not in the active compose.
 
-```rust
-let ctx = WhisperContext::new_with_params(model_path, params)?;
-let mut state = ctx.create_state()?;
-state.full(params, &audio_pcm)?;
-let n_segments = state.full_n_segments();
-let text: String = (0..n_segments)
-    .filter_map(|i| state.full_get_segment_text(i).ok())
-    .collect::<Vec<_>>()
-    .join(" ");
+### 6.2 TTS (Kokoro-FastAPI via LiteLLM)
+
+- Backend: Kokoro-FastAPI in the `kokoro` container, 67 voices preloaded.
+- Default judge voice: `bm_george` (British male, formal — fits the pompous-barrister character better than the `am_*` American voices). Configurable.
+- `POST /v1/audio/speech` with `{model: "kokoro-tts", voice: "bm_george", input: <text>, response_format: "pcm"}`. Use `response_format: "pcm"` (raw 24kHz s16le) so chunks are immediately playable without a container header — `wav` requires a length-prefixed header that forces the server to buffer the whole clip.
+- Use the OpenAI SDK's streaming variant (`with_streaming_response.create`) so the orchestrator gets bytes back as Kokoro emits them, not after the whole clip is synthesized.
+- Strip the `VERDICT: GUILTY` line and any non-printable characters before sending — Kokoro is sensitive to unusual unicode and can return empty or hang on it.
+
+### 6.3 Pipelined LLM → TTS (the "judge starts talking immediately" path)
+
+Naive flow waits for the LLM to finish, then waits for TTS to finish, then plays. Time-to-first-word ≈ LLM total + TTS total ≈ 3–5 s. Too slow for the booth.
+
+Pipelined flow:
+
+```
+LLM stream ──► sentence buffer ──► TTS task per sentence ──► audio queue ──► browser playback
+   (token at a time)   (split on . ! ?)        (HTTP /v1/audio/speech)        (in order)
 ```
 
-### 6.2 TTS (Kokoro via ort)
+The orchestrator runs three concurrent loops:
 
-- Source the Kokoro ONNX model from one of the community ports on HuggingFace (e.g., `onnx-community/Kokoro-82M-ONNX`).
-- Load via `ort::Session::builder()`. On Mac use CoreML EP; on Linux use CUDA EP if available, else CPU.
-- Voice: select a clean, formal English voice (`af_bella`, `am_adam`, etc.). Voices are encoded as preloaded f32 reference embeddings.
-- Phoneme conversion: Kokoro expects phoneme tokens, not raw text. Use `espeak-ng` (shell out, or `espeakng-sys`) to convert text → phonemes → token IDs.
-- Output: f32 PCM at 24kHz. Send to frontend as binary frame after a JSON `tts_audio` event.
+1. **Producer**: consumes the LLM SSE stream, appends tokens to a buffer, and on every sentence boundary (`[.!?]` followed by whitespace or stream end) pushes the completed sentence onto an `mpsc::channel<String>`. Stops emitting once a line beginning with `VERDICT:` is seen — that line goes only to the screen, never to TTS.
+2. **TTS worker**: pops sentences in order, fires `/v1/audio/speech` with `response_format: "pcm"` and streaming response, forwards each chunk to the browser as it arrives via a binary WebSocket frame prefixed with the same `tts_audio` JSON event from §5.1.
+3. **Frontend audio scheduler**: receives PCM chunks, decodes into `AudioBuffer`s, and queues `BufferSource` nodes back-to-back on a single `AudioContext` so playback is gapless across sentence boundaries.
 
-If Kokoro integration becomes a blocker, **fallback to a Python sidecar** running the reference Kokoro implementation, talking over a Unix socket. This is acceptable — keeps Rust as orchestrator.
+Time-to-first-word becomes:
 
-### 6.3 Display Server
+```
+LLM TTFT  +  time-to-first-sentence-boundary  +  TTS TTFB for sentence 1
+~300 ms       ~700 ms (≈10 tokens at 65 tok/s)     ~300 ms
+≈ 1.3 s
+```
+
+A few constraints worth respecting:
+
+- **Sentences must be played in order.** The TTS worker is single-task — do not parallelize across sentences, or the browser will need to reorder. Sequential TTS is fine because Kokoro is fast enough to stay ahead of speech playback.
+- **Don't synthesize one-word sentences.** Buffer until the sentence is at least ~25 chars; otherwise Kokoro produces a clipped utterance with no prosody. If the LLM emits "Indeed.", hold it and prepend to the next sentence.
+- **The verdict appears mid-stream sometimes.** Qwen3 occasionally emits `VERDICT: GUILTY` before the closing remarks. Treat the first `VERDICT:` line as a signal: emit the `verdict` event to the frontend immediately (so the screen flips), keep streaming the remaining tokens to the sentence buffer, but never include the verdict line itself in TTS.
+- **Backpressure.** Cap the audio queue depth at ~3 sentences. If TTS is faster than playback (it usually is), the worker awaits queue space rather than buffering unbounded bytes.
+
+### 6.4 Display Server
 
 `axum` with `axum::extract::ws::WebSocketUpgrade`. Single `/ws` endpoint, single connected client at a time (extra connections rejected).
 
@@ -548,7 +579,18 @@ The display task owns the WebSocket. It receives `DisplayCommand`s from the stat
 
 Audio frames are forwarded raw (binary) — no JSON wrapping for the bytes themselves. Header event tells the frontend what's coming next.
 
-### 6.4 Hardware Task
+### 6.5 Hardware Task
+
+The hardware task is selected at startup by `config.toml`'s `hardware.driver` field. Same `Command` / `Event` channels into and out of the state machine — only the implementation behind them changes. The state machine is unaware of which driver is in use.
+
+```rust
+trait HardwareDriver: Send {
+    async fn send(&mut self, cmd: HardwareCommand) -> Result<()>;
+    // events (HardwareAck, HardwareError, ESTOP) are pushed via the shared event channel
+}
+```
+
+#### `serial` driver (production)
 
 Owns the serial port, full-duplex. Two halves:
 
@@ -557,12 +599,29 @@ Owns the serial port, full-duplex. Two halves:
 
 On startup, send `PING`, fail loudly if no `PONG`. Reconnect logic if serial port drops (USB unplugged): retry every 2s and notify state machine.
 
-### 6.5 Operator Inputs
+#### `mock` driver (dev — no microcontroller required)
 
-Three inputs:
-- **Start trial**: arcade button (wired to MCU GPIO, sent as a serial event), or keyboard shortcut for testing.
-- **Emergency stop**: physical button (MCU sends `ESTOP`), also keyboard shortcut.
-- **Skip / reset**: keyboard shortcut for the operator to abort a wedged trial.
+A pure-software stand-in that lets the entire state machine, frontend, and inference pipeline run on a developer's laptop with nothing plugged in. Behavior:
+
+- Every `HardwareCommand` is logged at `info` level (`mock_hw: FIRE 150`, `mock_hw: GAVEL`, …).
+- Each command emits a `HardwareAck` after a configurable simulated latency (default 50 ms) so timing-sensitive states (`ExecutingSentence`) advance like they would with real hardware.
+- Optional `mock_hw.fail_rate = 0.05` in config to randomly emit `HardwareError` instead — useful for exercising the soft-degrade path without unplugging cables.
+- Optional `mock_hw.simulate_estop_after_secs = N` to fire a synthetic `ESTOP` event N seconds after startup, for e-stop testing.
+- The mock driver also forwards "FIRE" commands to the frontend as a `play_cue: 'mock_squirt'` event so the dev UI can render a debug overlay (a brief water-droplet animation) instead of actually getting wet.
+
+The mock driver is the default in `config.dev.toml`. CI runs the orchestrator in mock mode against a recorded set of plea audio files for regression testing.
+
+### 6.6 Operator Inputs
+
+Three inputs, each with both a real-hardware path and a dev path:
+
+| Input | Production | Dev |
+|---|---|---|
+| Start trial | Illuminated arcade button → MCU GPIO → serial event | Keyboard shortcut (`Space`), or POST to `/operator/start` |
+| Emergency stop | Physical big-red-button → MCU emits `ESTOP` | Keyboard shortcut (`Esc`), or POST to `/operator/estop` |
+| Skip / reset | Operator-side keyboard shortcut | Same |
+
+The keyboard shortcuts are handled by the kiosk frontend (which has the focused window) and forwarded over the existing WebSocket as `ClientEvent`s — no separate transport. The `/operator/*` HTTP endpoints exist so a developer can `curl` from a script during automated testing without driving a browser.
 
 ---
 
@@ -572,11 +631,13 @@ Three inputs:
 
 | Failure | Fallback |
 |---|---|
-| Ollama unreachable | Use canned charges and canned verdicts (random, weighted guilty) |
-| LLM returns malformed JSON | Constrained generation via `format` schema should prevent this; if it still happens, retry once, then canned |
-| LLM timeout | Canned response, log it |
+| LiteLLM unreachable / 5xx | Use canned charges and canned verdicts (random, weighted guilty) |
+| LLM returns malformed JSON | Constrained generation via `response_format` JSON schema should prevent this; if it still happens, retry once, then canned |
+| LLM timeout (charge 10s, verdict 30s) | Canned response, log it |
+| Qwen3 burned tokens on thinking | Should not happen — `enable_thinking: false` is set. If it does, retry with `max_tokens` raised; otherwise canned |
 | STT returns empty | Treat as "no defense offered," proceed to guilty |
-| STT fails | Same |
+| STT fails / timeout | Same |
+| TTS returns empty (Kokoro unicode bug) | Strip non-ASCII, retry once; otherwise show text on screen and skip audio |
 | TTS fails | Show text on screen only, skip audio |
 | Hardware unresponsive | Show "verdict rendered" text on screen, skip physical sentence |
 | Microcontroller disconnects | Soft-degrade: show continues without hardware effects, log it |
@@ -601,28 +662,35 @@ Small operator HUD on a separate browser page (or a terminal `tracing` sink) sho
 
 ## 8. Configuration
 
-`config.toml` next to the binary. Loaded via `figment` with env var overrides.
+`config.toml` mounted into the orchestrator container at `/app/config.toml`. Loaded via `figment` with env var overrides (`BOOTH__SECTION__KEY`). Secrets (LiteLLM key) come from env, not the toml.
 
 ```toml
-[ollama]
-base_url = "http://localhost:11434"
-model = "qwen3.6:35b-a3b"
+[inference]
+# Production (orchestrator container on the Spark): "http://litellm:4000"
+# Dev (orchestrator on a laptop):                   "http://dgx-spark.local:4000"
+base_url = "http://litellm:4000"
+# api_key from env: BOOTH__INFERENCE__API_KEY → reuses LITELLM_MASTER_KEY
+chat_model = "qwen3.6-35b-a3b"
+stt_model = "whisper-1"
+tts_model = "kokoro-tts"
+tts_voice = "bm_george"
 charge_timeout_secs = 10
-verdict_timeout_secs = 30
-
-[stt]
-model_path = "models/ggml-large-v3-turbo-q5_0.bin"
-language = "en"
-
-[tts]
-model_path = "models/kokoro-v1.onnx"
-voice_path = "models/voices/am_adam.bin"
-sample_rate = 24000
+verdict_first_token_timeout_secs = 15
+verdict_total_timeout_secs = 30
+stt_timeout_secs = 5
+tts_timeout_secs = 10
+enable_thinking = false                    # booth default — keep latency under 8s
 
 [hardware]
-serial_port = "/dev/cu.usbserial-XXXX"  # or COM3 on Windows, /dev/ttyUSB0 on Linux
+driver = "serial"                          # "serial" for real MCU, "mock" for dev without hardware
+serial_port = "/dev/ttyUSB0"               # ignored when driver = "mock"; on Windows use "COM3" etc.
 baud = 115200
 ack_timeout_ms = 3000
+
+[mock_hw]                                  # only consulted when hardware.driver = "mock"
+ack_latency_ms = 50                        # simulated time before HardwareAck is emitted
+fail_rate = 0.0                            # 0.0–1.0; emit HardwareError this fraction of the time
+simulate_estop_after_secs = 0              # >0 fires a synthetic ESTOP after orchestrator startup
 
 [squirt_intensity]
 level_1 = 60
@@ -635,80 +703,141 @@ level_5 = 280
 plea_window_secs = 20
 charge_display_secs = 5
 cooldown_secs = 4
-guilty_bias = 0.7  # for fallback verdicts
+guilty_bias = 0.7
 
 [display]
-listen_addr = "127.0.0.1:8080"
+listen_addr = "0.0.0.0:8080"               # exposed to LAN so the kiosk browser on the Spark display can connect
 
 [logging]
 level = "info"
-log_file = "logs/booth.log"
-transcripts_jsonl = "logs/transcripts.jsonl"
+log_file = "/var/log/booth/booth.log"
+transcripts_jsonl = "/var/log/booth/transcripts.jsonl"
 ```
 
 ---
 
 ## 9. Build and Deployment
 
-### Build targets
+### Build target
 
-Cross-compile from a dev machine:
+The orchestrator is built and run as an arm64 docker image alongside the existing AI stack. No cross-compilation toolchain is needed on the dev machine — `docker buildx` handles it.
 
-```bash
-# Mac (native)
-cargo build --release
+`dgx-ai-stack/orchestrator/Dockerfile` (sketch):
 
-# Linux x86_64
-cross build --release --target x86_64-unknown-linux-gnu
+```dockerfile
+FROM rust:1-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY frontend/dist ./frontend/dist          # bundled at build time, embedded via rust-embed
+RUN cargo build --release
 
-# Linux ARM64 (Pi 5, Jetson, Orin)
-cross build --release --target aarch64-unknown-linux-gnu
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/booth /usr/local/bin/booth
+EXPOSE 8080
+CMD ["booth", "--config", "/app/config.toml"]
 ```
 
-Native deps (whisper.cpp, ONNX Runtime) pull in C/C++ libs — `cross` handles toolchains. CI matrix builds all targets on push.
+### Adding to docker-compose
 
-### Distribution layout
+Append to `dgx-ai-stack/docker-compose.yml`:
+
+```yaml
+  orchestrator:
+    image: local/booth-orchestrator:latest
+    build:
+      context: ../orchestrator
+    container_name: orchestrator
+    restart: unless-stopped
+    networks: [ai]
+    depends_on:
+      - litellm
+    ports:
+      - "0.0.0.0:8080:8080"             # browser kiosk connects here
+    devices:
+      - "/dev/ttyUSB0:/dev/ttyUSB0"     # microcontroller USB-serial passthrough
+    environment:
+      BOOTH__INFERENCE__API_KEY: ${LITELLM_MASTER_KEY}
+      RUST_LOG: info
+    volumes:
+      - ./orchestrator/config.toml:/app/config.toml:ro
+      - booth-logs:/var/log/booth
+
+volumes:
+  booth-logs: {}
+```
+
+### Distribution layout (on the Spark)
 
 ```
-booth/
-├── booth                       (or booth.exe)
-├── config.toml
-├── models/
-│   ├── ggml-large-v3-turbo-q5_0.bin
-│   ├── kokoro-v1.onnx
-│   └── voices/
-│       └── am_adam.bin
-├── logs/
-└── run.sh
+~/dgx-ai-stack/
+├── docker-compose.yml         # all five services
+├── .env                       # LITELLM_MASTER_KEY, model paths, etc.
+├── ai-stack                   # control script
+├── litellm/config.yaml
+├── llama-cpp/Dockerfile
+├── parakeet/{Dockerfile,server.py}
+├── kokoro/                    # (image is prebuilt; no Dockerfile here)
+└── orchestrator/
+    ├── Dockerfile
+    ├── config.toml
+    └── (Rust source pulled at build time from ../orchestrator/)
 ```
 
-`run.sh`:
-```bash
-#!/usr/bin/env bash
-set -e
-cd "$(dirname "$0")"
+### Dev: running the orchestrator locally against the live Spark
 
-# Start Ollama if not running
-if ! pgrep -x ollama > /dev/null; then
-  ollama serve &
-  sleep 2
-fi
+For day-to-day development you don't want to rebuild a container on every change. Run the orchestrator natively against the already-running Spark stack:
 
-# Ensure model is pulled
-ollama pull qwen3.6:35b-a3b || true
+```sh
+# One-time: expose the Spark's LiteLLM port to the LAN (already true — :4000
+# is published in docker-compose.yml). Confirm reachability:
+curl -sf http://dgx-spark.local:4000/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 
-# Start booth
-./booth &
-BOOTH_PID=$!
+# Point the orchestrator at the Spark and run it on your machine:
+cd orchestrator
+cp config.toml config.dev.toml
+# Edit config.dev.toml:
+#   inference.base_url = "http://dgx-spark.local:4000"
+#   hardware.driver    = "mock"        (or "serial" + COM3 if you've got the MCU)
+#   display.listen_addr = "127.0.0.1:8080"
 
-# Wait for backend to come up
-sleep 2
+BOOTH__INFERENCE__API_KEY=$LITELLM_MASTER_KEY \
+  cargo run -- --config config.dev.toml
 
-# Open kiosk
-open -a "Google Chrome" --args --kiosk --app=http://localhost:8080
-# (on Linux: google-chrome --kiosk --app=http://localhost:8080 &)
+# In another shell, open the kiosk (or just a regular browser tab):
+open http://localhost:8080
+```
 
-wait $BOOTH_PID
+The frontend Vite dev server can run separately (`cd frontend && npm run dev`) and proxy `/ws` to `127.0.0.1:8080` for hot module reload during UI work — `rust-embed` only kicks in for release builds.
+
+This is also the right mode for the benchmark script, which already accepts `--base-url http://dgx-spark.local:4000/v1`.
+
+### Bringing it up (production, on the Spark)
+
+From the dev machine, the existing wrapper still works:
+
+```sh
+cd dgx-ai-stack
+./ai-stack                     # pulls + builds + starts all five services
+```
+
+The kiosk browser is launched on the Spark's attached display by a tiny systemd unit, **not** by docker (Chrome wants a display server, which complicates containerization for little gain):
+
+```ini
+# /etc/systemd/system/booth-kiosk.service
+[Unit]
+After=docker.service graphical.target
+Requires=docker.service
+
+[Service]
+ExecStartPre=/usr/bin/sh -c 'until curl -sf http://localhost:8080/health; do sleep 1; done'
+ExecStart=/usr/bin/google-chrome --kiosk --app=http://localhost:8080
+Restart=on-failure
+User=booth
+
+[Install]
+WantedBy=graphical.target
 ```
 
 ---
@@ -717,34 +846,43 @@ wait $BOOTH_PID
 
 Suggested phasing — each phase produces a working artifact you can demo.
 
+The DGX Spark inference stack (LiteLLM + llama-server + parakeet + kokoro) is **already running** — see `dgx-ai-stack/README.md` and the `sample-benchmark.py` end-to-end check. The roadmap below is for everything *above* that line: the orchestrator, frontend, microcontroller, and the booth itself.
+
 ### Phase 1: Skeleton with mocks
 
-- Set up Cargo project, modules, basic `tracing` setup.
-- Implement state machine with all states and transitions, but every subsystem is mocked (returns hardcoded responses immediately).
-- Implement axum WebSocket server with the full event protocol.
-- Build minimal frontend that connects, logs events, and shows current state.
-- Verify: a full trial cycles end-to-end with mocked subsystems. Operator hits "start", display shows charge, simulated 20s plea, mock transcript, mock verdict, mock hardware ack, return to idle.
+- Add `orchestrator/` to the repo. Cargo project, module layout per §4.1, basic `tracing` setup.
+- Add the `orchestrator` service to `dgx-ai-stack/docker-compose.yml` per §9 (production path).
+- Implement the state machine with all states and transitions; every external call is mocked (hardcoded responses, immediate completion).
+- Implement the `mock` hardware driver (§6.5) so the entire trial loop runs with nothing plugged in.
+- Implement axum WebSocket server with the full event protocol, plus the `/operator/start` and `/operator/estop` HTTP shims for scripted testing.
+- Build a minimal SolidJS frontend that connects, logs events, and shows current state.
+- Verify: `cargo run --config config.dev.toml` on the dev laptop with `hardware.driver = "mock"` cycles a full trial end-to-end. Operator hits "start" via keyboard shortcut, display shows mock charge, simulated 20s plea, mock transcript, mock verdict, mock hardware ack (logged as `mock_hw: FIRE 150`), return to idle. Then `docker compose up` on the Spark does the same with no code changes.
 
 ### Phase 2: Real LLM
 
-- Implement Ollama HTTP client with structured output and streaming.
-- Implement charge and verdict prompts.
+- Implement the LiteLLM HTTP client (`inference/client.rs`) — bearer auth, retry, timeout, JSON-schema response parsing.
+- Implement charge and verdict prompts (§5.3) with `enable_thinking: false`.
+- Implement SSE streaming for the verdict and forward `deliberation_token` events to the frontend.
 - Wire fallbacks (canned charges/verdicts).
-- Verify: real charges generated, real verdicts rendered. Pull network cable mid-trial → fallback fires.
+- Verify: real charges generated, real verdicts rendered, deliberation streams to the screen. Stop the `litellm` container mid-trial → fallback fires within the configured timeout.
 
 ### Phase 3: Real audio
 
-- Implement frontend mic capture and audio playback.
-- Implement STT subsystem (whisper-rs).
-- Implement TTS subsystem (Kokoro via ort, or Python sidecar fallback).
-- Verify: full audio loop works. Speak a plea, get a transcribed plea, hear the verdict spoken.
+- Frontend: implement mic capture (16 kHz mono, sent as binary WebSocket frames) and gapless PCM playback via `AudioContext` + queued `BufferSource`s (§6.3).
+- Backend: implement `inference/stt.rs` — multipart upload of captured audio to `/v1/audio/transcriptions`, model `whisper-1`. Warm Parakeet on orchestrator startup with a one-shot silent clip.
+- Backend: implement `inference/tts.rs` — `/v1/audio/speech` with `response_format: "pcm"` and the SDK's streaming response variant.
+- Backend: implement the **pipelined LLM → TTS path** from §6.3 — sentence buffer, ordered TTS worker, mid-stream `VERDICT:` handling.
+- Verify: full audio loop works against the live Spark stack. Time-to-first-word from operator press is <2 s (roughly the TTFA the benchmark reports with `--pipeline-tts`). Mute the mic during the plea window → STT returns empty → "no defense offered" path fires.
 
 ### Phase 4: Real hardware
 
-- Build microcontroller firmware implementing the serial protocol.
-- Implement Rust hardware task with ack/timeout/reconnect.
+The state machine and mock hardware driver have been driving fake commands since Phase 1. This phase swaps the `mock` driver for the `serial` driver — same channel API, no state-machine changes.
+
+- Build microcontroller firmware implementing the serial protocol (§5.2).
+- Implement the `serial` hardware driver with ack/timeout/reconnect.
+- Flip `hardware.driver = "serial"` in production config; add `devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]` to the orchestrator service so the container sees the MCU.
 - Wire up squirt + gavel + lights at minimum.
-- Verify: end-to-end live trial with real water firing.
+- Verify: end-to-end live trial with real water firing on the Spark; dev environment continues to work unchanged with `driver = "mock"`.
 
 ### Phase 5: Theater
 
@@ -755,16 +893,17 @@ Suggested phasing — each phase produces a working artifact you can demo.
 
 ### Phase 6: Hardening
 
-- 50-trial soak test on the actual booth. Random/adversarial inputs (silence, screaming, multilingual pleas, disconnect cables mid-trial). Fix every wedge until none remain.
-- Cross-compile to all target platforms.
-- Production logging and transcript archiving.
+- 50-trial soak test on the actual booth. Random/adversarial inputs (silence, screaming, multilingual pleas, disconnect cables mid-trial, kill `kokoro` mid-verdict, unplug the MCU). Fix every wedge until none remain.
+- Production logging and transcript archiving rotated under `booth-logs` volume; nightly rsync off the Spark.
+- Image pinning: tag the orchestrator image and pin every other service in the compose file to a digest before the event so a `docker pull` doesn't surprise you.
 
 ---
 
 ## 11. Open Questions / Decisions Deferred
 
-- **TTS path**: pure Rust via `ort` + Kokoro ONNX, or Python sidecar. Decide after spiking the ONNX path; sidecar is the safety net.
-- **Frontend framework**: vanilla TS vs. Svelte vs. Solid. Pick based on implementer comfort. Has no architectural impact.
 - **PTT button location**: on the lectern (via MCU GPIO) vs. operator-side. Currently planned as defendant-facing on the lectern, illuminated arcade button.
-- **Voice selection for Kokoro**: needs A/B testing for the pompous-British-barrister character. May need ElevenLabs-quality voice; if Kokoro can't carry the bit, swap to a different local TTS or use ElevenLabs API at the cost of internet dependency.
+- **Voice selection for Kokoro**: `bm_george` is the current pick for the pompous-British-barrister character; A/B test against `bm_lewis` and `bf_isabella` during dress rehearsal. If no Kokoro voice carries the bit, ElevenLabs is the next step at the cost of internet dependency (and breaking the all-local property).
 - **Hardware platform**: ESP32 default, but if a specific shield/HAT exists for the thermal printer or LED panels, that may dictate Arduino-flavor choice.
+- **Kiosk display**: assumed to be driven directly by the Spark (HDMI out → big monitor). If the Spark can't drive both inference loads and a desktop session smoothly, fall back to a small attached machine (Pi 5 or NUC) running just Chrome and pointing at `http://dgx-spark.local:8080`.
+- **Microcontroller location**: USB-serial passthrough into the orchestrator container assumes the MCU is plugged into the Spark itself. If the booth physical layout makes that awkward, options are (a) USB extender, (b) ser2net bridge over the booth LAN, (c) WebSerial from the kiosk browser relayed over the existing WebSocket. (a) is simplest; the others are escape hatches.
+- **Operator HUD reachability**: with the orchestrator in a container, the HUD is a second route on `:8080` (e.g. `/operator`) rather than a separate process. Confirm during Phase 5.
