@@ -25,6 +25,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    load_dotenv();
     let cli = Cli::parse();
     let cfg = Arc::new(config::load(&cli.config)?);
 
@@ -41,13 +42,14 @@ async fn main() -> Result<()> {
     let (hardware_tx, hardware_rx) = mpsc::channel::<state_machine::Command>(32);
     let (display_tx, display_rx) = mpsc::channel::<state_machine::Command>(64);
 
-    // Inference (mock for Phase 1).
+    // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
+    // still mocked. Set [inference] mode = "mock" for offline dev.
     {
         let cfg = cfg.clone();
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
         tokio::spawn(async move {
-            inference::run_mock(cfg, inference_rx, event_tx, display_tx).await;
+            inference::run(cfg, inference_rx, event_tx, display_tx).await;
         });
     }
 
@@ -102,6 +104,18 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Load `.env` from the current directory or any ancestor, then alias the
+/// stack's standard `LITELLM_MASTER_KEY` into the figment-prefixed
+/// `BOOTH__INFERENCE__API_KEY` so the dev loop is a single `cargo run`.
+fn load_dotenv() {
+    let _ = dotenvy::dotenv(); // walks parents for .env; silently ignored if absent
+    if std::env::var("BOOTH__INFERENCE__API_KEY").is_err() {
+        if let Ok(key) = std::env::var("LITELLM_MASTER_KEY") {
+            std::env::set_var("BOOTH__INFERENCE__API_KEY", key);
+        }
+    }
 }
 
 fn init_tracing(level: &str) {

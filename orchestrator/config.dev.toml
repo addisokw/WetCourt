@@ -2,8 +2,13 @@
 # No Spark, no microcontroller, no audio playback required.
 
 [inference]
-# Unused in Phase 1 (mocks). Kept so Phase 2 can flip a single field.
-base_url = "http://dgx-spark.local:4000"
+# "real" hits LiteLLM. "mock" uses canned responses with simulated latency
+# (no network) — set this when working offline from the Spark.
+mode = "real"
+# Spark LAN IP. (`dgx-spark.local` mDNS doesn't resolve from this laptop.)
+# api_key is read from BOOTH__INFERENCE__API_KEY, which main.rs auto-populates
+# from LITELLM_MASTER_KEY in a `.env` file at the repo root.
+base_url = "http://10.10.1.221:4000"
 chat_model = "qwen3.6-35b-a3b"
 stt_model = "whisper-1"
 tts_model = "kokoro-tts"

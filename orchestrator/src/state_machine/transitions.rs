@@ -198,6 +198,7 @@ mod tests {
     fn test_cfg() -> Config {
         Config {
             inference: InferenceConfig {
+                mode: "mock".into(),
                 base_url: "x".into(), chat_model: "x".into(), stt_model: "x".into(),
                 tts_model: "x".into(), tts_voice: "x".into(),
                 charge_timeout_secs: 10, verdict_first_token_timeout_secs: 15,

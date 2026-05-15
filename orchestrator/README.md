@@ -13,9 +13,13 @@ npm install
 npm run build
 cd ..
 
-# Run
+# Run (auto-loads ../.env for LITELLM_MASTER_KEY → BOOTH__INFERENCE__API_KEY)
 cargo run -- --config config.dev.toml
 ```
+
+`config.dev.toml` defaults to `inference.mode = "real"` against the Spark at
+`http://10.10.1.221:4000`. Set `mode = "mock"` (or pass
+`BOOTH__INFERENCE__MODE=mock`) to run fully offline.
 
 Then in another shell:
 

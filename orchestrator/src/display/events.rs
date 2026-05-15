@@ -11,9 +11,7 @@ pub enum DisplayEvent {
     StopPleaRecording,
     Transcribing,
     TranscriptReady { text: String },
-    #[allow(dead_code)]
     DeliberationToken { text: String },
-    #[allow(dead_code)]
     DeliberationComplete,
     Verdict { guilty: bool, intensity: u8, remarks: String },
     ExecuteSentence { guilty: bool },

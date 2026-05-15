@@ -18,6 +18,11 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InferenceConfig {
+    /// "real" hits LiteLLM at `base_url`. "mock" uses the canned latency-aware
+    /// stand-ins from `mock_inference` and never opens a socket — useful for
+    /// offline dev. Default: "real".
+    #[serde(default = "d_mode")]
+    pub mode: String,
     pub base_url: String,
     pub chat_model: String,
     pub stt_model: String,
@@ -59,6 +64,7 @@ pub struct MockInferenceConfig {
     #[serde(default = "d_tts")]
     pub tts_latency_ms: u64,
 }
+fn d_mode() -> String { "real".into() }
 fn d_charge() -> u64 { 800 }
 fn d_transcribe() -> u64 { 400 }
 fn d_deliberate() -> u64 { 1200 }
