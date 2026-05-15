@@ -54,6 +54,35 @@ button:hover { background: #30363d; }
 button.estop { background: #6e1b1f; border-color: #f85149; color: #ffa198; }
 button.estop:hover { background: #8b2326; }
 
+button.plea { background: #1f4828; border-color: #56d364; color: #aff5b4; }
+button.plea:hover:not(:disabled) { background: #2a6336; }
+button.plea:disabled { opacity: 0.4; cursor: not-allowed; }
+button.plea.recording { background: #6e1b1f; border-color: #f85149; color: #ffa198; }
+button.plea.recording:hover { background: #8b2326; }
+
+.recording-banner {
+  background: #1c1f24;
+  color: #ffa198;
+  padding: 0.6rem 2rem;
+  border-bottom: 1px solid #f85149;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+.recording-banner .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f85149;
+  animation: pulse 1s ease-in-out infinite;
+  display: inline-block;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 .deliberation {
   padding: 1.5rem 2rem;
   border-bottom: 1px solid #30363d;

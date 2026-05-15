@@ -11,6 +11,8 @@ export interface LogEntry {
 export const [currentState, setCurrentState] = createSignal<string>('disconnected');
 export const [log, setLog] = createSignal<LogEntry[]>([]);
 export const [deliberation, setDeliberation] = createSignal<string>('');
+export const [pleaWindowOpen, setPleaWindowOpen] = createSignal(false);
+export const [recording, setRecording] = createSignal(false);
 
 const STATE_LABEL: Record<string, string> = {
   reset: 'idle',
@@ -30,7 +32,6 @@ let reconnectDelay = 500;
 // Set when the most recent JSON event was `tts_audio`, so the next binary
 // frame is interpreted as audio rather than logged as raw bytes.
 let nextBinaryIsAudio = false;
-let recordingActive = false;
 
 function pushLog(entry: LogEntry) {
   setLog((prev) => {
@@ -103,30 +104,31 @@ function handleEvent(ev: DisplayEvent) {
       // No-op; deliberation buffer holds the full text.
       break;
     case 'start_plea_recording':
-      void beginPlea();
+      setPleaWindowOpen(true);
       break;
     case 'stop_plea_recording':
-      void endPlea();
+      setPleaWindowOpen(false);
+      // Window closed (timeout or e-stop) — make sure we flush whatever was captured.
+      if (recording()) void endPlea();
       break;
   }
 }
 
-async function beginPlea() {
-  if (recordingActive) return;
-  recordingActive = true;
+export async function beginPlea() {
+  if (recording()) return;
+  if (!pleaWindowOpen()) return;
   try {
     await startRecording();
+    setRecording(true);
   } catch (e) {
     pushLog({ ts: Date.now(), ev: { type: 'mic_error', message: String(e) } });
-    recordingActive = false;
-    // Tell backend we couldn't capture so it advances on its own timer.
     socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
   }
 }
 
-async function endPlea() {
-  if (!recordingActive) return;
-  recordingActive = false;
+export async function endPlea() {
+  if (!recording()) return;
+  setRecording(false);
   const blob = await stopRecording();
   if (blob && blob.size > 0) {
     socket?.send(JSON.stringify({ type: 'plea_audio_chunk' }));
