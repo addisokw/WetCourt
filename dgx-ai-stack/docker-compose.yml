@@ -16,6 +16,7 @@ networks:
 
 volumes:
   parakeet-cache: {}
+  booth-logs: {}
 
 services:
   llama-server:
@@ -85,3 +86,24 @@ services:
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+
+  orchestrator:
+    image: local/booth-orchestrator:latest
+    build:
+      context: ../orchestrator
+    container_name: orchestrator
+    restart: unless-stopped
+    networks: [ai]
+    depends_on:
+      - litellm
+    ports:
+      - "0.0.0.0:8080:8080"
+    # Phase 4 will plug in the microcontroller; uncomment when ready:
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+    environment:
+      BOOTH__INFERENCE__API_KEY: ${LITELLM_MASTER_KEY}
+      RUST_LOG: info
+    volumes:
+      - ../orchestrator/config.toml:/app/config.toml:ro
+      - booth-logs:/var/log/booth

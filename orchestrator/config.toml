@@ -1,0 +1,53 @@
+# Production config — orchestrator container on the DGX Spark.
+# Talks to LiteLLM over the private docker network. Real microcontroller on USB.
+
+[inference]
+base_url = "http://litellm:4000"
+chat_model = "qwen3.6-35b-a3b"
+stt_model = "whisper-1"
+tts_model = "kokoro-tts"
+tts_voice = "bm_george"
+charge_timeout_secs = 10
+verdict_first_token_timeout_secs = 15
+verdict_total_timeout_secs = 30
+stt_timeout_secs = 5
+tts_timeout_secs = 10
+enable_thinking = false
+
+[hardware]
+driver = "serial"
+serial_port = "/dev/ttyUSB0"
+baud = 115200
+ack_timeout_ms = 3000
+
+[mock_hw]
+ack_latency_ms = 50
+fail_rate = 0.0
+simulate_estop_after_secs = 0
+
+[mock_inference]
+charge_latency_ms = 800
+transcribe_latency_ms = 400
+deliberate_latency_ms = 1200
+tts_latency_ms = 200
+
+[squirt_intensity]
+level_1 = 60
+level_2 = 100
+level_3 = 150
+level_4 = 200
+level_5 = 280
+
+[trial]
+plea_window_secs = 20
+charge_display_secs = 5
+cooldown_secs = 4
+guilty_bias = 0.7
+
+[display]
+listen_addr = "0.0.0.0:8080"
+
+[logging]
+level = "info"
+log_file = "/var/log/booth/booth.log"
+transcripts_jsonl = "/var/log/booth/transcripts.jsonl"

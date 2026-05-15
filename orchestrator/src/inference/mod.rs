@@ -1,0 +1,39 @@
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+
+use crate::config::Config;
+use crate::state_machine::{Command, Event};
+
+pub mod charge;
+pub mod stt;
+pub mod tts;
+pub mod verdict;
+
+pub async fn run_mock(
+    cfg: Arc<Config>,
+    mut cmd_rx: mpsc::Receiver<Command>,
+    event_tx: mpsc::Sender<Event>,
+    display_tx: mpsc::Sender<Command>,
+) {
+    while let Some(cmd) = cmd_rx.recv().await {
+        let cfg = cfg.clone();
+        let event_tx = event_tx.clone();
+        let display_tx = display_tx.clone();
+        match cmd {
+            Command::GenerateCharge => {
+                tokio::spawn(async move { charge::mock(cfg, event_tx).await });
+            }
+            Command::Transcribe(audio) => {
+                tokio::spawn(async move { stt::mock(cfg, audio, event_tx).await });
+            }
+            Command::Deliberate { charge: c, plea } => {
+                tokio::spawn(async move { verdict::mock(cfg, c, plea, event_tx).await });
+            }
+            Command::Speak(text) => {
+                tokio::spawn(async move { tts::mock(cfg, text, event_tx, display_tx).await });
+            }
+            _ => {}
+        }
+    }
+}
