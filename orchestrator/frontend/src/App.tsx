@@ -1,5 +1,5 @@
-import { onMount, For } from 'solid-js';
-import { connect, currentState, log, startTrial, emergencyStop } from './ws';
+import { onMount, For, Show } from 'solid-js';
+import { connect, currentState, deliberation, log, startTrial, emergencyStop } from './ws';
 
 function fmt(ts: number): string {
   const d = new Date(ts);
@@ -24,6 +24,9 @@ export default function App() {
           <button class="estop" onClick={emergencyStop}>E-Stop (Esc)</button>
         </div>
       </header>
+      <Show when={deliberation()}>
+        <section class="deliberation">{deliberation()}</section>
+      </Show>
       <section class="log">
         <For each={log().slice().reverse()}>
           {(entry) => (

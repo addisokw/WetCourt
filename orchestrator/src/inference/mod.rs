@@ -36,8 +36,10 @@ pub async fn run(
                 });
             }
             Command::Transcribe(audio) => {
-                // Phase 3 will get a real STT here.
-                tokio::spawn(async move { stt::mock(cfg, audio, event_tx).await });
+                tokio::spawn(async move {
+                    if real { stt::real(cfg, audio, event_tx).await }
+                    else    { stt::mock(cfg, audio, event_tx).await }
+                });
             }
             Command::Deliberate { charge: c, plea } => {
                 tokio::spawn(async move {
@@ -46,8 +48,10 @@ pub async fn run(
                 });
             }
             Command::Speak(text) => {
-                // Phase 3 will get a real TTS here (with the pipelined LLM->TTS path).
-                tokio::spawn(async move { tts::mock(cfg, text, event_tx, display_tx).await });
+                tokio::spawn(async move {
+                    if real { tts::real(cfg, text, event_tx, display_tx).await }
+                    else    { tts::mock(cfg, text, event_tx, display_tx).await }
+                });
             }
             _ => {}
         }

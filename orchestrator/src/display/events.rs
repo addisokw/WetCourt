@@ -6,7 +6,13 @@ pub enum DisplayEvent {
     Reset,
     Idle,
     ShowCharge { text: String },
+    /// "next binary frame is audio in this format" — emitted before each chunk
+    /// so frontend knows how to decode. May appear multiple times per utterance
+    /// in the pipelined LLM→TTS path.
     TtsAudio { format: String },
+    /// "no more audio chunks for this utterance" — frontend schedules a
+    /// `tts_finished` ClientEvent for after the queued audio drains.
+    TtsEnd,
     StartPleaRecording { deadline_ms: u64 },
     StopPleaRecording,
     Transcribing,

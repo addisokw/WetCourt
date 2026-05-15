@@ -10,7 +10,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use tokio::sync::{broadcast, mpsc};
+use bytes::Bytes;
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::state_machine::{Command, Event};
@@ -20,11 +21,22 @@ pub mod events;
 
 use events::{ClientEvent, DisplayEvent};
 
+/// What the orchestrator pushes down the WebSocket. The display task fans these
+/// out to whichever client is currently connected.
+#[derive(Debug, Clone)]
+pub enum DisplayMessage {
+    Json(DisplayEvent),
+    Binary(Bytes),
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub event_tx: mpsc::Sender<Event>,
-    pub display_bcast: broadcast::Sender<DisplayEvent>,
+    pub display_bcast: broadcast::Sender<DisplayMessage>,
     pub ws_clients: Arc<AtomicUsize>,
+    /// Buffer for binary plea audio uploaded by the frontend across multiple
+    /// frames. Cleared when `plea_audio_complete` is received.
+    pub plea_buffer: Arc<Mutex<Vec<u8>>>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -80,14 +92,19 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
     loop {
         tokio::select! {
             ev = bcast_rx.recv() => match ev {
-                Ok(de) => {
+                Ok(DisplayMessage::Json(de)) => {
                     let json = serde_json::to_string(&de).unwrap();
                     if socket.send(Message::Text(json.into())).await.is_err() {
                         break;
                     }
                 }
+                Ok(DisplayMessage::Binary(b)) => {
+                    if socket.send(Message::Binary(b.into())).await.is_err() {
+                        break;
+                    }
+                }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    warn!("ws lagged {n} display events");
+                    warn!("ws lagged {n} display messages");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
@@ -95,9 +112,8 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
                 Some(Ok(Message::Text(t))) => {
                     handle_client_text(&t, &state).await;
                 }
-                Some(Ok(Message::Binary(_b))) => {
-                    debug!("received binary frame ({} bytes)", _b.len());
-                    // Phase 1 doesn't handle plea audio yet.
+                Some(Ok(Message::Binary(b))) => {
+                    state.plea_buffer.lock().await.extend_from_slice(&b);
                 }
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(_)) => {}
@@ -114,26 +130,29 @@ async fn handle_client_text(text: &str, state: &AppState) {
     match serde_json::from_str::<ClientEvent>(text) {
         Ok(ClientEvent::Ready) => debug!("client ready"),
         Ok(ClientEvent::TtsFinished) => {
-            // Phase 1: TTS mock self-emits this; ignore browser ack.
-            debug!("client tts_finished");
+            let _ = state.event_tx.send(Event::TtsFinished).await;
         }
         Ok(ClientEvent::PleaAudioComplete) => {
-            // Phase 3 wires this to PleaAudioReceived.
-            let _ = state.event_tx.send(Event::PleaTimeout).await;
+            let mut buf = state.plea_buffer.lock().await;
+            let audio = std::mem::take(&mut *buf);
+            info!(bytes = audio.len(), "plea audio complete");
+            let _ = state.event_tx.send(Event::PleaAudioReceived(audio)).await;
         }
-        Ok(ClientEvent::PleaAudioChunk) => {}
+        Ok(ClientEvent::PleaAudioChunk) => {} // header before binary frame; nothing to do
         Ok(ClientEvent::CueFinished { name }) => debug!(cue = %name, "cue_finished"),
         Err(e) => warn!("bad client message: {e} — payload: {text}"),
     }
 }
 
-/// Forwards Display commands from the state machine onto the broadcast channel
-/// so any connected ws client receives them.
-pub async fn forwarder(mut display_rx: mpsc::Receiver<Command>, bcast: broadcast::Sender<DisplayEvent>) {
+/// Forwards Display + DisplayBinary commands from the state machine and the
+/// inference subsystem onto the broadcast channel.
+pub async fn forwarder(mut display_rx: mpsc::Receiver<Command>, bcast: broadcast::Sender<DisplayMessage>) {
     while let Some(cmd) = display_rx.recv().await {
-        if let Command::Display(de) = cmd {
-            // Subscribers may be zero when no ws client is connected; that's fine.
-            let _ = bcast.send(de);
-        }
+        let msg = match cmd {
+            Command::Display(de) => DisplayMessage::Json(de),
+            Command::DisplayBinary(b) => DisplayMessage::Binary(b),
+            _ => continue,
+        };
+        let _ = bcast.send(msg);
     }
 }

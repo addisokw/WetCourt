@@ -28,6 +28,7 @@ async-stream = "0.3"
 rand = "0.8"
 regex = "1"
 dotenvy = "0.15"
+bytes = "1"
 
 [profile.release]
 lto = "thin"

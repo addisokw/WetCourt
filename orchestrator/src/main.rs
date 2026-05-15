@@ -13,8 +13,9 @@ mod hardware;
 mod inference;
 mod state_machine;
 
-use display::AppState;
+use display::{AppState, DisplayMessage};
 use state_machine::Runtime;
+use tokio::sync::Mutex;
 
 #[derive(Parser, Debug)]
 #[command(name = "booth", about = "Wet Court of Appeals orchestrator")]
@@ -73,7 +74,7 @@ async fn main() -> Result<()> {
     }
 
     // Display server: broadcast to ws clients, plus axum task.
-    let display_bcast = broadcast::channel::<display::events::DisplayEvent>(64).0;
+    let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
     {
         let bcast = display_bcast.clone();
         tokio::spawn(async move { display::forwarder(display_rx, bcast).await });
@@ -83,6 +84,7 @@ async fn main() -> Result<()> {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
         ws_clients: Arc::new(AtomicUsize::new(0)),
+        plea_buffer: Arc::new(Mutex::new(Vec::new())),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;

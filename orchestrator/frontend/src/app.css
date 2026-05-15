@@ -54,6 +54,18 @@ button:hover { background: #30363d; }
 button.estop { background: #6e1b1f; border-color: #f85149; color: #ffa198; }
 button.estop:hover { background: #8b2326; }
 
+.deliberation {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #30363d;
+  font-size: 1.4rem;
+  line-height: 1.5;
+  color: #d2a8ff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
 .log {
   flex: 1;
   overflow-y: auto;

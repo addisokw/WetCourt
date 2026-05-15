@@ -138,7 +138,7 @@ fn begin_displaying_charge(text: String, cfg: &Config) -> (State, Vec<Command>) 
     )
 }
 
-fn begin_transcribing(charge: String, audio: Vec<f32>, _cfg: &Config) -> (State, Vec<Command>) {
+fn begin_transcribing(charge: String, audio: Vec<u8>, _cfg: &Config) -> (State, Vec<Command>) {
     (
         State::Transcribing { charge, audio: audio.clone(), started_at: Instant::now() },
         vec![
@@ -160,18 +160,16 @@ fn begin_deliberating(charge: String, plea: String, _cfg: &Config) -> (State, Ve
 }
 
 fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
-    (
-        State::PronouncingVerdict { verdict: v.clone(), audio_done: false },
-        vec![
-            Command::Display(DisplayEvent::Verdict {
-                guilty: v.guilty,
-                intensity: v.intensity,
-                remarks: v.remarks.clone(),
-            }),
-            Command::Speak(v.deliberation.clone()),
-            Command::Hardware(HardwareCommand::Gavel),
-        ],
-    )
+    let mut cmds = vec![Command::Display(DisplayEvent::Verdict {
+        guilty: v.guilty,
+        intensity: v.intensity,
+        remarks: v.remarks.clone(),
+    })];
+    if !v.pre_announced {
+        cmds.push(Command::Speak(v.deliberation.clone()));
+    }
+    cmds.push(Command::Hardware(HardwareCommand::Gavel));
+    (State::PronouncingVerdict { verdict: v, audio_done: false }, cmds)
 }
 
 fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {

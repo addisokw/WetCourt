@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use reqwest::Client;
+use reqwest::{multipart, Client};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 
@@ -15,6 +16,9 @@ pub struct LlmClient {
     api_key: Option<String>,
     model: String,
     enable_thinking: bool,
+    stt_model: String,
+    tts_model: String,
+    tts_voice: String,
 }
 
 impl LlmClient {
@@ -29,7 +33,50 @@ impl LlmClient {
             api_key: cfg.api_key.clone(),
             model: cfg.chat_model.clone(),
             enable_thinking: cfg.enable_thinking,
+            stt_model: cfg.stt_model.clone(),
+            tts_model: cfg.tts_model.clone(),
+            tts_voice: cfg.tts_voice.clone(),
         }
+    }
+
+    /// Multipart upload to /v1/audio/transcriptions. Returns transcribed text.
+    pub async fn transcribe(&self, audio: Bytes, filename: &str, timeout: Duration) -> Result<String> {
+        let part = multipart::Part::bytes(audio.to_vec())
+            .file_name(filename.to_string())
+            .mime_str("application/octet-stream")?;
+        let form = multipart::Form::new()
+            .text("model", self.stt_model.clone())
+            .part("file", part);
+        let req = self.build(reqwest::Method::POST, "/audio/transcriptions").multipart(form);
+        let resp: Value = tokio::time::timeout(timeout, async {
+            let r = req.send().await?.error_for_status()?;
+            anyhow::Ok(r.json::<Value>().await?)
+        })
+        .await
+        .map_err(|_| anyhow!("transcribe timeout after {:?}", timeout))??;
+        Ok(resp["text"].as_str().unwrap_or("").trim().to_string())
+    }
+
+    /// Streaming /v1/audio/speech. Yields raw PCM s16le @ 24kHz bytes as they
+    /// arrive from Kokoro. Caller wraps each chunk into a frontend binary frame.
+    pub async fn synth_pcm_stream(
+        &self,
+        text: &str,
+        connect_timeout: Duration,
+    ) -> Result<impl Stream<Item = Result<Bytes>>> {
+        let body = json!({
+            "model": self.tts_model,
+            "voice": self.tts_voice,
+            "input": text,
+            "response_format": "pcm",
+        });
+        let req = self.build(reqwest::Method::POST, "/audio/speech").json(&body);
+        let resp = tokio::time::timeout(connect_timeout, req.send())
+            .await
+            .map_err(|_| anyhow!("tts connect timeout"))??
+            .error_for_status()?;
+        let stream = resp.bytes_stream().map(|r| r.map_err(|e| anyhow!(e)));
+        Ok(stream)
     }
 
     fn url(&self, path: &str) -> String {

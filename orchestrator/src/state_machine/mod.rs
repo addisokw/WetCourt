@@ -76,7 +76,7 @@ impl Runtime {
                     tracing::error!("hardware channel closed");
                 }
             }
-            Command::Display(_) => {
+            Command::Display(_) | Command::DisplayBinary(_) => {
                 if self.display_tx.send(cmd).await.is_err() {
                     tracing::warn!("display channel closed (no client?)");
                 }

@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, stopRecording } from './audio';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -9,19 +10,7 @@ export interface LogEntry {
 
 export const [currentState, setCurrentState] = createSignal<string>('disconnected');
 export const [log, setLog] = createSignal<LogEntry[]>([]);
-
-const STATE_EVENTS = new Set([
-  'idle',
-  'show_charge',
-  'start_plea_recording',
-  'stop_plea_recording',
-  'transcribing',
-  'transcript_ready',
-  'verdict',
-  'execute_sentence',
-  'cooldown',
-  'reset',
-]);
+export const [deliberation, setDeliberation] = createSignal<string>('');
 
 const STATE_LABEL: Record<string, string> = {
   reset: 'idle',
@@ -38,6 +27,10 @@ const STATE_LABEL: Record<string, string> = {
 
 let socket: WebSocket | null = null;
 let reconnectDelay = 500;
+// Set when the most recent JSON event was `tts_audio`, so the next binary
+// frame is interpreted as audio rather than logged as raw bytes.
+let nextBinaryIsAudio = false;
+let recordingActive = false;
 
 function pushLog(entry: LogEntry) {
   setLog((prev) => {
@@ -49,6 +42,7 @@ function pushLog(entry: LogEntry) {
 export function connect() {
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   socket = new WebSocket(url);
+  socket.binaryType = 'arraybuffer';
 
   socket.onopen = () => {
     reconnectDelay = 500;
@@ -61,20 +55,17 @@ export function connect() {
       try {
         const ev = JSON.parse(msg.data) as DisplayEvent;
         pushLog({ ts: Date.now(), ev });
-        if (STATE_EVENTS.has(ev.type)) {
-          setCurrentState(STATE_LABEL[ev.type] ?? ev.type);
-        }
-        if (ev.type === 'tts_audio') {
-          // Phase 1: auto-ack so the state machine advances even if we never get audio bytes.
-          socket?.send(JSON.stringify({ type: 'tts_finished' }));
-        }
-      } catch (e) {
-        pushLog({ ts: Date.now(), ev: { type: 'parse_error', raw: String(msg.data) } });
+        handleEvent(ev);
+      } catch {
+        pushLog({ ts: Date.now(), ev: { type: 'parse_error' } });
       }
     } else {
-      // Binary frame (Phase 3 will be PCM TTS audio).
-      const bytes = msg.data instanceof Blob ? msg.data.size : (msg.data as ArrayBuffer).byteLength;
-      pushLog({ ts: Date.now(), ev: { type: 'binary_frame', binary_bytes: bytes } });
+      const buf = msg.data as ArrayBuffer;
+      if (nextBinaryIsAudio) {
+        enqueuePcmFrame(buf);
+      } else {
+        pushLog({ ts: Date.now(), ev: { type: 'binary_frame', binary_bytes: buf.byteLength } });
+      }
     }
   };
 
@@ -84,12 +75,68 @@ export function connect() {
     reconnectDelay = Math.min(reconnectDelay * 2, 8000);
   };
 
-  socket.onerror = () => {
-    socket?.close();
-  };
+  socket.onerror = () => socket?.close();
+}
+
+function handleEvent(ev: DisplayEvent) {
+  if (STATE_LABEL[ev.type]) setCurrentState(STATE_LABEL[ev.type]);
+
+  switch (ev.type) {
+    case 'reset':
+    case 'idle':
+      setDeliberation('');
+      nextBinaryIsAudio = false;
+      break;
+    case 'tts_audio':
+      // Subsequent binary frames are PCM audio chunks until tts_end.
+      nextBinaryIsAudio = true;
+      resumeAudio();
+      break;
+    case 'tts_end':
+      nextBinaryIsAudio = false;
+      endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
+      break;
+    case 'deliberation_token':
+      setDeliberation((prev) => prev + (ev.text as string));
+      break;
+    case 'deliberation_complete':
+      // No-op; deliberation buffer holds the full text.
+      break;
+    case 'start_plea_recording':
+      void beginPlea();
+      break;
+    case 'stop_plea_recording':
+      void endPlea();
+      break;
+  }
+}
+
+async function beginPlea() {
+  if (recordingActive) return;
+  recordingActive = true;
+  try {
+    await startRecording();
+  } catch (e) {
+    pushLog({ ts: Date.now(), ev: { type: 'mic_error', message: String(e) } });
+    recordingActive = false;
+    // Tell backend we couldn't capture so it advances on its own timer.
+    socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
+  }
+}
+
+async function endPlea() {
+  if (!recordingActive) return;
+  recordingActive = false;
+  const blob = await stopRecording();
+  if (blob && blob.size > 0) {
+    socket?.send(JSON.stringify({ type: 'plea_audio_chunk' }));
+    socket?.send(await blob.arrayBuffer());
+  }
+  socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
 }
 
 export async function startTrial() {
+  resumeAudio(); // user gesture so the AudioContext can start producing sound
   await fetch('/operator/start', { method: 'POST' });
 }
 export async function emergencyStop() {

@@ -7,6 +7,11 @@ pub struct Verdict {
     pub intensity: u8,
     pub deliberation: String,
     pub remarks: String,
+    /// True when the verdict service has already streamed TTS audio to the
+    /// frontend during deliberation (pipelined LLM→TTS path). The state
+    /// machine then skips the redundant `Speak` command in PronouncingVerdict.
+    #[serde(default)]
+    pub pre_announced: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -15,7 +20,7 @@ pub enum State {
     GeneratingCharge { started_at: Instant },
     DisplayingCharge { charge: String, until: Instant },
     AwaitingPlea { charge: String, deadline: Instant },
-    Transcribing { charge: String, audio: Vec<f32>, started_at: Instant },
+    Transcribing { charge: String, audio: Vec<u8>, started_at: Instant },
     Deliberating { charge: String, plea: String, started_at: Instant },
     PronouncingVerdict { verdict: Verdict, audio_done: bool },
     ExecutingSentence { verdict: Verdict, hardware_done: bool },

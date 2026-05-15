@@ -217,6 +217,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum",
+ "bytes",
  "clap",
  "dotenvy",
  "eventsource-stream",
