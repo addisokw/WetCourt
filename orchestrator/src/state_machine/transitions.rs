@@ -222,7 +222,7 @@ mod tests {
                 verdict_total_timeout_secs: 30, stt_timeout_secs: 5, tts_timeout_secs: 10,
                 enable_thinking: false, api_key: None,
             },
-            hardware: HardwareConfig { driver: "mock".into(), serial_port: "x".into(), baud: 0, ack_timeout_ms: 1000 },
+            hardware: HardwareConfig { driver: "mock".into(), serial_port: "x".into(), baud: 0, ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into() },
             mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
             mock_inference: MockInferenceConfig::default(),
             squirt_intensity: SquirtIntensity { level_1: 60, level_2: 100, level_3: 150, level_4: 200, level_5: 280 },

@@ -40,10 +40,17 @@ pub struct InferenceConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct HardwareConfig {
-    pub driver: String,         // "serial" | "mock"
+    pub driver: String,         // "mock" | "tcp" | "serial"
     pub serial_port: String,
     pub baud: u32,
     pub ack_timeout_ms: u64,
+    /// Where to listen for the MCU's TCP connection when driver = "tcp".
+    #[serde(default = "default_bind_addr")]
+    pub bind_addr: String,
+}
+
+fn default_bind_addr() -> String {
+    "0.0.0.0:8090".into()
 }
 
 #[derive(Debug, Deserialize, Clone)]

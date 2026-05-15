@@ -16,10 +16,12 @@ tts_timeout_secs = 10
 enable_thinking = false
 
 [hardware]
-driver = "serial"
+driver = "tcp"
 serial_port = "/dev/ttyUSB0"
 baud = 115200
 ack_timeout_ms = 3000
+# MCU dials the orchestrator over WiFi using the line protocol from §5.2.
+bind_addr = "0.0.0.0:8090"
 
 [mock_hw]
 ack_latency_ms = 50

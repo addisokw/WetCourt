@@ -21,10 +21,13 @@ tts_timeout_secs = 10
 enable_thinking = false
 
 [hardware]
+# "mock" cycles synthetic acks. "tcp" listens for the MCU on `bind_addr`
+# (it dials in over WiFi). "serial" is a future Phase 4 USB driver.
 driver = "mock"
-serial_port = "COM3"        # ignored when driver = "mock"
+serial_port = "COM3"        # ignored when driver != "serial"
 baud = 115200
 ack_timeout_ms = 3000
+bind_addr = "0.0.0.0:8090"
 
 [mock_hw]
 ack_latency_ms = 50

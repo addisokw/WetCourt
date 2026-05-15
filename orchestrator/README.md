@@ -49,6 +49,14 @@ fail_rate = 0.5                 # half of hardware acks become errors
 simulate_estop_after_secs = 8   # synthetic ESTOP 8 s after orchestrator startup
 ```
 
+## Real hardware over WiFi (M5Stack NanoC6)
+
+Set `[hardware] driver = "tcp"` and `bind_addr = "0.0.0.0:8090"` in the
+config you're using. Then flash and configure the firmware in `../firmware/`
+— it dials this address and speaks the §5.2 line protocol. The MCU's BOOT
+button maps to `Event::OperatorStart`, so pressing it kicks off a trial
+without using the browser's Start button.
+
 ## Production (on the Spark)
 
 The `orchestrator` service is wired into `../dgx-ai-stack/docker-compose.yml`. From the Mac:
