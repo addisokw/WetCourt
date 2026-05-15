@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, stopRecording } from './audio';
+import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -91,7 +91,7 @@ function handleEvent(ev: DisplayEvent) {
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
       nextBinaryIsAudio = true;
-      resumeAudio();
+      startTtsSession();
       break;
     case 'tts_end':
       nextBinaryIsAudio = false;

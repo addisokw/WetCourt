@@ -9,11 +9,18 @@
 // Parakeet on the backend accepts standard formats — no client-side resampling.
 
 const TTS_SAMPLE_RATE = 24000;
+// Small lead-in for the first chunk of each TTS session so the output device
+// has time to warm up; without it the leading ~100ms (often the first word)
+// is scheduled inside the audio output latency window and gets clipped.
+const TTS_LEAD_IN_SECS = 0.12;
 
 let playCtx: AudioContext | null = null;
 let nextStartTime = 0;
 let queueDepth = 0;
 let endingSession = false;
+// Set true on `tts_audio`; the next enqueued chunk gets a lead-in and clears
+// the flag so subsequent chunks chain seamlessly.
+let sessionStartPending = false;
 // Carries a trailing odd byte across WS frames so we never feed an
 // odd-length buffer to Int16Array (which would byte-swap every subsequent
 // sample and produce bursts of white noise at chunk seams).
@@ -31,6 +38,12 @@ function ensureCtx(): AudioContext {
 
 export function resumeAudio() {
   ensureCtx();
+}
+
+/// Mark the start of a TTS session so the first chunk gets a small lead-in.
+export function startTtsSession() {
+  ensureCtx();
+  sessionStartPending = true;
 }
 
 export function enqueuePcmFrame(buf: ArrayBuffer) {
@@ -60,9 +73,13 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
   source.connect(ctx.destination);
-  const startAt = Math.max(ctx.currentTime, nextStartTime);
+  const earliest = sessionStartPending
+    ? ctx.currentTime + TTS_LEAD_IN_SECS
+    : ctx.currentTime;
+  const startAt = Math.max(earliest, nextStartTime);
   source.start(startAt);
   nextStartTime = startAt + audioBuf.duration;
+  sessionStartPending = false;
   queueDepth++;
   source.onended = () => {
     queueDepth--;
