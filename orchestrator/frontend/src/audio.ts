@@ -14,6 +14,10 @@ let playCtx: AudioContext | null = null;
 let nextStartTime = 0;
 let queueDepth = 0;
 let endingSession = false;
+// Carries a trailing odd byte across WS frames so we never feed an
+// odd-length buffer to Int16Array (which would byte-swap every subsequent
+// sample and produce bursts of white noise at chunk seams).
+let pcmResidue: number | null = null;
 
 function ensureCtx(): AudioContext {
   if (!playCtx) {
@@ -31,7 +35,23 @@ export function resumeAudio() {
 
 export function enqueuePcmFrame(buf: ArrayBuffer) {
   const ctx = ensureCtx();
-  const samples = new Int16Array(buf);
+  const incoming = new Uint8Array(buf);
+  const hasResidue = pcmResidue !== null;
+  const totalLen = incoming.length + (hasResidue ? 1 : 0);
+  if (totalLen < 2) {
+    if (incoming.length === 1) pcmResidue = incoming[0];
+    return;
+  }
+  const evenLen = totalLen - (totalLen & 1);
+  const aligned = new Uint8Array(evenLen);
+  if (hasResidue) {
+    aligned[0] = pcmResidue!;
+    aligned.set(incoming.subarray(0, evenLen - 1), 1);
+  } else {
+    aligned.set(incoming.subarray(0, evenLen));
+  }
+  pcmResidue = totalLen & 1 ? incoming[incoming.length - 1] : null;
+  const samples = new Int16Array(aligned.buffer, aligned.byteOffset, evenLen / 2);
   if (samples.length === 0) return;
   const audioBuf = ctx.createBuffer(1, samples.length, TTS_SAMPLE_RATE);
   const channel = audioBuf.getChannelData(0);
@@ -58,6 +78,7 @@ let onSessionDrained: (() => void) | null = null;
 /// Called when the backend signals `tts_end`. If buffers are still playing,
 /// invoke `cb` once the last one finishes; otherwise call it immediately.
 export function endTtsSession(cb: () => void) {
+  pcmResidue = null;
   if (queueDepth > 0) {
     endingSession = true;
     onSessionDrained = cb;

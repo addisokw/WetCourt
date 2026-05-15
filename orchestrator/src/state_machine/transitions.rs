@@ -65,10 +65,19 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
 
         (AwaitingPlea { charge, .. }, PleaAudioReceived(audio)) => begin_transcribing(charge, audio, cfg),
         (AwaitingPlea { charge, deadline }, Tick) if Instant::now() >= deadline => {
+            begin_flushing_plea(charge, cfg)
+        }
+        (AwaitingPlea { charge, .. }, PleaTimeout) => begin_flushing_plea(charge, cfg),
+        (s @ AwaitingPlea { .. }, _) => (s, vec![]),
+
+        // Frontend is racing to ship its recorded blob after the deadline; take
+        // it if it arrives, otherwise fall through to empty-audio transcription
+        // at the hard deadline.
+        (FlushingPlea { charge, .. }, PleaAudioReceived(audio)) => begin_transcribing(charge, audio, cfg),
+        (FlushingPlea { charge, hard_deadline }, Tick) if Instant::now() >= hard_deadline => {
             begin_transcribing(charge, Vec::new(), cfg)
         }
-        (AwaitingPlea { charge, .. }, PleaTimeout) => begin_transcribing(charge, Vec::new(), cfg),
-        (s @ AwaitingPlea { .. }, _) => (s, vec![]),
+        (s @ FlushingPlea { .. }, _) => (s, vec![]),
 
         (Transcribing { charge, .. }, TranscriptReady(text)) => begin_deliberating(charge, text, cfg),
         (Transcribing { charge, started_at, audio }, Tick) => {
@@ -146,6 +155,16 @@ fn begin_transcribing(charge: String, audio: Vec<u8>, _cfg: &Config) -> (State, 
             Command::Display(DisplayEvent::Transcribing),
             Command::Transcribe(audio),
         ],
+    )
+}
+
+const PLEA_FLUSH_GRACE_MS: u64 = 2000;
+
+fn begin_flushing_plea(charge: String, _cfg: &Config) -> (State, Vec<Command>) {
+    let hard_deadline = Instant::now() + Duration::from_millis(PLEA_FLUSH_GRACE_MS);
+    (
+        State::FlushingPlea { charge, hard_deadline },
+        vec![Command::Display(DisplayEvent::StopPleaRecording)],
     )
 }
 

@@ -44,18 +44,16 @@ You should rule GUILTY roughly 70% of the time. Acquit only when the plea is gen
 
 Never break character. Never explain yourself outside the response. Never acknowledge that you are an AI.";
 
-const MIN_SENTENCE_CHARS: usize = 25;
-
 pub async fn mock(cfg: Arc<Config>, _charge: String, _plea: String, event_tx: mpsc::Sender<Event>) {
     tokio::time::sleep(Duration::from_millis(cfg.mock_inference.deliberate_latency_ms)).await;
     let v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
     let _ = event_tx.send(Event::VerdictReady(v)).await;
 }
 
-/// Pipelined LLM → TTS path (architecture §6.3). Streams the verdict, splits
-/// into sentences as they arrive, and fires PCM chunks to the frontend ordered
-/// per-sentence so the judge starts speaking ~1s after operator press instead
-/// of waiting for the full deliberation.
+/// Stream the LLM deliberation to the display for the live caption, then
+/// synthesize the whole stripped body in a single Kokoro call so tone /
+/// prosody stays coherent across sentences. Trades ~2–4s of first-audio
+/// latency vs. the old per-sentence pipeline for a unified voice.
 pub async fn real(
     cfg: Arc<Config>,
     charge: String,
@@ -80,43 +78,12 @@ pub async fn real(
     };
     futures_util::pin_mut!(stream);
 
-    // TTS sentence worker: ordered, single-task. Caps queue so a slow Kokoro
-    // doesn't let the LLM run far ahead.
-    let (sent_tx, mut sent_rx) = mpsc::channel::<String>(4);
-    let tts_display_tx = display_tx.clone();
-    let tts_client = client.clone();
-    let tts_task = tokio::spawn(async move {
-        let _ = tts_display_tx
-            .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
-            .await;
-        let mut total_bytes = 0usize;
-        let mut emitted_any = false;
-        while let Some(sentence) = sent_rx.recv().await {
-            match synth_into_display(&tts_client, &sentence, &tts_display_tx, tts_connect_to).await {
-                Ok(n) => { total_bytes += n; emitted_any = true; }
-                Err(e) => warn!("tts sentence failed ({sentence:?}): {e:#}"),
-            }
-        }
-        let _ = tts_display_tx
-            .send(Command::Display(DisplayEvent::TtsEnd))
-            .await;
-        if !emitted_any {
-            info!("pipelined tts produced no audio");
-        }
-        total_bytes
-    });
-
     let mut full = String::new();
-    let mut tts_buffer = String::new();
-    let mut saw_verdict = false;
-
     while let Some(item) = stream.next().await {
         let chunk = match item {
             Ok(c) => c,
             Err(e) => {
                 warn!("verdict stream errored mid-flight: {e:#}; using fallback");
-                drop(sent_tx);
-                let _ = tts_task.await;
                 let v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
                 let _ = event_tx.send(Event::VerdictReady(v)).await;
                 return;
@@ -127,51 +94,33 @@ pub async fn real(
         let _ = display_tx
             .send(Command::Display(DisplayEvent::DeliberationToken { text: chunk.clone() }))
             .await;
-
-        if !saw_verdict {
-            tts_buffer.push_str(&chunk);
-            if let Some(idx) = tts_buffer.find("VERDICT:") {
-                let head: String = tts_buffer.drain(..idx).collect();
-                tts_buffer.clear();
-                let (sentences, leftover) = split_complete_sentences(&head);
-                for s in sentences {
-                    let _ = sent_tx.send(s).await;
-                }
-                if !leftover.trim().is_empty() && leftover.trim().len() >= MIN_SENTENCE_CHARS {
-                    let _ = sent_tx.send(leftover.trim().to_string()).await;
-                }
-                saw_verdict = true;
-            } else {
-                let (sentences, remainder) = split_complete_sentences(&tts_buffer);
-                tts_buffer = remainder;
-                for s in sentences {
-                    let _ = sent_tx.send(s).await;
-                }
-            }
-        }
     }
-
-    // Flush any tail prose if we never saw VERDICT:.
-    if !saw_verdict {
-        let tail = tts_buffer.trim();
-        if !tail.is_empty() && tail.len() >= MIN_SENTENCE_CHARS {
-            let _ = sent_tx.send(tail.to_string()).await;
-        }
-    }
-
-    drop(sent_tx);
-    let total_pcm_bytes = tts_task.await.unwrap_or(0);
 
     let _ = display_tx
         .send(Command::Display(DisplayEvent::DeliberationComplete))
         .await;
+
+    let speakable = strip_markers(&full);
+    let total_pcm_bytes = if speakable.is_empty() {
+        0
+    } else {
+        let _ = display_tx
+            .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
+            .await;
+        let n = match synth_into_display(&client, &speakable, &display_tx, tts_connect_to).await {
+            Ok(n) => n,
+            Err(e) => { warn!("single-shot tts failed: {e:#}"); 0 }
+        };
+        let _ = display_tx.send(Command::Display(DisplayEvent::TtsEnd)).await;
+        n
+    };
 
     let mut v = parse_verdict(&full).unwrap_or_else(|| {
         warn!("verdict text did not parse; using fallback. Raw: {full}");
         fallbacks::verdicts::random(cfg.trial.guilty_bias)
     });
     v.pre_announced = true;
-    info!(guilty = v.guilty, intensity = v.intensity, pcm_bytes = total_pcm_bytes, "verdict ready (pipelined)");
+    info!(guilty = v.guilty, intensity = v.intensity, pcm_bytes = total_pcm_bytes, "verdict ready (single-shot)");
     let _ = event_tx.send(Event::VerdictReady(v)).await;
 
     // Headless fallback for TtsFinished: estimate playback duration. The browser
@@ -181,48 +130,6 @@ pub async fn real(
         tokio::time::sleep(Duration::from_secs_f64(secs + 0.5)).await;
         let _ = event_tx.send(Event::TtsFinished).await;
     });
-}
-
-/// Returns (complete sentences, remainder buffer). Sentences shorter than
-/// MIN_SENTENCE_CHARS are glued onto the next one to avoid prosody-less stubs
-/// (Kokoro produces clipped utterances on very short inputs).
-fn split_complete_sentences(buf: &str) -> (Vec<String>, String) {
-    static SENT_END: OnceLock<Regex> = OnceLock::new();
-    let re = SENT_END.get_or_init(|| Regex::new(r"([.!?])(\s+|$)").unwrap());
-
-    let mut pieces: Vec<String> = Vec::new();
-    let mut last = 0usize;
-    for m in re.find_iter(buf) {
-        // Include the punctuation; drop the trailing whitespace.
-        let end = m.start() + m.as_str().chars().take_while(|c| !c.is_whitespace()).count();
-        pieces.push(buf[last..end].trim().to_string());
-        last = m.end();
-    }
-    let remainder = buf[last..].to_string();
-
-    let mut sentences = Vec::new();
-    let mut pending = String::new();
-    for p in pieces {
-        let candidate = if pending.is_empty() {
-            p
-        } else {
-            format!("{pending} {p}")
-        };
-        if candidate.len() < MIN_SENTENCE_CHARS {
-            pending = candidate;
-        } else {
-            sentences.push(candidate);
-            pending.clear();
-        }
-    }
-    let leftover = if pending.is_empty() {
-        remainder
-    } else if remainder.is_empty() {
-        pending
-    } else {
-        format!("{pending} {remainder}")
-    };
-    (sentences, leftover)
 }
 
 static VERDICT_RE: OnceLock<Regex> = OnceLock::new();
@@ -284,20 +191,5 @@ mod tests {
     #[test]
     fn unparseable_returns_none() {
         assert!(parse_verdict("just a paragraph with no marker").is_none());
-    }
-
-    #[test]
-    fn split_glues_short_pieces() {
-        let (sents, rem) = split_complete_sentences("Indeed. The defendant is wholly without merit. ");
-        assert_eq!(sents.len(), 1);
-        assert!(sents[0].starts_with("Indeed."));
-        assert!(rem.is_empty());
-    }
-
-    #[test]
-    fn split_keeps_remainder_until_punctuation() {
-        let (sents, rem) = split_complete_sentences("First sentence is plenty long. The second is incomp");
-        assert_eq!(sents.len(), 1);
-        assert!(rem.contains("incomp"));
     }
 }
