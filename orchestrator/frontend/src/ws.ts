@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
+import { enqueuePcmFrame, endTtsSession, getFaceAnalyser, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
+import { bindAnalyser, setMood, type Mood } from './face';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -79,8 +80,21 @@ export function connect() {
   socket.onerror = () => socket?.close();
 }
 
+// Per-state default mood. Verdict outcomes override `verdict` and `execute_sentence`.
+const STATE_MOOD: Record<string, Mood> = {
+  reset: 'neutral',
+  idle: 'neutral',
+  show_charge: 'stern',
+  start_plea_recording: 'neutral',
+  stop_plea_recording: 'neutral',
+  transcribing: 'neutral',
+  transcript_ready: 'stern',
+  cooldown: 'neutral',
+};
+
 function handleEvent(ev: DisplayEvent) {
   if (STATE_LABEL[ev.type]) setCurrentState(STATE_LABEL[ev.type]);
+  if (STATE_MOOD[ev.type]) setMood(STATE_MOOD[ev.type]);
 
   switch (ev.type) {
     case 'reset':
@@ -103,6 +117,13 @@ function handleEvent(ev: DisplayEvent) {
     case 'deliberation_complete':
       // No-op; deliberation buffer holds the full text.
       break;
+    case 'verdict': {
+      // Guilty: stern satisfaction. Acquitted: disgust (Wettington considers
+      // acquittal a personal failure).
+      const guilty = (ev as { guilty?: boolean }).guilty;
+      setMood(guilty === false ? 'disappointed' : 'stern');
+      break;
+    }
     case 'start_plea_recording':
       setPleaWindowOpen(true);
       break;
@@ -139,6 +160,10 @@ export async function endPlea() {
 
 export async function startTrial() {
   resumeAudio(); // user gesture so the AudioContext can start producing sound
+  // The face's analyser depends on the AudioContext that resumeAudio just
+  // created. Bind once now; later starts are no-ops since the analyser
+  // identity doesn't change.
+  bindAnalyser(getFaceAnalyser());
   await fetch('/operator/start', { method: 'POST' });
 }
 export async function emergencyStop() {

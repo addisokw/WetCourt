@@ -26,14 +26,32 @@ let sessionStartPending = false;
 // sample and produce bursts of white noise at chunk seams).
 let pcmResidue: number | null = null;
 
+// Shared analyser tapped between each BufferSource and ctx.destination.
+// face.ts reads time-domain samples from this to drive the avatar's jaw.
+// The audio still routes to the speakers normally; the analyser is a
+// passive observer in the graph.
+let faceAnalyser: AnalyserNode | null = null;
+
 function ensureCtx(): AudioContext {
   if (!playCtx) {
     playCtx = new AudioContext({ sampleRate: TTS_SAMPLE_RATE });
+    faceAnalyser = playCtx.createAnalyser();
+    faceAnalyser.fftSize = 512;      // ~21 ms @ 24 kHz
+    faceAnalyser.smoothingTimeConstant = 0;
+    faceAnalyser.connect(playCtx.destination);
   }
   // Browser autoplay policies require resumption inside a user gesture; the
   // Start button click handler triggers this.
   if (playCtx.state === 'suspended') void playCtx.resume();
   return playCtx;
+}
+
+/// Get the shared analyser node for face-driving. Returns null before the
+/// first audio interaction; the face module should poll on its tick if it
+/// matters, or call `resumeAudio()` first.
+export function getFaceAnalyser(): AnalyserNode | null {
+  ensureCtx();
+  return faceAnalyser;
 }
 
 export function resumeAudio() {
@@ -72,7 +90,9 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
 
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
-  source.connect(ctx.destination);
+  // Route through the analyser (which is itself connected to destination)
+  // so the face module sees the same energy the speakers play.
+  source.connect(faceAnalyser ?? ctx.destination);
   const earliest = sessionStartPending
     ? ctx.currentTime + TTS_LEAD_IN_SECS
     : ctx.currentTime;
