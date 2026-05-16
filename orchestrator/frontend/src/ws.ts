@@ -11,7 +11,7 @@ import {
   stopRecording,
   takeAccumulatedPcm,
 } from './audio';
-import { bindAnalyser, isMounted as isFaceMounted, playUtterance, setMood, type Mood } from './face';
+import { bindAnalyser, isMounted as isFaceMounted, playUtterance, resumeFaceAudio, setMood, type Mood } from './face';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -205,10 +205,13 @@ export async function endPlea() {
 }
 
 export async function startTrial() {
-  resumeAudio(); // user gesture so the AudioContext can start producing sound
-  // The face's analyser depends on the AudioContext that resumeAudio just
-  // created. Bind once now; later starts are no-ops since the analyser
-  // identity doesn't change.
+  resumeAudio(); // resumes audio.ts's AudioContext under the click gesture
+  // TalkingHead owns a SEPARATE AudioContext (it manages speech playback
+  // internally when we use speakAudio). It also boots suspended; without
+  // this resume in the click handler, by the time tts_end fires and we
+  // call speakAudio the browser has long left the user-gesture window
+  // and TH's playback is silently dropped.
+  resumeFaceAudio();
   bindAnalyser(getFaceAnalyser());
   await fetch('/operator/start', { method: 'POST' });
 }

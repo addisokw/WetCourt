@@ -40,6 +40,15 @@ export function isMounted(): boolean {
   return head !== null;
 }
 
+/// TalkingHead owns a separate AudioContext from audio.ts's. Browser autoplay
+/// policy keeps it suspended until a user gesture resumes it. Call this from
+/// inside the click handler that starts a trial; resume() is a no-op if the
+/// context is already running.
+export function resumeFaceAudio(): void {
+  const ctx = head?.audioCtx;
+  if (ctx && ctx.state !== 'running') void ctx.resume();
+}
+
 export async function mountFace(el: HTMLElement, opts: { avatarUrl?: string } = {}) {
   const url = opts.avatarUrl ?? '/avatars/judge.glb';
   head = new TalkingHead(el, {
