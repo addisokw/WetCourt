@@ -70,6 +70,14 @@ export function dispose() {
   timeBuf = null;
 }
 
+function writeRealtime(mt: string, val: number | null) {
+  if (!head) return;
+  const o = head.mtAvatar[mt];
+  if (!o) return; // avatar lacks this morph target
+  o.realtime = val;
+  o.needsUpdate = true;
+}
+
 function tick(_dt: number) {
   if (!head || !analyser || !timeBuf) return;
   analyser.getByteTimeDomainData(timeBuf);
@@ -82,15 +90,18 @@ function tick(_dt: number) {
 
   if (rms < SILENCE_RMS) {
     if (!lastWasSilent) {
-      // Release fixed overrides so idle motion (blink, breathing, sway) resumes.
-      head.setFixedValue('jawOpen', null);
-      for (const m of SUPPORT_MORPHS) head.setFixedValue(m, null);
+      // Release the realtime channel so idle (blink, breathing, sway) resumes.
+      writeRealtime('jawOpen', null);
+      for (const m of SUPPORT_MORPHS) writeRealtime(m, null);
       lastWasSilent = true;
     }
     return;
   }
   lastWasSilent = false;
+  // Use TalkingHead's internal `realtime` morph channel, not setFixedValue.
+  // setFixedValue runs through exponential smoothing tuned for mood transitions
+  // (~hundreds of ms to reach target); realtime writes apply directly each frame.
   const jaw = Math.min(1, rms * JAW_GAIN);
-  head.setFixedValue('jawOpen', jaw);
-  for (const m of SUPPORT_MORPHS) head.setFixedValue(m, jaw * SUPPORT_RATIO);
+  writeRealtime('jawOpen', jaw);
+  for (const m of SUPPORT_MORPHS) writeRealtime(m, jaw * SUPPORT_RATIO);
 }
