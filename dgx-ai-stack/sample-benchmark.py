@@ -41,7 +41,7 @@ LLM_MAX_TOKENS = 4000  # Qwen3 reasoning chews ~1500-1750 tokens before the verd
 CONTAINER_NAMES = ["llama-server", "whisper-server", "kokoro", "litellm"]
 
 # A realistic plea audio file you've pre-recorded. ~15-20 seconds is representative.
-SAMPLE_PLEA_AUDIO = "sample_plea.wav"
+SAMPLE_PLEA_AUDIO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_plea.wav")
 
 SAMPLE_CHARGE = (
     "You stand accused of pushing directly to main without code review, "

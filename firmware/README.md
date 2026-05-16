@@ -2,7 +2,7 @@
 
 Rust firmware for the M5Stack NanoC6 (ESP32-C6). Connects to the orchestrator
 over WiFi via plain TCP and speaks the line protocol from §5.2 of
-`../wet-court-architecture.md`.
+`../docs/architecture.md`.
 
 First-cut hardware mapping:
 - **Built-in SK6812 RGB LED** stands in for the squirt valve. `FIRE <ms>`

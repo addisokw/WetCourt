@@ -1,42 +1,67 @@
 # Wet Court of Appeals
 
-A courtroom-themed demo of a self-hosted, OpenAI-compatible AI stack running on
-an NVIDIA DGX Spark. A defendant pleads their case (audio in), the Honorable
-Justice Wettington deliberates (LLM), and the verdict is read aloud (audio
-out) — all through one LAN endpoint, no cloud round-trip.
+A courtroom-themed interactive booth. An operator triggers a trial, the LLM
+invents an absurd charge against the next visitor, the visitor pleads their
+case into a microphone, the judge deliberates aloud, and a verdict is rendered
+theatrically — on guilty findings, a computer-aimed squirt gun fires. Audio,
+LLM, and TTS all run locally on an NVIDIA DGX Spark; no cloud round-trip.
 
 ## Repo layout
 
 ```
 .
-├── dgx-ai-stack/          The stack itself: docker-compose + per-service Dockerfiles + ai-stack control script
-│   └── README.md          Operate the stack, call the endpoints, troubleshoot
-├── sample-benchmark.py    End-to-end pipeline benchmark (STT → LLM → TTS) with GPU telemetry
-├── sample_plea.wav        Test fixture used by the benchmark
-└── judges_ruling.wav      Example TTS output
+├── docs/
+│   ├── architecture.md         Design doc: state machine, protocols, boundaries
+│   └── judge-persona-notes.md  Notes on judge characters and TTS delivery
+├── dgx-ai-stack/               Self-hosted AI stack on the Spark
+│                               (LiteLLM + llama.cpp + Kokoro TTS + Parakeet STT)
+│                               plus the end-to-end pipeline benchmark
+├── orchestrator/               Rust state machine, axum WS server, SolidJS kiosk UI
+└── firmware/                   Rust firmware for M5Stack NanoC6 (squirt valve, gavel, button)
 ```
 
-The interesting documentation lives in [`dgx-ai-stack/README.md`](dgx-ai-stack/README.md):
-architecture diagram, daily ops via `./ai-stack`, per-endpoint curl examples,
-and what didn't land.
+Start with [`docs/architecture.md`](docs/architecture.md) for the big picture.
+Each subproject has its own README for ops details:
+
+- [`dgx-ai-stack/README.md`](dgx-ai-stack/README.md) — operate the stack, call
+  the endpoints, troubleshoot.
+- [`orchestrator/README.md`](orchestrator/README.md) — run the state machine
+  on a laptop against the Spark, drive the debug UI, inject failures.
+- [`firmware/README.md`](firmware/README.md) — flash the NanoC6, pair it with
+  the orchestrator over TCP.
 
 ## Quick start
+
+Bring up the inference stack on the Spark:
 
 ```sh
 cd dgx-ai-stack
 cp .env.example .env       # then fill in LITELLM_MASTER_KEY and model paths
-./ai-stack                 # bring everything up on the Spark
+./ai-stack                 # builds + starts everything, orchestrator included
 ```
 
-Once the stack is up, the LAN endpoint is `http://dgx-spark.local:4000` and
-speaks the OpenAI API: `/v1/chat/completions`, `/v1/audio/speech`,
-`/v1/audio/transcriptions`, `/v1/models`.
+Once up, the LAN endpoint is `http://10.10.1.221:4000` (the Spark; mDNS
+doesn't resolve reliably). It speaks the OpenAI API: `/v1/chat/completions`,
+`/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/models`.
+
+For laptop dev without rebuilding the Spark image:
+
+```powershell
+cd orchestrator
+cargo run -- --config config.dev.toml
+# kiosk UI: http://localhost:8080
+```
+
+This points the orchestrator at the Spark's LiteLLM over LAN and runs
+hardware in mock mode. See `orchestrator/README.md` for failure injection
+and pairing with real firmware over WiFi.
 
 ## Benchmarking the pipeline
 
 ```sh
-set -a; . dgx-ai-stack/.env; set +a
-.venv/bin/python sample-benchmark.py --runs 5 --no-think
+cd dgx-ai-stack
+set -a; . .env; set +a
+../.venv/bin/python sample-benchmark.py --runs 5 --no-think
 ```
 
 Reports per-stage latency (STT, LLM TTFT, LLM total, TTS), GPU power and

@@ -149,12 +149,11 @@ not hot-reload its config).
 
 ## Benchmarking
 
-End-to-end benchmark lives at the repo root: `../sample-benchmark.py`.
+End-to-end benchmark is `sample-benchmark.py` in this directory.
 
 ```sh
-cd ..
-set -a; . dgx-ai-stack/.env; set +a
-.venv/bin/python sample-benchmark.py --runs 5 --no-think
+set -a; . .env; set +a
+../.venv/bin/python sample-benchmark.py --runs 5 --no-think
 ```
 
 Reports per-stage timing (STT, LLM TTFT, LLM total, TTS), GPU power and

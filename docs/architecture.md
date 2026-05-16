@@ -846,7 +846,7 @@ WantedBy=graphical.target
 
 Suggested phasing — each phase produces a working artifact you can demo.
 
-The DGX Spark inference stack (LiteLLM + llama-server + parakeet + kokoro) is **already running** — see `dgx-ai-stack/README.md` and the `sample-benchmark.py` end-to-end check. The roadmap below is for everything *above* that line: the orchestrator, frontend, microcontroller, and the booth itself.
+The DGX Spark inference stack (LiteLLM + llama-server + parakeet + kokoro) is **already running** — see `dgx-ai-stack/README.md` and the `dgx-ai-stack/sample-benchmark.py` end-to-end check. The roadmap below is for everything *above* that line: the orchestrator, frontend, microcontroller, and the booth itself.
 
 ### Phase 1: Skeleton with mocks
 

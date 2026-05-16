@@ -2,7 +2,7 @@
 
 Phase 1 skeleton: Rust state machine + axum WS server + SolidJS debug UI. Inference and hardware are mocked; no Spark or microcontroller required.
 
-See `../wet-court-architecture.md` for the full design.
+See `../docs/architecture.md` for the full design.
 
 ## Dev (no MCU, no Docker)
 
