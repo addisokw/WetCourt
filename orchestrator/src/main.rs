@@ -11,6 +11,7 @@ mod display;
 mod fallbacks;
 mod hardware;
 mod inference;
+mod personas;
 mod state_machine;
 
 use display::{AppState, DisplayMessage};
@@ -43,14 +44,28 @@ async fn main() -> Result<()> {
     let (hardware_tx, hardware_rx) = mpsc::channel::<state_machine::Command>(32);
     let (display_tx, display_rx) = mpsc::channel::<state_machine::Command>(64);
 
+    // Persona registry: directory sits next to the binary's working dir;
+    // resolve relative to the config file's parent so a non-default config
+    // can co-locate its personas dir without surprises.
+    let personas_dir = cli
+        .config
+        .parent()
+        .map(|p| p.join("personas"))
+        .unwrap_or_else(|| PathBuf::from("personas"));
+    let registry = personas::PersonaRegistry::load_from_dir(&personas_dir, &cfg.default_persona_id)
+        .map_err(|e| anyhow::anyhow!("loading personas from {}: {e:#}", personas_dir.display()))?;
+    let personas = Arc::new(tokio::sync::RwLock::new(registry));
+    tracing::info!(dir = %personas_dir.display(), active = %cfg.default_persona_id, "personas loaded");
+
     // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
     // still mocked. Set [inference] mode = "mock" for offline dev.
     {
         let cfg = cfg.clone();
+        let personas = personas.clone();
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
         tokio::spawn(async move {
-            inference::run(cfg, inference_rx, event_tx, display_tx).await;
+            inference::run(cfg, personas, inference_rx, event_tx, display_tx).await;
         });
     }
 
@@ -85,6 +100,8 @@ async fn main() -> Result<()> {
         display_bcast: display_bcast.clone(),
         ws_clients: Arc::new(AtomicUsize::new(0)),
         plea_buffer: Arc::new(Mutex::new(Vec::new())),
+        personas,
+        inference_cfg: cfg.inference.clone(),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;

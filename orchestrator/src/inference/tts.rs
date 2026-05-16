@@ -3,11 +3,12 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::display::events::DisplayEvent;
+use crate::personas::PersonaRegistry;
 use crate::state_machine::{Command, Event};
 
 use super::client::LlmClient;
@@ -34,6 +35,7 @@ pub async fn mock(
 /// we self-ack so the state machine still moves on.
 pub async fn real(
     cfg: Arc<Config>,
+    personas: Arc<RwLock<PersonaRegistry>>,
     text: String,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
@@ -45,7 +47,8 @@ pub async fn real(
     }
     let client = LlmClient::new(&cfg.inference);
     let connect_to = Duration::from_secs(cfg.inference.tts_timeout_secs);
-    match client.synth_pcm_stream(&text, connect_to).await {
+    let voice = personas.read().await.active().tts_voice.clone();
+    match client.synth_pcm_stream(&text, &voice, connect_to).await {
         Ok(stream) => {
             futures_util::pin_mut!(stream);
             let _ = display_tx
@@ -84,10 +87,11 @@ pub async fn real(
 pub async fn synth_into_display(
     client: &LlmClient,
     text: &str,
+    voice: &str,
     display_tx: &mpsc::Sender<Command>,
     connect_to: Duration,
 ) -> anyhow::Result<usize> {
-    let stream = client.synth_pcm_stream(text, connect_to).await?;
+    let stream = client.synth_pcm_stream(text, voice, connect_to).await?;
     futures_util::pin_mut!(stream);
     let mut total = 0usize;
     while let Some(chunk) = stream.next().await {

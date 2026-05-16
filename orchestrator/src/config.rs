@@ -14,7 +14,11 @@ pub struct Config {
     pub trial: TrialConfig,
     pub display: DisplayConfig,
     pub logging: LoggingConfig,
+    #[serde(default = "d_default_persona_id")]
+    pub default_persona_id: String,
 }
+
+fn d_default_persona_id() -> String { "wettington".into() }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InferenceConfig {

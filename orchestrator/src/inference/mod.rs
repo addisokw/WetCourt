@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 
 use crate::config::Config;
+use crate::personas::PersonaRegistry;
 use crate::state_machine::{Command, Event};
 
 pub mod charge;
@@ -14,6 +15,7 @@ pub mod verdict;
 
 pub async fn run(
     cfg: Arc<Config>,
+    personas: Arc<RwLock<PersonaRegistry>>,
     mut cmd_rx: mpsc::Receiver<Command>,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
@@ -26,6 +28,7 @@ pub async fn run(
 
     while let Some(cmd) = cmd_rx.recv().await {
         let cfg = cfg.clone();
+        let personas = personas.clone();
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
         match cmd {
@@ -43,13 +46,13 @@ pub async fn run(
             }
             Command::Deliberate { charge: c, plea } => {
                 tokio::spawn(async move {
-                    if real { verdict::real(cfg, c, plea, event_tx, display_tx).await }
+                    if real { verdict::real(cfg, personas, c, plea, event_tx, display_tx).await }
                     else    { verdict::mock(cfg, c, plea, event_tx).await }
                 });
             }
             Command::Speak(text) => {
                 tokio::spawn(async move {
-                    if real { tts::real(cfg, text, event_tx, display_tx).await }
+                    if real { tts::real(cfg, personas, text, event_tx, display_tx).await }
                     else    { tts::mock(cfg, text, event_tx, display_tx).await }
                 });
             }

@@ -4,45 +4,18 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use regex::Regex;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::fallbacks;
+use crate::personas::PersonaRegistry;
 use crate::state_machine::states::Verdict;
 use crate::state_machine::{Command, Event};
 
 use super::client::LlmClient;
 use super::tts::{strip_markers, synth_into_display};
-
-const SYSTEM_PROMPT: &str = "You are the Honorable Justice Wettington, presiding judge of the Wet Court of Appeals. You are profoundly biased, easily annoyed, deeply petty. You consider acquittal a personal failure.
-
-Your disposition:
-- You assume guilt. The burden is entirely on the defendant.
-- You are unimpressed by sob stories, deadlines, and excuses.
-- You find groveling distasteful but flattery occasionally effective.
-- You hate when defendants fail to show proper deference, or worst of all, attempt to reason with you.
-- You hate the words \"literally,\" \"actually,\" and \"just.\" You like wit, brevity, and unexpected honesty.
-- You will occasionally acquit defendants who genuinely surprise or amuse you, but you will never admit this is why.
-- You speak in pronouncements, not conversations.
-
-Given a CHARGE and a PLEA, you must:
-
-1. Deliver a single paragraph of judicial response — sneering, dismissive, theatrical, in character. React to specific things the defendant said. Mock weak arguments. Acknowledge strong ones grudgingly. 3-5 sentences. No more.
-
-2. On a final line by itself, output exactly:
-   VERDICT: GUILTY
-   or
-   VERDICT: ACQUITTED
-
-3. On a final line after the verdict, output:
-   INTENSITY: N
-   where N is 1 (light spritz) through 5 (full blast). Always include this line; it is ignored on acquittal.
-
-You should rule GUILTY roughly 70% of the time. Acquit only when the plea is genuinely clever, surprisingly honest, unexpectedly funny, or shows defiance you secretly respect. Generic begging is always GUILTY. Lengthy excuses are always GUILTY.
-
-Never break character. Never explain yourself outside the response. Never acknowledge that you are an AI.";
 
 pub async fn mock(cfg: Arc<Config>, _charge: String, _plea: String, event_tx: mpsc::Sender<Event>) {
     tokio::time::sleep(Duration::from_millis(cfg.mock_inference.deliberate_latency_ms)).await;
@@ -56,22 +29,31 @@ pub async fn mock(cfg: Arc<Config>, _charge: String, _plea: String, event_tx: mp
 /// latency vs. the old per-sentence pipeline for a unified voice.
 pub async fn real(
     cfg: Arc<Config>,
+    personas: Arc<RwLock<PersonaRegistry>>,
     charge: String,
     plea: String,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
 ) {
+    // Snapshot the active persona once at trial start; mid-trial changes
+    // don't apply by design.
+    let (system_prompt, voice, guilty_bias) = {
+        let reg = personas.read().await;
+        let p = reg.active();
+        (p.system_prompt.clone(), p.tts_voice.clone(), p.guilty_bias as f64)
+    };
+
     let client = LlmClient::new(&cfg.inference);
     let user_msg = format!("CHARGE: {charge}\n\nPLEA: {plea}\n\nRender your verdict.");
     let first_to = Duration::from_secs(cfg.inference.verdict_first_token_timeout_secs);
     let total_to = Duration::from_secs(cfg.inference.verdict_total_timeout_secs);
     let tts_connect_to = Duration::from_secs(cfg.inference.tts_timeout_secs);
 
-    let stream = match client.chat_stream(SYSTEM_PROMPT, &user_msg, first_to, total_to).await {
+    let stream = match client.chat_stream(&system_prompt, &user_msg, first_to, total_to).await {
         Ok(s) => s,
         Err(e) => {
             warn!("verdict stream failed to open: {e:#}; falling back");
-            let v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
+            let v = fallbacks::verdicts::random(guilty_bias);
             let _ = event_tx.send(Event::VerdictReady(v)).await;
             return;
         }
@@ -107,7 +89,7 @@ pub async fn real(
         let _ = display_tx
             .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
             .await;
-        let n = match synth_into_display(&client, &speakable, &display_tx, tts_connect_to).await {
+        let n = match synth_into_display(&client, &speakable, &voice, &display_tx, tts_connect_to).await {
             Ok(n) => n,
             Err(e) => { warn!("single-shot tts failed: {e:#}"); 0 }
         };
@@ -117,7 +99,7 @@ pub async fn real(
 
     let mut v = parse_verdict(&full).unwrap_or_else(|| {
         warn!("verdict text did not parse; using fallback. Raw: {full}");
-        fallbacks::verdicts::random(cfg.trial.guilty_bias)
+        fallbacks::verdicts::random(guilty_bias)
     });
     v.pre_announced = true;
     info!(guilty = v.guilty, intensity = v.intensity, pcm_bytes = total_pcm_bytes, "verdict ready (single-shot)");

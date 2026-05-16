@@ -229,6 +229,7 @@ mod tests {
             trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 1, cooldown_secs: 1, guilty_bias: 1.0 },
             display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
             logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },
+            default_persona_id: "wettington".into(),
         }
     }
 

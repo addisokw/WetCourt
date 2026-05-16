@@ -18,7 +18,6 @@ pub struct LlmClient {
     enable_thinking: bool,
     stt_model: String,
     tts_model: String,
-    tts_voice: String,
 }
 
 impl LlmClient {
@@ -35,7 +34,6 @@ impl LlmClient {
             enable_thinking: cfg.enable_thinking,
             stt_model: cfg.stt_model.clone(),
             tts_model: cfg.tts_model.clone(),
-            tts_voice: cfg.tts_voice.clone(),
         }
     }
 
@@ -62,11 +60,12 @@ impl LlmClient {
     pub async fn synth_pcm_stream(
         &self,
         text: &str,
+        voice: &str,
         connect_timeout: Duration,
     ) -> Result<impl Stream<Item = Result<Bytes>>> {
         let body = json!({
             "model": self.tts_model,
-            "voice": self.tts_voice,
+            "voice": voice,
             "input": text,
             "response_format": "pcm",
         });

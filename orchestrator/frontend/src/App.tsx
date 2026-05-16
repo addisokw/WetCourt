@@ -11,6 +11,7 @@ import {
   recording,
   startTrial,
 } from './ws';
+import PersonaPanel from './PersonaPanel';
 
 function fmt(ts: number): string {
   const d = new Date(ts);
@@ -22,8 +23,13 @@ export default function App() {
     connect();
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      // Escape is always global — it's an emergency stop.
+      if (e.code === 'Escape') { e.preventDefault(); emergencyStop(); return; }
+      // Other shortcuts shouldn't hijack typing or button activation.
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || t?.isContentEditable) return;
       if (e.code === 'Space') { e.preventDefault(); startTrial(); }
-      if (e.code === 'Escape') { e.preventDefault(); emergencyStop(); }
       if (e.code === 'KeyP' && pleaWindowOpen()) {
         e.preventDefault();
         if (recording()) void endPlea(); else void beginPlea();
@@ -61,6 +67,7 @@ export default function App() {
       <Show when={deliberation()}>
         <section class="deliberation">{deliberation()}</section>
       </Show>
+      <PersonaPanel />
       <section class="log">
         <For each={log().slice().reverse()}>
           {(entry) => (
