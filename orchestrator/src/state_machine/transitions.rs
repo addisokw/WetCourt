@@ -31,6 +31,10 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
             vec![
                 Command::GenerateCharge,
                 Command::Display(DisplayEvent::Reset),
+                Command::Display(DisplayEvent::PhaseDeadline {
+                    phase: "generating_charge".into(),
+                    deadline_ms: cfg.inference.charge_timeout_secs * 1000,
+                }),
                 Command::Hardware(HardwareCommand::Panel(PanelPattern::Thinking)),
             ],
         ),
@@ -57,6 +61,10 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
                     Command::Display(DisplayEvent::StartPleaRecording {
                         deadline_ms: cfg.trial.plea_window_secs * 1000,
                     }),
+                    Command::Display(DisplayEvent::PhaseDeadline {
+                        phase: "awaiting_plea".into(),
+                        deadline_ms: cfg.trial.plea_window_secs * 1000,
+                    }),
                     Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
                 ],
             )
@@ -64,6 +72,21 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
         (s @ DisplayingCharge { .. }, _) => (s, vec![]),
 
         (AwaitingPlea { charge, .. }, PleaAudioReceived(audio)) => begin_transcribing(charge, audio, cfg),
+        // The accused pressed the button: reset the plea-window deadline so
+        // they get the full talking time from the moment they start speaking.
+        (AwaitingPlea { charge, .. }, PleaRecordingStarted) => {
+            let deadline = Instant::now() + Duration::from_secs(cfg.trial.plea_window_secs);
+            (
+                AwaitingPlea { charge, deadline },
+                vec![
+                    Command::Display(DisplayEvent::PleaRecording { active: true }),
+                    Command::Display(DisplayEvent::PhaseDeadline {
+                        phase: "awaiting_plea".into(),
+                        deadline_ms: cfg.trial.plea_window_secs * 1000,
+                    }),
+                ],
+            )
+        }
         (AwaitingPlea { charge, deadline }, Tick) if Instant::now() >= deadline => {
             begin_flushing_plea(charge, cfg)
         }
@@ -106,21 +129,24 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
         (s @ Deliberating { .. }, _) => (s, vec![]),
 
         (PronouncingVerdict { verdict, .. }, TtsFinished) => {
-            let cmds = sentence_commands(&verdict, cfg);
-            (ExecutingSentence { verdict, hardware_done: false }, cmds)
+            let mut cmds = sentence_commands(&verdict, cfg);
+            // Watchdog: if no HardwareAck/Error arrives (e.g. MCU disconnected
+            // with the TCP driver), the Tick handler below escapes to Cooldown.
+            let deadline = Instant::now() + Duration::from_secs(15);
+            cmds.push(Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "executing_sentence".into(),
+                deadline_ms: 15_000,
+            }));
+            (ExecutingSentence { verdict, deadline }, cmds)
         }
         (s @ PronouncingVerdict { .. }, _) => (s, vec![]),
 
+        (ExecutingSentence { deadline, .. }, Tick) if Instant::now() >= deadline => {
+            tracing::warn!("ExecutingSentence watchdog fired — no hardware ack; advancing to Cooldown");
+            begin_cooldown(cfg)
+        }
         (ExecutingSentence { .. }, HardwareAck(_)) | (ExecutingSentence { .. }, HardwareError(_)) => {
-            let until = Instant::now() + Duration::from_secs(cfg.trial.cooldown_secs);
-            (
-                Cooldown { until },
-                vec![
-                    Command::Display(DisplayEvent::Cooldown),
-                    Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
-                    Command::Hardware(HardwareCommand::Panel(PanelPattern::Idle)),
-                ],
-            )
+            begin_cooldown(cfg)
         }
         (s @ ExecutingSentence { .. }, _) => (s, vec![]),
 
@@ -142,17 +168,25 @@ fn begin_displaying_charge(text: String, cfg: &Config) -> (State, Vec<Command>) 
         State::DisplayingCharge { charge: text.clone(), until },
         vec![
             Command::Display(DisplayEvent::ShowCharge { text: text.clone() }),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "displaying_charge".into(),
+                deadline_ms: cfg.trial.charge_display_secs * 1000,
+            }),
             Command::Speak(text),
         ],
     )
 }
 
-fn begin_transcribing(charge: String, audio: Vec<u8>, _cfg: &Config) -> (State, Vec<Command>) {
+fn begin_transcribing(charge: String, audio: Vec<u8>, cfg: &Config) -> (State, Vec<Command>) {
     (
         State::Transcribing { charge, audio: audio.clone(), started_at: Instant::now() },
         vec![
             Command::Display(DisplayEvent::StopPleaRecording),
             Command::Display(DisplayEvent::Transcribing),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "transcribing".into(),
+                deadline_ms: cfg.inference.stt_timeout_secs * 1000,
+            }),
             Command::Transcribe(audio),
         ],
     )
@@ -168,12 +202,32 @@ fn begin_flushing_plea(charge: String, _cfg: &Config) -> (State, Vec<Command>) {
     )
 }
 
-fn begin_deliberating(charge: String, plea: String, _cfg: &Config) -> (State, Vec<Command>) {
+fn begin_deliberating(charge: String, plea: String, cfg: &Config) -> (State, Vec<Command>) {
     (
         State::Deliberating { charge: charge.clone(), plea: plea.clone(), started_at: Instant::now() },
         vec![
             Command::Display(DisplayEvent::TranscriptReady { text: plea.clone() }),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "deliberating".into(),
+                deadline_ms: cfg.inference.verdict_total_timeout_secs * 1000,
+            }),
             Command::Deliberate { charge, plea },
+        ],
+    )
+}
+
+fn begin_cooldown(cfg: &Config) -> (State, Vec<Command>) {
+    let until = Instant::now() + Duration::from_secs(cfg.trial.cooldown_secs);
+    (
+        State::Cooldown { until },
+        vec![
+            Command::Display(DisplayEvent::Cooldown),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "cooldown".into(),
+                deadline_ms: cfg.trial.cooldown_secs * 1000,
+            }),
+            Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
+            Command::Hardware(HardwareCommand::Panel(PanelPattern::Idle)),
         ],
     )
 }

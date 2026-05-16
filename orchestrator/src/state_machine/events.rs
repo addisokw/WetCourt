@@ -9,6 +9,7 @@ pub enum Event {
     #[allow(dead_code)]
     ChargeFailed(String),
     PleaAudioReceived(Vec<u8>),
+    PleaRecordingStarted,
     PleaTimeout,
     TranscriptReady(String),
     #[allow(dead_code)]

@@ -13,6 +13,23 @@ export const [log, setLog] = createSignal<LogEntry[]>([]);
 export const [deliberation, setDeliberation] = createSignal<string>('');
 export const [pleaWindowOpen, setPleaWindowOpen] = createSignal(false);
 export const [recording, setRecording] = createSignal(false);
+// Face-driving signals — monotonic timestamps the JudgeFace component samples
+// each frame to drive mouth lip-sync and "thinking" beats.
+export const [ttsActive, setTtsActive] = createSignal(false);
+export const [lastTtsChunkAt, setLastTtsChunkAt] = createSignal(0);
+export const [lastTokenAt, setLastTokenAt] = createSignal(0);
+export const [lastVerdictGuilty, setLastVerdictGuilty] = createSignal<boolean | null>(null);
+// Case-view signals — captured from display events for the presentational viewer.
+export const [charge, setCharge] = createSignal<string>('');
+export const [pleaTranscript, setPleaTranscript] = createSignal<string>('');
+export const [verdictRemarks, setVerdictRemarks] = createSignal<string>('');
+export const [verdictIntensity, setVerdictIntensity] = createSignal<number>(0);
+export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolean>(false);
+// Generic per-phase deadline countdown. Captured from server `phase_deadline`
+// events; absolute Date.now() timestamp at which the current state will time
+// out (or 0 if the active state has no deadline).
+export const [phaseDeadlineAt, setPhaseDeadlineAt] = createSignal<number>(0);
+export const [phaseDeadlineLabel, setPhaseDeadlineLabel] = createSignal<string>('');
 
 const STATE_LABEL: Record<string, string> = {
   reset: 'idle',
@@ -40,15 +57,19 @@ function pushLog(entry: LogEntry) {
   });
 }
 
-export function connect() {
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+let readOnly = false;
+
+export function connect(opts: { readOnly?: boolean } = {}) {
+  readOnly = !!opts.readOnly;
+  const path = readOnly ? '/ws/view' : '/ws';
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
   socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
 
   socket.onopen = () => {
     reconnectDelay = 500;
     setCurrentState('connected');
-    socket?.send(JSON.stringify({ type: 'ready' }));
+    if (!readOnly) socket?.send(JSON.stringify({ type: 'ready' }));
   };
 
   socket.onmessage = (msg) => {
@@ -72,7 +93,7 @@ export function connect() {
 
   socket.onclose = () => {
     setCurrentState('reconnecting');
-    setTimeout(connect, reconnectDelay);
+    setTimeout(() => connect({ readOnly }), reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 8000);
   };
 
@@ -86,28 +107,61 @@ function handleEvent(ev: DisplayEvent) {
     case 'reset':
     case 'idle':
       setDeliberation('');
+      setLastVerdictGuilty(null);
+      setTtsActive(false);
+      setCharge('');
+      setPleaTranscript('');
+      setVerdictRemarks('');
+      setVerdictIntensity(0);
+      setPleaRecordingActive(false);
+      setPhaseDeadlineAt(0);
+      setPhaseDeadlineLabel('');
       nextBinaryIsAudio = false;
+      break;
+    case 'show_charge':
+      setCharge(String(ev.text ?? ''));
+      break;
+    case 'transcript_ready':
+      setPleaTranscript(String(ev.text ?? ''));
       break;
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
       nextBinaryIsAudio = true;
-      startTtsSession();
+      setTtsActive(true);
+      setLastTtsChunkAt(performance.now());
+      if (!readOnly) startTtsSession();
       break;
     case 'tts_end':
       nextBinaryIsAudio = false;
-      endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
+      setTtsActive(false);
+      if (!readOnly) endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
       break;
     case 'deliberation_token':
       setDeliberation((prev) => prev + (ev.text as string));
+      setLastTokenAt(performance.now());
+      break;
+    case 'verdict':
+      setLastVerdictGuilty(Boolean(ev.guilty));
+      setVerdictRemarks(String(ev.remarks ?? ''));
+      setVerdictIntensity(Number(ev.intensity ?? 0));
+      break;
+    case 'start_plea_recording':
+      setPleaWindowOpen(true);
+      setPleaRecordingActive(false);
+      break;
+    case 'plea_recording':
+      setPleaRecordingActive(Boolean(ev.active));
+      break;
+    case 'phase_deadline':
+      setPhaseDeadlineLabel(String(ev.phase ?? ''));
+      setPhaseDeadlineAt(Date.now() + Number(ev.deadline_ms ?? 0));
       break;
     case 'deliberation_complete':
       // No-op; deliberation buffer holds the full text.
       break;
-    case 'start_plea_recording':
-      setPleaWindowOpen(true);
-      break;
     case 'stop_plea_recording':
       setPleaWindowOpen(false);
+      setPleaRecordingActive(false);
       // Window closed (timeout or e-stop) — make sure we flush whatever was captured.
       if (recording()) void endPlea();
       break;
@@ -120,6 +174,7 @@ export async function beginPlea() {
   try {
     await startRecording();
     setRecording(true);
+    socket?.send(JSON.stringify({ type: 'plea_recording_started' }));
   } catch (e) {
     pushLog({ ts: Date.now(), ev: { type: 'mic_error', message: String(e) } });
     socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));

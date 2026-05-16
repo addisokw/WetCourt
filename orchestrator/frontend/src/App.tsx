@@ -1,4 +1,4 @@
-import { onMount, For, Show } from 'solid-js';
+import { createMemo, createSignal, onCleanup, onMount, For, Show } from 'solid-js';
 import {
   beginPlea,
   connect,
@@ -7,15 +7,41 @@ import {
   emergencyStop,
   endPlea,
   log,
+  phaseDeadlineAt,
+  phaseDeadlineLabel,
   pleaWindowOpen,
   recording,
   startTrial,
 } from './ws';
 import PersonaPanel from './PersonaPanel';
+import JudgeFace from './JudgeFace';
+import { CaseContent } from './CaseView';
 
 function fmt(ts: number): string {
   const d = new Date(ts);
   return `${d.toLocaleTimeString('en-US', { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+
+function PhaseCountdown() {
+  const [now, setNow] = createSignal(Date.now());
+  let timer = 0;
+  onMount(() => {
+    timer = window.setInterval(() => setNow(Date.now()), 200);
+  });
+  onCleanup(() => {
+    if (timer) window.clearInterval(timer);
+  });
+  const remainingMs = createMemo(() => Math.max(0, phaseDeadlineAt() - now()));
+  const show = () => phaseDeadlineAt() > 0 && remainingMs() > 0;
+  const secs = () => (remainingMs() / 1000).toFixed(remainingMs() < 10_000 ? 1 : 0);
+  return (
+    <Show when={show()}>
+      <span class="phase-countdown" title={phaseDeadlineLabel()}>
+        <span class="phase-countdown-label">{phaseDeadlineLabel().replace(/_/g, ' ')} →</span>
+        <span class="phase-countdown-num">{secs()}s</span>
+      </span>
+    </Show>
+  );
 }
 
 export default function App() {
@@ -46,7 +72,10 @@ export default function App() {
   return (
     <div class="app">
       <header>
-        <h1 class={`banner state-${currentState()}`}>{currentState()}</h1>
+        <div class="banner-group">
+          <h1 class={`banner state-${currentState()}`}>{currentState()}</h1>
+          <PhaseCountdown />
+        </div>
         <div class="controls">
           <button onClick={startTrial}>Start (Space)</button>
           <button
@@ -64,6 +93,16 @@ export default function App() {
           <span class="dot" /> Recording — speak your plea, click Stop or press P when done.
         </div>
       </Show>
+      <section class="monitors">
+        <div class="monitor-pane monitor-face">
+          <div class="monitor-tag">FACE</div>
+          <JudgeFace />
+        </div>
+        <div class="monitor-pane monitor-case">
+          <div class="monitor-tag">CASE</div>
+          <div class="case-embed"><CaseContent /></div>
+        </div>
+      </section>
       <Show when={deliberation()}>
         <section class="deliberation">{deliberation()}</section>
       </Show>

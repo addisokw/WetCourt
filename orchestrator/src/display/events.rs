@@ -15,6 +15,14 @@ pub enum DisplayEvent {
     TtsEnd,
     StartPleaRecording { deadline_ms: u64 },
     StopPleaRecording,
+    /// Broadcast when the operator's microphone actually starts/stops capturing
+    /// — distinct from the plea *window* opening. Drives the case-view prompt
+    /// ("press to begin" → "press to end") on read-only monitors.
+    PleaRecording { active: bool },
+    /// Operator-facing countdown helper. Emitted whenever the state machine
+    /// enters a state with a deadline; `deadline_ms` is the duration from
+    /// emission until the watchdog/timeout fires.
+    PhaseDeadline { phase: String, deadline_ms: u64 },
     Transcribing,
     TranscriptReady { text: String },
     DeliberationToken { text: String },
@@ -31,6 +39,7 @@ pub enum DisplayEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientEvent {
     Ready,
+    PleaRecordingStarted,
     PleaAudioChunk,
     PleaAudioComplete,
     TtsFinished,

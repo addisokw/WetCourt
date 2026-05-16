@@ -50,6 +50,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
+        .route("/ws/view", get(view_ws_handler))
         .route("/operator/start", post(operator_start))
         .route("/operator/estop", post(operator_estop))
         .route("/operator/personas", get(list_personas))
@@ -92,6 +93,51 @@ async fn ws_handler(
         return (StatusCode::CONFLICT, "single client only").into_response();
     }
     ws.on_upgrade(move |socket| ws_session(socket, state))
+}
+
+/// Read-only WebSocket for presentational monitors (judge face, case info).
+/// Subscribes to the display broadcast but forwards only JSON events (no PCM
+/// binary frames) and ignores anything the client sends. Doesn't participate
+/// in the single-client budget that `/ws` enforces, so multiple read-only
+/// viewers can connect simultaneously.
+async fn view_ws_handler(
+    ws: WebSocketUpgrade,
+    AxumState(state): AxumState<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| view_ws_session(socket, state))
+}
+
+async fn view_ws_session(mut socket: WebSocket, state: AppState) {
+    info!("view ws client connected");
+    let _ = socket
+        .send(Message::Text(
+            serde_json::to_string(&DisplayEvent::Idle).unwrap().into(),
+        ))
+        .await;
+    let mut bcast_rx = state.display_bcast.subscribe();
+    loop {
+        tokio::select! {
+            ev = bcast_rx.recv() => match ev {
+                Ok(DisplayMessage::Json(de)) => {
+                    let json = serde_json::to_string(&de).unwrap();
+                    if socket.send(Message::Text(json.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(DisplayMessage::Binary(_)) => {} // read-only viewers don't need PCM
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    warn!("view ws lagged {n} display messages");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            msg = socket.recv() => match msg {
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(_)) => {} // ignore — read-only
+                Some(Err(e)) => { warn!("view ws error: {e}"); break; }
+            }
+        }
+    }
+    info!("view ws client disconnected");
 }
 
 async fn ws_session(mut socket: WebSocket, state: AppState) {
@@ -143,10 +189,18 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
 async fn handle_client_text(text: &str, state: &AppState) {
     match serde_json::from_str::<ClientEvent>(text) {
         Ok(ClientEvent::Ready) => debug!("client ready"),
+        Ok(ClientEvent::PleaRecordingStarted) => {
+            // Hand to the state machine — it resets the plea-window deadline
+            // and emits the PleaRecording + PhaseDeadline broadcasts.
+            let _ = state.event_tx.send(Event::PleaRecordingStarted).await;
+        }
         Ok(ClientEvent::TtsFinished) => {
             let _ = state.event_tx.send(Event::TtsFinished).await;
         }
         Ok(ClientEvent::PleaAudioComplete) => {
+            let _ = state
+                .display_bcast
+                .send(DisplayMessage::Json(DisplayEvent::PleaRecording { active: false }));
             let mut buf = state.plea_buffer.lock().await;
             let audio = std::mem::take(&mut *buf);
             info!(bytes = audio.len(), "plea audio complete");
