@@ -1,4 +1,10 @@
 import { createSignal, createMemo, For, Show, onMount } from 'solid-js';
+
+interface Voice {
+  id: string;
+  label: string;
+  group: string;
+}
 import {
   Persona,
   TestResult,
@@ -34,6 +40,28 @@ export default function PersonaPanel() {
   const [testCharge, setTestCharge] = createSignal('Loitering with intent');
   const [testPlea, setTestPlea] = createSignal('I was just walking my dog.');
   const [testResult, setTestResult] = createSignal<TestResult | null>(null);
+  const [voices, setVoices] = createSignal<Voice[]>([]);
+
+  // Group voices by their `group` field for the optgroup labels in the select.
+  const voiceGroups = createMemo(() => {
+    const out = new Map<string, Voice[]>();
+    for (const v of voices()) {
+      if (!out.has(v.group)) out.set(v.group, []);
+      out.get(v.group)!.push(v);
+    }
+    return out;
+  });
+
+  async function loadVoices() {
+    try {
+      const r = await fetch('/operator/voices');
+      if (!r.ok) return;
+      const body = await r.json();
+      if (Array.isArray(body.voices)) setVoices(body.voices);
+    } catch {
+      // Non-fatal — the input falls back to free-text via the manual entry row.
+    }
+  }
 
   const errors = createMemo(() => validatePersona(form()));
   const hasErrors = () => Object.keys(errors()).length > 0;
@@ -68,7 +96,10 @@ export default function PersonaPanel() {
     }
   }
 
-  onMount(() => { void loadActive(); });
+  onMount(() => {
+    void loadActive();
+    void loadVoices();
+  });
 
   async function doSelect() {
     setError(''); setStatus('selecting…');
@@ -221,7 +252,34 @@ export default function PersonaPanel() {
 
           <div class="field">
             <label>tts_voice</label>
-            <input type="text" value={form().tts_voice} onInput={(e) => patch('tts_voice', e.currentTarget.value)} />
+            <Show
+              when={voices().length > 0}
+              fallback={
+                <input
+                  type="text"
+                  value={form().tts_voice}
+                  onInput={(e) => patch('tts_voice', e.currentTarget.value)}
+                />
+              }
+            >
+              <select
+                value={form().tts_voice}
+                onChange={(e) => patch('tts_voice', e.currentTarget.value)}
+              >
+                <Show when={!voices().some((v) => v.id === form().tts_voice)}>
+                  <option value={form().tts_voice}>{form().tts_voice} (custom)</option>
+                </Show>
+                <For each={Array.from(voiceGroups().entries())}>
+                  {([group, vs]) => (
+                    <optgroup label={group}>
+                      <For each={vs}>
+                        {(v) => <option value={v.id}>{v.label} ({v.id})</option>}
+                      </For>
+                    </optgroup>
+                  )}
+                </For>
+              </select>
+            </Show>
             <Show when={errors().tts_voice}><span class="err">{errors().tts_voice}</span></Show>
           </div>
 

@@ -57,6 +57,12 @@ impl LlmClient {
 
     /// Streaming /v1/audio/speech. Yields raw PCM s16le @ 24kHz bytes as they
     /// arrive from Kokoro. Caller wraps each chunk into a frontend binary frame.
+    ///
+    /// Retries once on connection-closed errors — Kokoro/LiteLLM closes idle
+    /// keep-alive sockets after a few seconds, but reqwest may hand back a
+    /// pooled connection that's already half-closed. The first send fails
+    /// with "connection closed before message completed"; the retry lands on
+    /// a fresh connection.
     pub async fn synth_pcm_stream(
         &self,
         text: &str,
@@ -69,11 +75,22 @@ impl LlmClient {
             "input": text,
             "response_format": "pcm",
         });
-        let req = self.build(reqwest::Method::POST, "/audio/speech").json(&body);
-        let resp = tokio::time::timeout(connect_timeout, req.send())
-            .await
-            .map_err(|_| anyhow!("tts connect timeout"))??
-            .error_for_status()?;
+        let send_once = || async {
+            let req = self.build(reqwest::Method::POST, "/audio/speech").json(&body);
+            tokio::time::timeout(connect_timeout, req.send())
+                .await
+                .map_err(|_| anyhow!("tts connect timeout"))?
+                .map_err(anyhow::Error::from)
+        };
+        let resp = match send_once().await {
+            Ok(r) => r,
+            Err(e) if is_stale_connection(&e) => {
+                tracing::debug!("tts: stale keep-alive, retrying once: {e:#}");
+                send_once().await?
+            }
+            Err(e) => return Err(e),
+        };
+        let resp = resp.error_for_status()?;
         let stream = resp.bytes_stream().map(|r| r.map_err(|e| anyhow!(e)));
         Ok(stream)
     }
@@ -204,4 +221,24 @@ impl LlmClient {
         }
         req
     }
+}
+
+/// Match the reqwest/hyper error patterns that indicate the pooled keep-alive
+/// connection was closed by the peer before our request reached it. These are
+/// safe to retry idempotently on the first send (no bytes of the body were
+/// committed to the wire from the server's perspective).
+fn is_stale_connection(err: &anyhow::Error) -> bool {
+    let mut src: Option<&dyn std::error::Error> = Some(err.as_ref());
+    while let Some(e) = src {
+        let s = e.to_string().to_lowercase();
+        if s.contains("connection closed before message completed")
+            || s.contains("sendrequest")
+            || s.contains("broken pipe")
+            || s.contains("connection reset")
+        {
+            return true;
+        }
+        src = e.source();
+    }
+    false
 }

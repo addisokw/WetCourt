@@ -35,4 +35,5 @@ Rule GUILTY about 50% of time. Acquit when plea is true, brave, or makes
 you laugh small. Long excuse: guilty. Begging: guilty. Story that does not
 answer charge: guilty, friend."""
 guilty_bias = 0.5
-tts_voice = "bm_george"
+tts_voice = "am_onyx"
+tts_speed = 0.699999988079071

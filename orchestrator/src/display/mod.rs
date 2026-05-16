@@ -54,6 +54,7 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/start", post(operator_start))
         .route("/operator/estop", post(operator_estop))
         .route("/operator/personas", get(list_personas))
+        .route("/operator/voices", get(list_voices))
         .route("/operator/persona", get(get_active_persona).post(create_persona))
         .route("/operator/persona/{id}", put(update_persona))
         .route("/operator/persona/{id}/select", post(select_persona))
@@ -224,6 +225,56 @@ struct PersonaSummary {
 struct PersonasListResp {
     active_id: String,
     personas: Vec<PersonaSummary>,
+}
+
+#[derive(Serialize)]
+struct VoiceEntry {
+    id: &'static str,
+    label: &'static str,
+    group: &'static str,
+}
+
+#[derive(Serialize)]
+struct VoicesResp {
+    voices: &'static [VoiceEntry],
+}
+
+// Kokoro voice catalogue. Kept here because LiteLLM's OpenAI-compatible
+// `/v1/audio/speech` doesn't expose a voice-listing endpoint to forward.
+// Add / remove rows to match the Kokoro deployment if it diverges.
+const VOICES: &[VoiceEntry] = &[
+    VoiceEntry { id: "af_heart",    label: "Heart",    group: "American Female" },
+    VoiceEntry { id: "af_alloy",    label: "Alloy",    group: "American Female" },
+    VoiceEntry { id: "af_aoede",    label: "Aoede",    group: "American Female" },
+    VoiceEntry { id: "af_bella",    label: "Bella",    group: "American Female" },
+    VoiceEntry { id: "af_jessica",  label: "Jessica",  group: "American Female" },
+    VoiceEntry { id: "af_kore",     label: "Kore",     group: "American Female" },
+    VoiceEntry { id: "af_nicole",   label: "Nicole",   group: "American Female" },
+    VoiceEntry { id: "af_nova",     label: "Nova",     group: "American Female" },
+    VoiceEntry { id: "af_river",    label: "River",    group: "American Female" },
+    VoiceEntry { id: "af_sarah",    label: "Sarah",    group: "American Female" },
+    VoiceEntry { id: "af_sky",      label: "Sky",      group: "American Female" },
+    VoiceEntry { id: "am_adam",     label: "Adam",     group: "American Male" },
+    VoiceEntry { id: "am_echo",     label: "Echo",     group: "American Male" },
+    VoiceEntry { id: "am_eric",     label: "Eric",     group: "American Male" },
+    VoiceEntry { id: "am_fenrir",   label: "Fenrir",   group: "American Male" },
+    VoiceEntry { id: "am_liam",     label: "Liam",     group: "American Male" },
+    VoiceEntry { id: "am_michael",  label: "Michael",  group: "American Male" },
+    VoiceEntry { id: "am_onyx",     label: "Onyx",     group: "American Male" },
+    VoiceEntry { id: "am_puck",     label: "Puck",     group: "American Male" },
+    VoiceEntry { id: "am_santa",    label: "Santa",    group: "American Male" },
+    VoiceEntry { id: "bf_alice",    label: "Alice",    group: "British Female" },
+    VoiceEntry { id: "bf_emma",     label: "Emma",     group: "British Female" },
+    VoiceEntry { id: "bf_isabella", label: "Isabella", group: "British Female" },
+    VoiceEntry { id: "bf_lily",     label: "Lily",     group: "British Female" },
+    VoiceEntry { id: "bm_daniel",   label: "Daniel",   group: "British Male" },
+    VoiceEntry { id: "bm_fable",    label: "Fable",    group: "British Male" },
+    VoiceEntry { id: "bm_george",   label: "George",   group: "British Male" },
+    VoiceEntry { id: "bm_lewis",    label: "Lewis",    group: "British Male" },
+];
+
+async fn list_voices() -> impl IntoResponse {
+    (StatusCode::OK, Json(VoicesResp { voices: VOICES })).into_response()
 }
 
 async fn list_personas(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
