@@ -30,15 +30,28 @@ let analyser: AnalyserNode | null = null;
 // (not the broader ArrayBufferLike) per the DOM lib types.
 let timeBuf: Uint8Array<ArrayBuffer> | null = null;
 let lastWasSilent = true;
+// While TalkingHead is driving speech via speakAudio it writes visemes
+// through the animation queue (newvalue priority). Our amplitude path
+// writes the realtime channel, which has higher priority, so we suppress
+// it during TalkingHead-driven speech to avoid clobbering the visemes.
+let speakingViaTH = false;
+
+export function isMounted(): boolean {
+  return head !== null;
+}
 
 export async function mountFace(el: HTMLElement, opts: { avatarUrl?: string } = {}) {
   const url = opts.avatarUrl ?? '/avatars/judge.glb';
   head = new TalkingHead(el, {
     cameraView: 'head',
-    avatarMute: true,        // we drive lipsync ourselves; no TTS playback inside TH
     modelFPS: 60,
     lipsyncLang: 'en',
     avatarMood: 'neutral',
+    pcmSampleRate: 24000,    // matches Kokoro PCM
+    avatarIdleEyeContact: 0.4,
+    avatarIdleHeadMove: 0.7,
+    avatarSpeakingEyeContact: 0.6,
+    avatarSpeakingHeadMove: 0.8,
     update: tick,
   });
   try {
@@ -49,6 +62,48 @@ export async function mountFace(el: HTMLElement, opts: { avatarUrl?: string } = 
     head = null;
     throw e;
   }
+}
+
+/// Hand TalkingHead a whole-utterance PCM buffer + the spoken text. TH does
+/// playback, visemes, and full speaking-state head/brow animation. Word
+/// timings are estimated from per-char distribution since Kokoro's stream
+/// doesn't give us alignment.
+export function playUtterance(rawPcm: ArrayBuffer, speakableText: string, onDone: () => void) {
+  if (!head) { onDone(); return; }
+  const audio = head.pcmToAudioBuffer(rawPcm);
+  const text = speakableText.trim();
+  if (!text || audio.duration < 0.05) {
+    // Nothing to lipsync; just play the audio as-is with a marker for the ack.
+    head.speakAudio({ audio, markers: [onDone], mtimes: [audio.duration * 1000 + 50] });
+    speakingViaTH = true;
+    return;
+  }
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  // Per-character time, including the implicit trailing space. Stressed
+  // syllables actually take longer in real speech; this is an estimate.
+  const totalUnits = words.reduce((s, w) => s + w.length + 1, 0);
+  const perUnit = (audio.duration * 1000) / totalUnits;
+  let t = 0;
+  const wtimes: number[] = [];
+  const wdurations: number[] = [];
+  for (const w of words) {
+    wtimes.push(t);
+    const d = (w.length + 1) * perUnit;
+    wdurations.push(d);
+    t += d;
+  }
+  speakingViaTH = true;
+  head.speakAudio(
+    {
+      audio,
+      words,
+      wtimes,
+      wdurations,
+      markers: [() => { speakingViaTH = false; onDone(); }],
+      mtimes: [audio.duration * 1000 + 50],
+    },
+    { lipsyncLang: 'en' },
+  );
 }
 
 export function bindAnalyser(node: AnalyserNode | null) {
@@ -79,7 +134,7 @@ function writeRealtime(mt: string, val: number | null) {
 }
 
 function tick(_dt: number) {
-  if (!head || !analyser || !timeBuf) return;
+  if (!head || !analyser || !timeBuf || speakingViaTH) return;
   analyser.getByteTimeDomainData(timeBuf);
   let sum = 0;
   for (let i = 0; i < timeBuf.length; i++) {

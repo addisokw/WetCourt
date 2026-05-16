@@ -30,6 +30,23 @@ declare module '@met4citizen/talkinghead' {
     setBaselineValue(mt: string, val: number | null): void;
     getMorphTargetNames(): string[];
     getMoodNames(): string[];
+    speakAudio(
+      r: {
+        audio: AudioBuffer | ArrayBuffer[] | Int16Array;
+        words?: string[];
+        wtimes?: number[];
+        wdurations?: number[];
+        visemes?: string[];
+        vtimes?: number[];
+        vdurations?: number[];
+        markers?: Array<() => void>;
+        mtimes?: number[];
+      },
+      opt?: { lipsyncLang?: string },
+      onsubtitles?: ((s: string) => void) | null,
+    ): void;
+    audioCtx: AudioContext;
+    pcmToAudioBuffer(buf: ArrayBuffer): AudioBuffer;
     stop(): void;
     stopSpeaking(): void;
   }

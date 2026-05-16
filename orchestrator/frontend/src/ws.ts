@@ -1,6 +1,17 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, getFaceAnalyser, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
-import { bindAnalyser, setMood, type Mood } from './face';
+import {
+  appendPcmChunk,
+  enqueuePcmFrame,
+  endTtsSession,
+  getFaceAnalyser,
+  resumeAudio,
+  startPcmAccumulation,
+  startRecording,
+  startTtsSession,
+  stopRecording,
+  takeAccumulatedPcm,
+} from './audio';
+import { bindAnalyser, isMounted as isFaceMounted, playUtterance, setMood, type Mood } from './face';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -33,6 +44,25 @@ let reconnectDelay = 500;
 // Set when the most recent JSON event was `tts_audio`, so the next binary
 // frame is interpreted as audio rather than logged as raw bytes.
 let nextBinaryIsAudio = false;
+// `true` for the current TTS session if we're routing PCM into face.ts's
+// accumulator (TalkingHead plays + lipsyncs on tts_end). `false` falls back
+// to audio.ts's chunk-by-chunk Web Audio queue.
+let routeToFace = false;
+
+// Mirror of orchestrator's `strip_markers` (verdict.rs:103). Removes the
+// VERDICT/INTENSITY lines from the streamed deliberation so they're not
+// counted as words to lipsync; the speakable text is what Kokoro actually
+// synthesized.
+function stripMarkers(text: string): string {
+  return text
+    .split('\n')
+    .filter((l) => {
+      const t = l.trimStart();
+      return !t.startsWith('VERDICT:') && !t.startsWith('INTENSITY:');
+    })
+    .join('\n')
+    .trim();
+}
 
 function pushLog(entry: LogEntry) {
   setLog((prev) => {
@@ -64,7 +94,8 @@ export function connect() {
     } else {
       const buf = msg.data as ArrayBuffer;
       if (nextBinaryIsAudio) {
-        enqueuePcmFrame(buf);
+        if (routeToFace) appendPcmChunk(buf);
+        else enqueuePcmFrame(buf);
       } else {
         pushLog({ ts: Date.now(), ev: { type: 'binary_frame', binary_bytes: buf.byteLength } });
       }
@@ -105,11 +136,26 @@ function handleEvent(ev: DisplayEvent) {
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
       nextBinaryIsAudio = true;
-      startTtsSession();
+      // When the face is mounted, accumulate the full utterance so
+      // TalkingHead can play it via speakAudio and run full speaking-state
+      // animation. Otherwise fall back to the chunked Web Audio queue.
+      routeToFace = isFaceMounted();
+      if (routeToFace) {
+        startPcmAccumulation();
+      } else {
+        startTtsSession();
+      }
       break;
     case 'tts_end':
       nextBinaryIsAudio = false;
-      endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
+      if (routeToFace) {
+        const pcm = takeAccumulatedPcm();
+        const speakable = stripMarkers(deliberation());
+        playUtterance(pcm, speakable, () => socket?.send(JSON.stringify({ type: 'tts_finished' })));
+        routeToFace = false;
+      } else {
+        endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
+      }
       break;
     case 'deliberation_token':
       setDeliberation((prev) => prev + (ev.text as string));

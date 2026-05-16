@@ -125,6 +125,52 @@ export function endTtsSession(cb: () => void) {
   }
 }
 
+// ---------- PCM accumulator (for TalkingHead's speakAudio path) ----------
+//
+// When the face is mounted, ws.ts buffers PCM across the TTS session and
+// hands the concatenated bytes to face.ts on tts_end. TalkingHead then plays
+// the whole utterance through its own pipeline and drives proper visemes +
+// "speaking" state head/brow animation that the chunked path can't trigger.
+
+let pcmAccumulator: Uint8Array[] = [];
+let pcmAccumulatorBytes = 0;
+
+export function startPcmAccumulation() {
+  pcmAccumulator = [];
+  pcmAccumulatorBytes = 0;
+  pcmResidue = null;
+}
+
+export function appendPcmChunk(buf: ArrayBuffer) {
+  const u8 = new Uint8Array(buf);
+  pcmAccumulator.push(u8);
+  pcmAccumulatorBytes += u8.length;
+}
+
+export function takeAccumulatedPcm(): ArrayBuffer {
+  // Kokoro emits even-length chunks but be defensive about a trailing byte
+  // (the chunked path has dedicated residue handling; this path doesn't need
+  // the same machinery since we get everything in one shot).
+  const total = pcmAccumulatorBytes & ~1;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of pcmAccumulator) {
+    if (off + c.length <= total) {
+      out.set(c, off);
+      off += c.length;
+    } else {
+      out.set(c.subarray(0, total - off), off);
+      off = total;
+      break;
+    }
+  }
+  pcmAccumulator = [];
+  pcmAccumulatorBytes = 0;
+  return out.buffer;
+}
+
+export const TTS_PCM_SAMPLE_RATE = TTS_SAMPLE_RATE;
+
 // ---------- Mic capture ----------
 
 let recorder: MediaRecorder | null = null;
