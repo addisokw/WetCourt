@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::state_machine::{Command, Event};
 
+use super::a2f::A2fSession;
 use super::client::LlmClient;
 
 /// Mock: emits a `tts_audio`/`tts_end` pair with no actual bytes and self-acks
@@ -38,6 +39,16 @@ pub async fn real(
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
 ) {
+    real_inner(cfg, text, event_tx, display_tx, None).await
+}
+
+async fn real_inner(
+    cfg: Arc<Config>,
+    text: String,
+    event_tx: mpsc::Sender<Event>,
+    display_tx: mpsc::Sender<Command>,
+    a2f: Option<&A2fSession>,
+) {
     let text = strip_markers(&text);
     if text.is_empty() {
         let _ = event_tx.send(Event::TtsFinished).await;
@@ -56,6 +67,7 @@ pub async fn real(
                 match chunk {
                     Ok(b) => {
                         total += b.len();
+                        if let Some(s) = a2f { s.push_audio(b.clone()); }
                         let _ = display_tx.send(Command::DisplayBinary(b)).await;
                     }
                     Err(e) => {
@@ -86,6 +98,7 @@ pub async fn synth_into_display(
     text: &str,
     display_tx: &mpsc::Sender<Command>,
     connect_to: Duration,
+    a2f: Option<&A2fSession>,
 ) -> anyhow::Result<usize> {
     let stream = client.synth_pcm_stream(text, connect_to).await?;
     futures_util::pin_mut!(stream);
@@ -93,6 +106,7 @@ pub async fn synth_into_display(
     while let Some(chunk) = stream.next().await {
         let b: Bytes = chunk?;
         total += b.len();
+        if let Some(s) = a2f { s.push_audio(b.clone()); }
         let _ = display_tx.send(Command::DisplayBinary(b)).await;
     }
     Ok(total)

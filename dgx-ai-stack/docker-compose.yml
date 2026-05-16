@@ -69,6 +69,20 @@ services:
       USE_GPU: "true"
       DEVICE: cuda
 
+  # Feasibility spike (feat/a2f-3d-spike). Internal-only; orchestrator talks to
+  # it at ws://audio2face:9000/v1/face/stream. Swap `image:` to
+  # nvcr.io/nim/nvidia/audio2face-3d if NIM ends up working on this hardware.
+  audio2face:
+    image: local/audio2face:latest
+    build:
+      context: ./audio2face
+    container_name: audio2face
+    restart: unless-stopped
+    networks: [ai]
+    <<: *gpu
+    environment:
+      A2F_MODE: cuda
+      A2F_CHARACTER: claire
 
   litellm:
     image: ghcr.io/berriai/litellm:main-stable

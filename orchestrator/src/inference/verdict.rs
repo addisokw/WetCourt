@@ -13,6 +13,7 @@ use crate::fallbacks;
 use crate::state_machine::states::Verdict;
 use crate::state_machine::{Command, Event};
 
+use super::a2f::A2fSession;
 use super::client::LlmClient;
 use super::tts::{strip_markers, synth_into_display};
 
@@ -104,14 +105,47 @@ pub async fn real(
     let total_pcm_bytes = if speakable.is_empty() {
         0
     } else {
+        // Open A2F session opportunistically. If it fails or isn't enabled,
+        // proceed without it — TTS path is unchanged.
+        let mut a2f = if cfg.a2f.enabled {
+            match A2fSession::open(&cfg.a2f).await {
+                Ok(s) => Some(s),
+                Err(e) => { warn!("a2f open failed: {e:#}; proceeding without face stream"); None }
+            }
+        } else { None };
+        // Drain blendshape frames in a background task and forward each one
+        // as a DisplayEvent::BlendshapeFrame.
+        let forwarder = if let Some(s) = a2f.as_mut() {
+            s.take_frames_rx().map(|mut rx| {
+                let tx = display_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(frame) = rx.recv().await {
+                        let _ = tx.send(Command::Display(DisplayEvent::BlendshapeFrame {
+                            weights: frame.weights,
+                            audio_offset_ms: frame.audio_offset_ms,
+                        })).await;
+                    }
+                })
+            })
+        } else { None };
+
         let _ = display_tx
             .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
             .await;
-        let n = match synth_into_display(&client, &speakable, &display_tx, tts_connect_to).await {
+        let n = match synth_into_display(&client, &speakable, &display_tx, tts_connect_to, a2f.as_ref()).await {
             Ok(n) => n,
             Err(e) => { warn!("single-shot tts failed: {e:#}"); 0 }
         };
         let _ = display_tx.send(Command::Display(DisplayEvent::TtsEnd)).await;
+
+        // Dropping `a2f` closes the audio_in side; the session task drains the
+        // remaining frames, then closes the WS, which ends the forwarder loop.
+        drop(a2f);
+        if let Some(h) = forwarder {
+            // Give the tail frames a moment to land — short bound so we never
+            // hold the verdict thread waiting on a slow renderer.
+            let _ = tokio::time::timeout(Duration::from_millis(500), h).await;
+        }
         n
     };
 

@@ -50,6 +50,14 @@ guilty_bias = 0.7
 [display]
 listen_addr = "0.0.0.0:8080"
 
+[a2f]
+# Feasibility spike (feat/a2f-3d-spike). Flip to true once the audio2face
+# service is up on the Spark to enable PCM tee + blendshape forwarding.
+enabled = false
+base_url = "ws://audio2face:9000/v1/face/stream"
+character = "claire"
+timeout_ms = 5000
+
 [logging]
 level = "info"
 log_file = "/var/log/booth/booth.log"

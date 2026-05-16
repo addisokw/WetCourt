@@ -19,6 +19,11 @@ pub enum DisplayEvent {
     TranscriptReady { text: String },
     DeliberationToken { text: String },
     DeliberationComplete,
+    /// ARKit-52 blendshape weights from Audio2Face-3D, timestamped against the
+    /// PCM byte stream the kiosk is currently playing. Emitted at ~30 Hz during
+    /// verdict TTS playback. Consumed by a face renderer (TBD); browser drops
+    /// these silently today.
+    BlendshapeFrame { weights: Vec<f32>, audio_offset_ms: f32 },
     Verdict { guilty: bool, intensity: u8, remarks: String },
     ExecuteSentence { guilty: bool },
     PlayCue { name: String },

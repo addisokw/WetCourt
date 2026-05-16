@@ -14,6 +14,8 @@ pub struct Config {
     pub trial: TrialConfig,
     pub display: DisplayConfig,
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub a2f: A2fConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -110,6 +112,36 @@ pub struct TrialConfig {
 pub struct DisplayConfig {
     pub listen_addr: String,
 }
+
+/// Audio2Face-3D feasibility spike. Disabled by default. When `enabled = true`,
+/// verdict::real opens a WS to `base_url` and tees TTS PCM into it, then
+/// forwards blendshape frames out via DisplayEvent::BlendshapeFrame.
+#[derive(Debug, Deserialize, Clone)]
+pub struct A2fConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "d_a2f_url")]
+    pub base_url: String,
+    #[serde(default = "d_a2f_character")]
+    pub character: String,
+    #[serde(default = "d_a2f_timeout")]
+    pub timeout_ms: u64,
+}
+
+impl Default for A2fConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: d_a2f_url(),
+            character: d_a2f_character(),
+            timeout_ms: d_a2f_timeout(),
+        }
+    }
+}
+
+fn d_a2f_url() -> String { "ws://audio2face:9000/v1/face/stream".into() }
+fn d_a2f_character() -> String { "claire".into() }
+fn d_a2f_timeout() -> u64 { 5000 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LoggingConfig {

@@ -6,6 +6,7 @@ use tracing::warn;
 use crate::config::Config;
 use crate::state_machine::{Command, Event};
 
+pub mod a2f;
 pub mod charge;
 pub mod client;
 pub mod stt;

@@ -29,6 +29,7 @@ rand = "0.8"
 regex = "1"
 dotenvy = "0.15"
 bytes = "1"
+tokio-tungstenite = "0.24"
 
 [profile.release]
 lto = "thin"
