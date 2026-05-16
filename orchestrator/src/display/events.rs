@@ -23,6 +23,10 @@ pub enum DisplayEvent {
     /// enters a state with a deadline; `deadline_ms` is the duration from
     /// emission until the watchdog/timeout fires.
     PhaseDeadline { phase: String, deadline_ms: u64 },
+    /// "The court finds the defendant…" preamble is done; pause begins. The
+    /// operator console plays an ambient pad and viewers dim until TheaterEnd.
+    TheaterStart,
+    TheaterEnd,
     Transcribing,
     TranscriptReady { text: String },
     DeliberationToken { text: String },
@@ -30,7 +34,6 @@ pub enum DisplayEvent {
     Verdict { guilty: bool, intensity: u8, remarks: String },
     ExecuteSentence { guilty: bool },
     PlayCue { name: String },
-    Cooldown,
     #[allow(dead_code)]
     Error { message: String },
 }

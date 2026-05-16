@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use regex::Regex;
@@ -83,35 +83,132 @@ pub async fn real(
         .await;
 
     let speakable = strip_markers(&full);
-    let total_pcm_bytes = if speakable.is_empty() {
-        0
-    } else {
-        let _ = display_tx
-            .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
-            .await;
-        let n = match synth_into_display(&client, &speakable, &voice, &display_tx, tts_connect_to).await {
-            Ok(n) => n,
-            Err(e) => { warn!("single-shot tts failed: {e:#}"); 0 }
-        };
-        let _ = display_tx.send(Command::Display(DisplayEvent::TtsEnd)).await;
-        n
-    };
+    info!(
+        llm_raw_len = full.len(),
+        speakable_len = speakable.len(),
+        llm_first_120 = %truncate(&full, 120),
+        "llm verdict stream complete"
+    );
 
     let mut v = parse_verdict(&full).unwrap_or_else(|| {
         warn!("verdict text did not parse; using fallback. Raw: {full}");
-        fallbacks::verdicts::random(guilty_bias)
+        let mut fb = fallbacks::verdicts::random(guilty_bias);
+        fb.pre_announced = true;
+        fb
     });
     v.pre_announced = true;
-    info!(guilty = v.guilty, intensity = v.intensity, pcm_bytes = total_pcm_bytes, "verdict ready (single-shot)");
+    let guilty = v.guilty;
+    let intensity = v.intensity;
+    let remarks = v.remarks.clone();
+    let verdict_word: &str = if guilty { "Guilty." } else { "Not guilty." };
+
+    // Move the state machine out of Deliberating ASAP — its 30s Tick timeout
+    // would otherwise fire while we're still pacing audio playback. The
+    // pre_announced flag tells the state machine to skip its own Verdict
+    // broadcast and Speak command; we'll emit them ourselves at the right
+    // theatrical moments below.
     let _ = event_tx.send(Event::VerdictReady(v)).await;
 
-    // Headless fallback for TtsFinished: estimate playback duration. The browser
-    // beats us to it when connected.
-    let secs = (total_pcm_bytes as f64 / 48_000.0).max(0.1);
+    // Single audio session wraps deliberation + preamble + (silent theater) +
+    // verdict word. Only the final TtsEnd advances PronouncingVerdict, so
+    // intermediate "session" boundaries from the synth stay invisible to the
+    // state machine.
+    let _ = display_tx
+        .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
+        .await;
+
+    // 1) Speak the deliberation body.
+    let t1 = Instant::now();
+    info!(text = %truncate(&speakable, 120), "tts segment 1 (deliberation) start");
+    let n1 = synth_body(&client, &speakable, &voice, &display_tx, tts_connect_to).await;
+    info!(bytes = n1, "tts segment 1 (deliberation) bytes");
+    play_through(t1, n1).await;
+
+    // 2) Lead-in: "The court finds the defendant…"
+    let preamble = "The court finds the defendant...";
+    let t2 = Instant::now();
+    info!(text = preamble, "tts segment 2 (preamble) start");
+    let n2 = synth_body(&client, preamble, &voice, &display_tx, tts_connect_to).await;
+    info!(bytes = n2, "tts segment 2 (preamble) bytes");
+    play_through(t2, n2).await;
+
+    // 3) Theater beat — pad + dim — covers the dramatic silence in the
+    //    audio queue (no PCM bytes flow for 3s).
+    const THEATER_BEAT: Duration = Duration::from_millis(3000);
+    let _ = display_tx.send(Command::Display(DisplayEvent::TheaterStart)).await;
+    tokio::time::sleep(THEATER_BEAT).await;
+    let _ = display_tx.send(Command::Display(DisplayEvent::TheaterEnd)).await;
+
+    // 4) Reveal: broadcast the Verdict display event NOW (face flips colour,
+    //    case view shows GUILTY/NOT GUILTY) right as the verdict-word TTS
+    //    starts playing.
+    let _ = display_tx
+        .send(Command::Display(DisplayEvent::Verdict {
+            guilty,
+            intensity,
+            remarks,
+        }))
+        .await;
+
+    let t3 = Instant::now();
+    info!(text = verdict_word, "tts segment 3 (verdict word) start");
+    let n3 = synth_body(&client, verdict_word, &voice, &display_tx, tts_connect_to).await;
+    info!(bytes = n3, "tts segment 3 (verdict word) bytes");
+
+    // Close the single audio session. Browser fires tts_finished once after
+    // the queue drains (i.e. after the verdict word plays).
+    let _ = display_tx.send(Command::Display(DisplayEvent::TtsEnd)).await;
+
+    info!(pcm_bytes_total = n1 + n2 + n3, "verdict spoken (deliberation + preamble + word)");
+
+    // Headless fallback: if no browser is listening, fire TtsFinished after
+    // the verdict word would have finished playing.
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs_f64(secs + 0.5)).await;
+        play_through(t3, n3).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let _ = event_tx.send(Event::TtsFinished).await;
     });
+}
+
+/// Synthesise PCM straight into `display_tx` without emitting `tts_audio` /
+/// `tts_end` boundaries — the multi-segment verdict flow wraps everything in
+/// one outer session. Returns total bytes pushed.
+async fn synth_body(
+    client: &LlmClient,
+    text: &str,
+    voice: &str,
+    display_tx: &mpsc::Sender<Command>,
+    connect_to: Duration,
+) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    match synth_into_display(client, text, voice, display_tx, connect_to).await {
+        Ok(n) => n,
+        Err(e) => { warn!("tts segment failed: {e:#}"); 0 }
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    let single_line: String = s.chars().map(|c| if c == '\n' { ' ' } else { c }).collect();
+    if single_line.chars().count() <= max {
+        single_line
+    } else {
+        let head: String = single_line.chars().take(max).collect();
+        format!("{head}…")
+    }
+}
+
+/// Wait until a session that started at `start` would have finished playing
+/// (24 kHz mono s16le → 48 000 bytes/s). If we already spent that long
+/// synthesising it (Kokoro can be slower than realtime on cold start), no
+/// extra sleep.
+async fn play_through(start: Instant, bytes: usize) {
+    let dur = Duration::from_secs_f64(bytes as f64 / 48_000.0);
+    let elapsed = start.elapsed();
+    if elapsed < dur {
+        tokio::time::sleep(dur - elapsed).await;
+    }
 }
 
 static VERDICT_RE: OnceLock<Regex> = OnceLock::new();

@@ -8,9 +8,21 @@ import {
   phaseDeadlineAt,
   pleaRecordingActive,
   pleaTranscript,
+  theaterActive,
   verdictIntensity,
   verdictRemarks,
 } from './ws';
+
+function stripMarkers(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => {
+      const t = line.trimStart();
+      return !t.startsWith('VERDICT:') && !t.startsWith('INTENSITY:');
+    })
+    .join('\n')
+    .trim();
+}
 
 // Presentational read-only view served at /case — meant for the visitor /
 // accused-facing monitor. Shows the charge, instructions on what to do, the
@@ -21,9 +33,6 @@ function StateInstruction() {
     <Switch>
       <Match when={currentState() === 'idle' || currentState() === 'connected'}>
         <p class="instruction">Step up. The court will hear your case.</p>
-      </Match>
-      <Match when={currentState() === 'cooldown'}>
-        <p class="instruction muted">Court is in recess. Next case begins shortly.</p>
       </Match>
       <Match when={currentState() === 'displaying_charge'}>
         <p class="instruction">Listen carefully to the charge against you.</p>
@@ -97,16 +106,29 @@ function VerdictPanel() {
   );
 }
 
-const VERDICT_STATES = new Set(['pronouncing_verdict', 'executing_sentence', 'cooldown']);
+// Charge stays hidden once we're pronouncing/executing/cooling-down; the
+// verdict panel only reveals after TTS has actually drained on the client
+// (state advances past pronouncing_verdict on the TtsFinished round-trip).
+const CHARGE_HIDDEN_STATES = new Set(['pronouncing_verdict', 'executing_sentence']);
+// Verdict word reveals as the judge says "GUILTY!" — at pronouncing_verdict
+// entry (the server fires the Verdict display event after the theater beat).
+const VERDICT_REVEAL_STATES = new Set(['pronouncing_verdict', 'executing_sentence']);
+const DELIBERATION_VISIBLE_STATES = new Set(['deliberating', 'pronouncing_verdict']);
 
 /// Reusable inner content — used by the standalone /case fullscreen view AND
 /// embedded in the operator panel split-monitor preview.
 export function CaseContent() {
-  const showCharge = () => charge().length > 0 && !VERDICT_STATES.has(currentState());
-  const showDeliberation = () => currentState() === 'deliberating' && deliberation().length > 0;
+  const showCharge = () => charge().length > 0 && !CHARGE_HIDDEN_STATES.has(currentState());
   const showPlea = () =>
     pleaTranscript().length > 0 &&
     (currentState() === 'deliberating' || currentState() === 'transcribing');
+  const cleanedDeliberation = () => stripMarkers(deliberation());
+  // Hide the deliberation as soon as the verdict reveals — otherwise it sits
+  // below the GUILTY panel for the post-fire hold, which crowds the screen.
+  const showDeliberation = () =>
+    DELIBERATION_VISIBLE_STATES.has(currentState()) &&
+    cleanedDeliberation().length > 0 &&
+    lastVerdictGuilty() === null;
 
   return (
     <>
@@ -123,7 +145,7 @@ export function CaseContent() {
           </section>
         </Show>
 
-        <Show when={VERDICT_STATES.has(currentState())}>
+        <Show when={VERDICT_REVEAL_STATES.has(currentState())}>
           <VerdictPanel />
         </Show>
 
@@ -135,7 +157,7 @@ export function CaseContent() {
         </Show>
 
         <Show when={showDeliberation()}>
-          <section class="deliberation-block">{deliberation()}</section>
+          <section class="deliberation-block">{cleanedDeliberation()}</section>
         </Show>
 
         <StateInstruction />
@@ -150,7 +172,7 @@ export default function CaseView() {
     connect({ readOnly: true });
   });
   return (
-    <div class="case-view">
+    <div class={`case-view ${theaterActive() ? 'theater-active' : ''}`}>
       <CaseContent />
     </div>
   );

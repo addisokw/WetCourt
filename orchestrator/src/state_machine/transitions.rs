@@ -131,29 +131,42 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
         (PronouncingVerdict { verdict, .. }, TtsFinished) => {
             let mut cmds = sentence_commands(&verdict, cfg);
             // Watchdog: if no HardwareAck/Error arrives (e.g. MCU disconnected
-            // with the TCP driver), the Tick handler below escapes to Cooldown.
-            let deadline = Instant::now() + Duration::from_secs(15);
+            // with the TCP driver), the Tick handler below escapes to Idle.
+            // Sized for the full sentence sequence — lights + chained squirt
+            // bursts at max intensity + ack round-trips with some headroom.
+            const SENTENCE_WATCHDOG_SECS: u64 = 60;
+            let deadline = Instant::now() + Duration::from_secs(SENTENCE_WATCHDOG_SECS);
             cmds.push(Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "executing_sentence".into(),
-                deadline_ms: 15_000,
+                deadline_ms: SENTENCE_WATCHDOG_SECS * 1000,
             }));
-            (ExecutingSentence { verdict, deadline }, cmds)
+            (ExecutingSentence { verdict, deadline, hardware_done: false }, cmds)
         }
         (s @ PronouncingVerdict { .. }, _) => (s, vec![]),
 
+        // First hardware ack — the sentence-execution hardware has finished
+        // firing. Shorten the deadline from the 60s watchdog to a cooldown
+        // hold, reset lights/panel, and flag hardware_done so subsequent acks
+        // (from the cleanup commands themselves) don't restart the cycle.
+        (ExecutingSentence { verdict, hardware_done: false, .. }, HardwareAck(_)) |
+        (ExecutingSentence { verdict, hardware_done: false, .. }, HardwareError(_)) => {
+            let deadline = Instant::now() + Duration::from_secs(cfg.trial.cooldown_secs);
+            (
+                ExecutingSentence { verdict, deadline, hardware_done: true },
+                vec![
+                    Command::Display(DisplayEvent::PhaseDeadline {
+                        phase: "executing_sentence".into(),
+                        deadline_ms: cfg.trial.cooldown_secs * 1000,
+                    }),
+                    Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
+                    Command::Hardware(HardwareCommand::Panel(PanelPattern::Idle)),
+                ],
+            )
+        }
         (ExecutingSentence { deadline, .. }, Tick) if Instant::now() >= deadline => {
-            tracing::warn!("ExecutingSentence watchdog fired — no hardware ack; advancing to Cooldown");
-            begin_cooldown(cfg)
-        }
-        (ExecutingSentence { .. }, HardwareAck(_)) | (ExecutingSentence { .. }, HardwareError(_)) => {
-            begin_cooldown(cfg)
-        }
-        (s @ ExecutingSentence { .. }, _) => (s, vec![]),
-
-        (Cooldown { until }, Tick) if Instant::now() >= until => {
             (Idle, vec![Command::Display(DisplayEvent::Idle)])
         }
-        (s @ Cooldown { .. }, _) => (s, vec![]),
+        (s @ ExecutingSentence { .. }, _) => (s, vec![]),
 
         (Error { until, .. }, Tick) if Instant::now() >= until => {
             (Idle, vec![Command::Display(DisplayEvent::Idle)])
@@ -216,29 +229,19 @@ fn begin_deliberating(charge: String, plea: String, cfg: &Config) -> (State, Vec
     )
 }
 
-fn begin_cooldown(cfg: &Config) -> (State, Vec<Command>) {
-    let until = Instant::now() + Duration::from_secs(cfg.trial.cooldown_secs);
-    (
-        State::Cooldown { until },
-        vec![
-            Command::Display(DisplayEvent::Cooldown),
-            Command::Display(DisplayEvent::PhaseDeadline {
-                phase: "cooldown".into(),
-                deadline_ms: cfg.trial.cooldown_secs * 1000,
-            }),
-            Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
-            Command::Hardware(HardwareCommand::Panel(PanelPattern::Idle)),
-        ],
-    )
-}
-
 fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
-    let mut cmds = vec![Command::Display(DisplayEvent::Verdict {
-        guilty: v.guilty,
-        intensity: v.intensity,
-        remarks: v.remarks.clone(),
-    })];
+    let mut cmds = vec![];
+    // Fallback paths (timeout / stream error) don't have an inference task in
+    // flight, so the state machine announces and speaks immediately. The
+    // inference happy path sets `pre_announced=true`; it handles its own
+    // theatre + announcement + TTS via direct `display_tx` sends, and the
+    // state machine just holds the state.
     if !v.pre_announced {
+        cmds.push(Command::Display(DisplayEvent::Verdict {
+            guilty: v.guilty,
+            intensity: v.intensity,
+            remarks: v.remarks.clone(),
+        }));
         cmds.push(Command::Speak(v.deliberation.clone()));
     }
     cmds.push(Command::Hardware(HardwareCommand::Gavel));
@@ -325,9 +328,14 @@ mod tests {
     }
 
     #[test]
-    fn cooldown_tick_returns_to_idle() {
+    fn executing_sentence_tick_past_deadline_returns_to_idle() {
         let cfg = test_cfg();
-        let (s, _) = step(State::Cooldown { until: Instant::now() }, Event::Tick, &cfg);
+        let v = fallbacks::verdicts::random(1.0);
+        let (s, _) = step(
+            State::ExecutingSentence { verdict: v, deadline: Instant::now(), hardware_done: true },
+            Event::Tick,
+            &cfg,
+        );
         assert!(matches!(s, State::Idle));
     }
 }

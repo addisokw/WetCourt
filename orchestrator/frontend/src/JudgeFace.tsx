@@ -4,6 +4,7 @@ import {
   lastTokenAt,
   lastTtsChunkAt,
   lastVerdictGuilty,
+  theaterActive,
   ttsActive,
 } from './ws';
 
@@ -148,7 +149,7 @@ export default function JudgeFace() {
   });
 
   return (
-    <section class="judge-face">
+    <section class={`judge-face mood-${mood()} ${theaterActive() ? 'theater-active' : ''}`}>
       <div class="face-stack">
         <pre class="face-noise">{noise()}</pre>
         <pre class="face-features" style={{ color: moodColor(mood()) }}>{features()}</pre>

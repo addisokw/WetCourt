@@ -40,6 +40,12 @@ export function resumeAudio() {
   ensureCtx();
 }
 
+/// Shared playback AudioContext, for things that want to mix with TTS
+/// (e.g. the deliberation-theater synth pad).
+export function getPlaybackCtx(): AudioContext {
+  return ensureCtx();
+}
+
 /// Mark the start of a TTS session so the first chunk gets a small lead-in.
 export function startTtsSession() {
   ensureCtx();

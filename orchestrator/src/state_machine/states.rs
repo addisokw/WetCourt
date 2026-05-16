@@ -27,8 +27,7 @@ pub enum State {
     Transcribing { charge: String, audio: Vec<u8>, started_at: Instant },
     Deliberating { charge: String, plea: String, started_at: Instant },
     PronouncingVerdict { verdict: Verdict, audio_done: bool },
-    ExecutingSentence { verdict: Verdict, deadline: Instant },
-    Cooldown { until: Instant },
+    ExecutingSentence { verdict: Verdict, deadline: Instant, hardware_done: bool },
     Error { message: String, until: Instant },
 }
 
@@ -44,7 +43,6 @@ impl State {
             State::Deliberating { .. } => "deliberating",
             State::PronouncingVerdict { .. } => "pronouncing_verdict",
             State::ExecutingSentence { .. } => "executing_sentence",
-            State::Cooldown { .. } => "cooldown",
             State::Error { .. } => "error",
         }
     }

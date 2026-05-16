@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
+import { startTheater, stopTheater } from './theater';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -30,6 +31,10 @@ export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolea
 // out (or 0 if the active state has no deadline).
 export const [phaseDeadlineAt, setPhaseDeadlineAt] = createSignal<number>(0);
 export const [phaseDeadlineLabel, setPhaseDeadlineLabel] = createSignal<string>('');
+// Deliberation theater is on between TheaterStart and TheaterEnd display
+// events — independent of any state. Drives the pad (operator audio) and
+// the dim/pulse visuals on every view.
+export const [theaterActive, setTheaterActive] = createSignal<boolean>(false);
 
 const STATE_LABEL: Record<string, string> = {
   reset: 'idle',
@@ -41,7 +46,6 @@ const STATE_LABEL: Record<string, string> = {
   transcript_ready: 'deliberating',
   verdict: 'pronouncing_verdict',
   execute_sentence: 'executing_sentence',
-  cooldown: 'cooldown',
 };
 
 let socket: WebSocket | null = null;
@@ -61,6 +65,22 @@ let readOnly = false;
 
 export function connect(opts: { readOnly?: boolean } = {}) {
   readOnly = !!opts.readOnly;
+  // Tear down any prior socket so we don't accumulate listeners. Without this,
+  // a Vite HMR reload or accidental double-mount stacks multiple live sockets
+  // — every broadcast event then fires its handler N times, and signals like
+  // `deliberation` (which use `prev => prev + ev.text`) get appended N times
+  // per token. (Operator `/ws` is single-client so it self-protects; the
+  // multi-viewer `/ws/view` is the one that needs explicit cleanup.)
+  if (socket) {
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onclose = null;
+    socket.onerror = null;
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close();
+    }
+    socket = null;
+  }
   const path = readOnly ? '/ws/view' : '/ws';
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
   socket = new WebSocket(url);
@@ -116,6 +136,10 @@ function handleEvent(ev: DisplayEvent) {
       setPleaRecordingActive(false);
       setPhaseDeadlineAt(0);
       setPhaseDeadlineLabel('');
+      if (theaterActive()) {
+        setTheaterActive(false);
+        if (!readOnly) stopTheater();
+      }
       nextBinaryIsAudio = false;
       break;
     case 'show_charge':
@@ -155,6 +179,14 @@ function handleEvent(ev: DisplayEvent) {
     case 'phase_deadline':
       setPhaseDeadlineLabel(String(ev.phase ?? ''));
       setPhaseDeadlineAt(Date.now() + Number(ev.deadline_ms ?? 0));
+      break;
+    case 'theater_start':
+      setTheaterActive(true);
+      if (!readOnly) startTheater();
+      break;
+    case 'theater_end':
+      setTheaterActive(false);
+      if (!readOnly) stopTheater();
       break;
     case 'deliberation_complete':
       // No-op; deliberation buffer holds the full text.
