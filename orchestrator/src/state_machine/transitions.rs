@@ -50,17 +50,9 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
         (s @ GeneratingCharge { .. }, _) => (s, vec![]),
 
         (DisplayingCharge { charge, until }, Tick) if Instant::now() >= until => {
-            let deadline = Instant::now() + Duration::from_secs(cfg.trial.plea_window_secs);
-            (
-                AwaitingPlea { charge, deadline },
-                vec![
-                    Command::Display(DisplayEvent::StartPleaRecording {
-                        deadline_ms: cfg.trial.plea_window_secs * 1000,
-                    }),
-                    Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
-                ],
-            )
+            begin_awaiting_plea(charge, cfg)
         }
+        (DisplayingCharge { charge, .. }, OperatorPlea) => begin_awaiting_plea(charge, cfg),
         (s @ DisplayingCharge { .. }, _) => (s, vec![]),
 
         (AwaitingPlea { charge, .. }, PleaAudioReceived(audio)) => begin_transcribing(charge, audio, cfg),
@@ -68,6 +60,7 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
             begin_flushing_plea(charge, cfg)
         }
         (AwaitingPlea { charge, .. }, PleaTimeout) => begin_flushing_plea(charge, cfg),
+        (AwaitingPlea { charge, .. }, OperatorPlea) => begin_flushing_plea(charge, cfg),
         (s @ AwaitingPlea { .. }, _) => (s, vec![]),
 
         // Frontend is racing to ship its recorded blob after the deadline; take
@@ -143,6 +136,19 @@ fn begin_displaying_charge(text: String, cfg: &Config) -> (State, Vec<Command>) 
         vec![
             Command::Display(DisplayEvent::ShowCharge { text: text.clone() }),
             Command::Speak(text),
+        ],
+    )
+}
+
+fn begin_awaiting_plea(charge: String, cfg: &Config) -> (State, Vec<Command>) {
+    let deadline = Instant::now() + Duration::from_secs(cfg.trial.plea_window_secs);
+    (
+        State::AwaitingPlea { charge, deadline },
+        vec![
+            Command::Display(DisplayEvent::StartPleaRecording {
+                deadline_ms: cfg.trial.plea_window_secs * 1000,
+            }),
+            Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
         ],
     )
 }
@@ -267,6 +273,38 @@ mod tests {
             assert_eq!(c, charge);
             assert_eq!(plea, "i did not");
         } else { panic!("not deliberating"); }
+    }
+
+    #[test]
+    fn operator_plea_from_displaying_charge_jumps_to_awaiting_plea() {
+        let cfg = test_cfg();
+        let until = Instant::now() + Duration::from_secs(60); // not yet expired
+        let (s, cmds) = step(
+            State::DisplayingCharge { charge: "c".into(), until },
+            Event::OperatorPlea, &cfg);
+        assert!(matches!(s, State::AwaitingPlea { .. }));
+        assert!(cmds.iter().any(|c|
+            matches!(c, Command::Display(DisplayEvent::StartPleaRecording { .. }))));
+    }
+
+    #[test]
+    fn operator_plea_from_awaiting_plea_starts_flush() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(
+            State::AwaitingPlea { charge: "c".into(), deadline: Instant::now() + Duration::from_secs(60) },
+            Event::OperatorPlea, &cfg);
+        assert!(matches!(s, State::FlushingPlea { .. }));
+        assert!(cmds.iter().any(|c|
+            matches!(c, Command::Display(DisplayEvent::StopPleaRecording))));
+    }
+
+    #[test]
+    fn operator_plea_in_other_state_is_noop() {
+        let cfg = test_cfg();
+        let s = State::Cooldown { until: Instant::now() + Duration::from_secs(60) };
+        let (s2, cmds) = step(s, Event::OperatorPlea, &cfg);
+        assert!(matches!(s2, State::Cooldown { .. }));
+        assert!(cmds.is_empty());
     }
 
     #[test]

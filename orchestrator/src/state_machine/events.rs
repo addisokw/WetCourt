@@ -4,6 +4,12 @@ use super::states::Verdict;
 pub enum Event {
     OperatorStart,
     OperatorEmergencyStop,
+    /// Context-aware "Plea" trigger from the operator (UE hotkey, browser,
+    /// future hardware button): from DisplayingCharge it cuts the charge-
+    /// display dwell short and starts plea capture; from AwaitingPlea it
+    /// ends plea capture early (same path as PleaTimeout). Ignored in any
+    /// other state.
+    OperatorPlea,
 
     ChargeReady(String),
     #[allow(dead_code)]

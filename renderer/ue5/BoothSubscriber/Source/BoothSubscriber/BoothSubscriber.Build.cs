@@ -18,9 +18,14 @@ public class BoothSubscriber : ModuleRules
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "WebSockets",
+            "HTTP",
             "Json",
             "JsonUtilities",
             "AudioMixer",
+            "InputCore",
+            "Slate",
+            "SlateCore",
+            "ApplicationCore",
         });
 
         // NVIDIA ACE Unreal Plugin (NV_ACE_Reference v2.5.0-rc3 verified).

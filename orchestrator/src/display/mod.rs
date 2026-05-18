@@ -43,6 +43,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ws", get(ws_handler))
         .route("/operator/start", post(operator_start))
         .route("/operator/estop", post(operator_estop))
+        .route("/operator/plea", post(operator_plea))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -61,6 +62,14 @@ async fn operator_start(AxumState(s): AxumState<AppState>) -> impl IntoResponse 
 async fn operator_estop(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     info!("operator: estop");
     if s.event_tx.send(Event::OperatorEmergencyStop).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
+    }
+    (StatusCode::NO_CONTENT, "")
+}
+
+async fn operator_plea(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    info!("operator: plea");
+    if s.event_tx.send(Event::OperatorPlea).await.is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
     }
     (StatusCode::NO_CONTENT, "")
