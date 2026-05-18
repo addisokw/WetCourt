@@ -1,0 +1,40 @@
+common:
+  # Single-stream for 8 GB VRAM co-resident with UE5 on RTX 4070 Laptop.
+  # Default (10) on the RTX 4090 profile pushed VRAM to 7855 / 8188 MiB and
+  # left nothing for UE5 + MetaHuman.
+  stream_number: 1
+
+  add_silence_padding_after_audio: false
+  silence_padding_duration_second: 1.5
+
+logging:
+  log_level: info
+  fps_logging_interval_second: 1
+
+endpoints:
+  use_bidirectional: true
+
+  bidirectional:
+    server:
+      url: 0.0.0.0:52000
+      secure_mode: "disabled"
+      certificate_path: ""
+      key_path: ""
+      ca_path: ""
+
+  unidirectional:
+    server:
+      url: 0.0.0.0:50000
+    client:
+      url: 0.0.0.0:51000
+
+telemetry:
+  service_name: audio2face
+  metrics_enabled: false
+  traces_enabled: false
+  metrics_exporter: prometheus
+  otel_metric_export_interval: 60000
+  otel_metric_export_timeout: 30000
+  otlp_http_metrics_endpoint: http://localhost:4318/v1/metrics
+  otlp_http_traces_endpoint: http://localhost:4318/v1/traces
+  prometheus_endpoint: 0.0.0.0:9464

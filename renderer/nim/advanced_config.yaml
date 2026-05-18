@@ -1,0 +1,55 @@
+input_sanitization:
+  max_len_uuid: 50
+  max_sample_rate: 144000
+  min_sample_rate: 16000
+  max_processing_duration_second: 300
+  max_audio_buffer_size_second: 10
+  max_audio_clip_size_second: 300
+  max_wait_time_idle_ms: 30000
+  low_fps: 29
+  low_fps_max_duration_second: 7
+
+garbage_collector:
+  enabled: false
+  interval_run_second: 10
+  max_size_stored_data_second: 60
+
+pipeline_parameters:
+  queue_size_after_a2e: 1
+  queue_size_after_a2f: 300
+  queue_size_after_streammux: 1
+  burst_mode: false
+  blendshape_streaming_fps: 90
+  streammux:
+    adaptive_batching: 0
+    overall_min_fps_n: 40
+    overall_min_fps_d: 1
+
+a2f:
+  temporal_smoothing: true
+  device_id: 0
+  use_gpu_solver: true
+
+a2e:
+  inference_interval: 10
+  device_id: 0
+
+# Force bs=1 engines for the 8 GB RTX 4070 Laptop. Default opt=10/max=128
+# (multiplied by stream_number) is what the pre-built RTX 4090 profile costs
+# us — ~7.8 GB on this card. Building local engines at bs=1 trades multi-
+# user throughput we do not need (single kiosk = one stream) for VRAM we do.
+trt_model_generation:
+  a2e:
+    precision: "fp32"
+    min_shape: 1
+    optimal_shape: 1
+    maximum_shape: 1
+  a2f:
+    precision: "fp16"
+    min_shape: 1
+    optimal_shape: 1
+    maximum_shape: 1
+
+resampling:
+  chunk_size: 640
+  quality: 1.0
