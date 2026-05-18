@@ -76,9 +76,15 @@ private:
     TUniquePtr<FBoothWSClient> WSClient;
     FResample24To16 Resampler;
 
-    // Buffer of bytes received before the playback delay has elapsed in a
-    // new session; flushed in one shot at delay+0, then bypassed.
+    // Buffer of aligned bytes received during the playback preroll window;
+    // flushed in one shot at delay+0, then bypassed.
     TArray<uint8> SessionStartBuffer;
     bool bSessionPrerollActive = false;
     FTimerHandle PrerollTimer;
+
+    // Carries 0 or 1 byte across WS frames so int16-stride alignment holds
+    // across arbitrarily chunked PCM (the orchestrator's last chunk per
+    // session is frequently odd-byte). Mirrors the operator browser's
+    // pcmResidue in orchestrator/frontend/src/audio.ts.
+    TArray<uint8> AudioResidue;
 };

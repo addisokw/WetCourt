@@ -76,6 +76,9 @@ void FBoothWSClient::Connect()
     Socket->OnConnectionError().AddRaw(this, &FBoothWSClient::HandleConnectionError);
     Socket->OnClosed().AddRaw(this, &FBoothWSClient::HandleClosed);
     Socket->OnMessage().AddRaw(this, &FBoothWSClient::HandleTextMessage);
+    // UE 5.7's libwebsockets backend doesn't dispatch OnBinaryMessage in
+    // practice — every message lands on OnRawMessage regardless of opcode.
+    // We filter text vs. binary by content: text frames start with `{"type":`.
     Socket->OnRawMessage().AddRaw(this, &FBoothWSClient::HandleRawMessage);
 
     UE_LOG(LogBoothWS, Log, TEXT("connecting to %s"), *Url);
@@ -177,22 +180,60 @@ void FBoothWSClient::DispatchEvent(const FString& Type, const TSharedPtr<FJsonOb
     }
 }
 
+bool FBoothWSClient::LooksLikeJsonEvent(const uint8* Data, SIZE_T Size)
+{
+    // The orchestrator's DisplayEvent enum serializes as `{"type":"..."}`
+    // with the `type` discriminator first. Random PCM s16le bytes matching
+    // this 8-character prefix in the right positions is statistically zero
+    // (~1 in 2^64 per frame), so this filter is safe for separating text
+    // and binary on UE 5.7's libwebsockets backend (which broadcasts both
+    // to OnRawMessage).
+    if (Size < 8 || Data[0] != '{')
+    {
+        return false;
+    }
+    const SIZE_T MaxScan = FMath::Min<SIZE_T>(Size - 6, 16);
+    for (SIZE_T i = 1; i <= MaxScan; ++i)
+    {
+        if (Data[i]   == '"' && Data[i+1] == 't' && Data[i+2] == 'y' &&
+            Data[i+3] == 'p' && Data[i+4] == 'e' && Data[i+5] == '"')
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void FBoothWSClient::HandleRawMessage(const void* Data, SIZE_T Size, SIZE_T BytesRemaining)
 {
-    if (!bAudioStreaming)
+    const uint8* Bytes = static_cast<const uint8*>(Data);
+    if (BinaryBuffer.Num() == 0 && LooksLikeJsonEvent(Bytes, Size))
     {
-        return; // binary outside an audio session — ignore
+        // Text frame — OnMessage will (or has) handled it. Skip the raw
+        // echo so the JSON bytes don't get pipelined into the audio queue.
+        return;
     }
+    UE_LOG(LogBoothWS, Verbose, TEXT("raw binary: size=%llu remaining=%llu"),
+        static_cast<uint64>(Size), static_cast<uint64>(BytesRemaining));
+
+    // Note: no `bAudioStreaming` gate. In UE 5.7's libwebsockets backend,
+    // all text events for a tick are dispatched before any binary, so
+    // tts_end always lands before its preceding audio bytes. Gating on
+    // tts_audio/tts_end would drop every byte of PCM. The actor handles
+    // session boundaries (resampler reset, preroll) on the JSON timeline
+    // independently; audio just streams into the procedural wave as it
+    // arrives.
+
     if (BinaryBuffer.Num() == 0 && BytesRemaining == 0)
     {
         // Hot path: whole message in one shot. Skip the buffer copy.
         if (OnAudioFrame && Size > 0)
         {
-            OnAudioFrame(static_cast<const uint8*>(Data), static_cast<int32>(Size));
+            OnAudioFrame(Bytes, static_cast<int32>(Size));
         }
         return;
     }
-    BinaryBuffer.Append(static_cast<const uint8*>(Data), static_cast<int32>(Size));
+    BinaryBuffer.Append(Bytes, static_cast<int32>(Size));
     if (BytesRemaining == 0)
     {
         if (OnAudioFrame && BinaryBuffer.Num() > 0)

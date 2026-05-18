@@ -5,6 +5,7 @@
 #include "Components/AudioComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Sound/SoundWaveProcedural.h"
 #include "TimerManager.h"
 
@@ -30,16 +31,41 @@ void ABoothFaceActor::BeginPlay()
     ProceduralWave->SetSampleRate(TtsSampleRate);
     ProceduralWave->NumChannels = NumChannels;
     ProceduralWave->Duration = INDEFINITELY_LOOPING_DURATION;
-    ProceduralWave->SoundGroup = SOUNDGROUP_Voice;
-    ProceduralWave->bLooping = false;
+    ProceduralWave->SoundGroup = SOUNDGROUP_Default;
+    // Keep the audio engine pulling from our queue even when it's
+    // momentarily empty between TTS chunks; without this the wave can
+    // finish on the first underrun and we never recover.
+    ProceduralWave->bLooping = true;
+    ProceduralWave->Pitch = 1.0f;
+    ProceduralWave->Volume = 1.0f;
 
-    AudioComponent = NewObject<UAudioComponent>(this);
-    AudioComponent->bAutoActivate = false;
-    AudioComponent->SetSound(ProceduralWave);
-    AudioComponent->RegisterComponent();
     if (!bMuteAudio)
     {
-        AudioComponent->Play();
+        // UGameplayStatics::SpawnSound2D is the canonical UE 5 path for a
+        // procedural / streaming 2D sound — it auto-registers with the
+        // audio mixer, sets up the component correctly, and avoids the
+        // "wave was created but the mixer never picked it up" failure
+        // mode we saw with manual NewObject<UAudioComponent>. We keep a
+        // reference so we can Stop() in EndPlay.
+        AudioComponent = UGameplayStatics::SpawnSound2D(
+            this,
+            ProceduralWave,
+            /*VolumeMultiplier=*/ 1.0f,
+            /*PitchMultiplier=*/ 1.0f,
+            /*StartTime=*/ 0.0f,
+            /*ConcurrencySettings=*/ nullptr,
+            /*bPersistAcrossLevelTransition=*/ false,
+            /*bAutoDestroy=*/ false);
+        if (AudioComponent)
+        {
+            AudioComponent->bAllowSpatialization = false;
+            AudioComponent->bIsUISound = true;
+            UE_LOG(LogBoothFace, Log, TEXT("audio component spawned (2D, non-spatial)"));
+        }
+        else
+        {
+            UE_LOG(LogBoothFace, Warning, TEXT("SpawnSound2D returned null"));
+        }
     }
 
     WSClient = MakeUnique<FBoothWSClient>();
@@ -71,10 +97,19 @@ void ABoothFaceActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ABoothFaceActor::HandleAudioSessionStart(const FString& Format)
 {
-    UE_LOG(LogBoothFace, Log, TEXT("audio session start: format=%s"), *Format);
+    const int32 RemainingInQueue = ProceduralWave ? ProceduralWave->GetAvailableAudioByteCount() : 0;
+    UE_LOG(LogBoothFace, Log, TEXT("audio session start: format=%s, queue=%d bytes"), *Format, RemainingInQueue);
     Resampler.Reset();
     SessionStartBuffer.Reset();
+    AudioResidue.Reset();
     bSessionPrerollActive = AudioPlaybackDelaySecs > 0.0f;
+
+    // (Re-)start the AudioComponent so the wave is actively pulling from
+    // our queue when chunks land. Play() is idempotent.
+    if (!bMuteAudio && AudioComponent)
+    {
+        AudioComponent->Play();
+    }
 
 #if WITH_ACE_RUNTIME
     // TODO(renderer-pc): open a new ACE A2F-3D streaming session here.
@@ -99,13 +134,32 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
         return;
     }
 
-    // Branch 1 — resample to 16 kHz and feed to A2F for blendshapes.
-    if (Size % 2 != 0)
+    // Concatenate any prior odd-byte residue with this frame, then split
+    // into an int16-aligned prefix + (optional) one-byte residue carried
+    // to the next call. Without this, the orchestrator's tail chunk per
+    // session (frequently odd-byte) trips the (Size % SampleByteSize)==0
+    // ensure inside USoundWaveProcedural::QueueAudio.
+    TArray<uint8> Aligned;
+    Aligned.Reserve(AudioResidue.Num() + Size);
+    Aligned.Append(AudioResidue);
+    Aligned.Append(Data, Size);
+    AudioResidue.Reset();
+
+    const int32 EvenLen = Aligned.Num() & ~1;
+    if (EvenLen == 0)
     {
-        UE_LOG(LogBoothFace, Warning, TEXT("odd-byte audio frame (%d); dropping last byte"), Size);
+        // Less than two bytes accumulated; keep all of it as residue.
+        AudioResidue = MoveTemp(Aligned);
+        return;
     }
-    const int32 NumSamples24k = Size / 2;
-    const int16* Samples24k = reinterpret_cast<const int16*>(Data);
+    if (Aligned.Num() & 1)
+    {
+        AudioResidue.Add(Aligned[Aligned.Num() - 1]);
+    }
+
+    // Branch 1 — resample to 16 kHz and feed to A2F for blendshapes.
+    const int32 NumSamples24k = EvenLen / 2;
+    const int16* Samples24k = reinterpret_cast<const int16*>(Aligned.GetData());
 
     TArray<int16> Samples16k;
     Samples16k.Reserve((NumSamples24k * 2) / 3 + 4);
@@ -129,11 +183,13 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
     }
     if (bSessionPrerollActive)
     {
-        SessionStartBuffer.Append(Data, Size);
+        SessionStartBuffer.Append(Aligned.GetData(), EvenLen);
     }
     else
     {
-        ProceduralWave->QueueAudio(Data, Size);
+        ProceduralWave->QueueAudio(Aligned.GetData(), EvenLen);
+        UE_LOG(LogBoothFace, Verbose, TEXT("queued %d bytes; wave queue=%d"),
+            EvenLen, ProceduralWave->GetAvailableAudioByteCount());
     }
 }
 
@@ -163,7 +219,10 @@ void ABoothFaceActor::FlushBufferedAudio()
     bSessionPrerollActive = false;
     if (ProceduralWave && !bMuteAudio && SessionStartBuffer.Num() > 0)
     {
-        ProceduralWave->QueueAudio(SessionStartBuffer.GetData(), SessionStartBuffer.Num());
+        const int32 N = SessionStartBuffer.Num();
+        ProceduralWave->QueueAudio(SessionStartBuffer.GetData(), N);
+        UE_LOG(LogBoothFace, Log, TEXT("preroll flush: %d bytes queued; wave queue=%d"),
+            N, ProceduralWave->GetAvailableAudioByteCount());
     }
     SessionStartBuffer.Reset();
 }

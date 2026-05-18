@@ -47,6 +47,7 @@ private:
     void HandleClosed(int32 StatusCode, const FString& Reason, bool bWasClean);
     void HandleTextMessage(const FString& Message);
     void HandleRawMessage(const void* Data, SIZE_T Size, SIZE_T BytesRemaining);
+    static bool LooksLikeJsonEvent(const uint8* Data, SIZE_T Size);
 
     void ScheduleReconnect();
     bool TickReconnect(float DeltaTime);

@@ -1,0 +1,5 @@
+# UE compile outputs landing here via the junction from
+# C:\Users\Strix-4070\UnrealProjects\BoothRenderer\Plugins\BoothSubscriber\
+# (where this dir is symlinked during integration testing).
+Binaries/
+Intermediate/
