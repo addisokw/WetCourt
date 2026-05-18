@@ -24,9 +24,10 @@ public class BoothSubscriber : ModuleRules
         });
 
         // NVIDIA ACE Unreal Plugin module (added on the renderer PC once the
-        // ACE plugin is installed; the BoothFaceActor's ACE calls compile
-        // out via #if BOOTH_ACE_AVAILABLE until then). Uncomment when ready:
-        //
+        // ACE plugin is installed; BoothFaceActor's ACE calls are gated by
+        // WITH_ACE_RUNTIME and compile out when this is 0). Flip both lines
+        // to 1 + add the module deps once ACE is installed.
+        PublicDefinitions.Add("WITH_ACE_RUNTIME=0");
         // PrivateDependencyModuleNames.AddRange(new string[]
         // {
         //     "ACERuntime",
