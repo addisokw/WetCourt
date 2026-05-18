@@ -9,26 +9,21 @@
 
 #include "BoothFaceActor.generated.h"
 
-class UAudioComponent;
-class USoundWaveProcedural;
+class UACEAudioCurveSourceComponent;
 
 /**
  * Actor that subscribes to the WetCourt orchestrator and drives a
- * MetaHuman face.
+ * MetaHuman face via NVIDIA ACE Audio2Face-3D.
  *
- * Three streams flow on each TTS utterance:
+ * Per utterance:
+ *   1. Orchestrator -> WS binary frames (24 kHz s16le mono).
+ *   2. Resampled to 16 kHz -> NVIDIA ACE A2F-3D NIM (gRPC) for blendshapes.
+ *   3. Original 24 kHz passthrough -> ACE plays it synced with the curves.
  *
- *   1. Orchestrator -> WS binary (24 kHz s16le mono).
- *   2. Resampled to 16 kHz -> fed to NVIDIA ACE A2F-3D NIM for blendshapes.
- *   3. Original 24 kHz queued to a USoundWaveProcedural for booth speaker
- *      output, delayed by ~p99 NIM latency so blendshapes arrive in time.
- *
- * Place one of these in the booth scene and parent a MetaHuman to it (or
- * reference the MetaHuman's face anim BP and wire ACE Face Animation node).
- *
- * The ACE plugin calls are wrapped in `#if WITH_ACE_RUNTIME` and disabled
- * by default; enable on the renderer PC once the NVIDIA ACE Unreal Plugin
- * is installed and its module is added to BoothSubscriber.Build.cs.
+ * The actor owns a UACEAudioCurveSourceComponent at its root; ACE feeds
+ * audio and blendshape curves into that component. Wire a MetaHuman's
+ * face anim BP to the "Apply ACE Face Animation" anim node referencing
+ * this actor's curve source for lipsync.
  */
 UCLASS()
 class BOOTHSUBSCRIBER_API ABoothFaceActor : public AActor
@@ -42,17 +37,24 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Booth")
     FString OrchestratorWsUrl = TEXT("ws://10.10.1.221:8080/ws");
 
-    /**
-     * Hold each session's first audio for this long before starting
-     * playback, so A2F blendshapes have arrived by then. p99 NIM latency
-     * was measured at ~32 ms; 50 ms is a safe production value.
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Booth", meta=(ClampMin="0.0", ClampMax="0.5"))
-    float AudioPlaybackDelaySecs = 0.05f;
-
-    /** Disable audio playback (e.g. when this box is dev-only, not booth). */
+    /** Mute the ACE curve source's audio output (e.g. dev box, not booth). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Booth")
     bool bMuteAudio = false;
+
+    /**
+     * Audio2Face-3D server URL. Default points at the A2F-3D NIM running
+     * on this same box (Strix-4070 dev setup). The NIM listens on 52000.
+     * Override per-instance for production / remote NIM hosts.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Booth|ACE")
+    FString A2FUrl = TEXT("http://localhost:52000");
+
+    /**
+     * Audio2Face-3D provider name. The remote-via-gRPC provider that
+     * ships with the NV_ACE_Reference plugin registers as "RemoteA2F".
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Booth|ACE")
+    FName A2FProviderName = FName(TEXT("RemoteA2F"));
 
 protected:
     virtual void BeginPlay() override;
@@ -65,26 +67,24 @@ private:
     void HandleDisplayEvent(const FString& Type, const TSharedPtr<FJsonObject>& Event);
     void HandleConnectionChanged(bool bConnected);
 
-    void FlushBufferedAudio();
-
-    UPROPERTY()
-    TObjectPtr<USoundWaveProcedural> ProceduralWave;
-
-    UPROPERTY()
-    TObjectPtr<UAudioComponent> AudioComponent;
-
     TUniquePtr<FBoothWSClient> WSClient;
     FResample24To16 Resampler;
-
-    // Buffer of aligned bytes received during the playback preroll window;
-    // flushed in one shot at delay+0, then bypassed.
-    TArray<uint8> SessionStartBuffer;
-    bool bSessionPrerollActive = false;
-    FTimerHandle PrerollTimer;
 
     // Carries 0 or 1 byte across WS frames so int16-stride alignment holds
     // across arbitrarily chunked PCM (the orchestrator's last chunk per
     // session is frequently odd-byte). Mirrors the operator browser's
     // pcmResidue in orchestrator/frontend/src/audio.ts.
     TArray<uint8> AudioResidue;
+
+    // Curve-source component receives audio + blendshape curves from the
+    // ACE provider; doubles as the root SceneComponent. Replace later
+    // with a MetaHuman that has the "Apply ACE Face Animation" anim node
+    // referencing this component for end-to-end lipsync.
+    UPROPERTY()
+    TObjectPtr<UACEAudioCurveSourceComponent> AceCurveSource;
+
+    // Current open A2F-3D stream (lifecycle: tts_audio -> CreateA2FStream,
+    // tts_end -> EndOutgoingStream). Plugin-owned IA2FProvider::IA2FStream*;
+    // stored as void* so the header doesn't need to include A2FProvider.h.
+    void* AceStreamPtr = nullptr;
 };

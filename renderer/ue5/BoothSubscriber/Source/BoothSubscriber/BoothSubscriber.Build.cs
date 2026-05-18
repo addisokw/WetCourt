@@ -23,15 +23,17 @@ public class BoothSubscriber : ModuleRules
             "AudioMixer",
         });
 
-        // NVIDIA ACE Unreal Plugin module (added on the renderer PC once the
-        // ACE plugin is installed; BoothFaceActor's ACE calls are gated by
-        // WITH_ACE_RUNTIME and compile out when this is 0). Flip both lines
-        // to 1 + add the module deps once ACE is installed.
-        PublicDefinitions.Add("WITH_ACE_RUNTIME=0");
-        // PrivateDependencyModuleNames.AddRange(new string[]
-        // {
-        //     "ACERuntime",
-        //     "ACEAudio2Face",
-        // });
+        // NVIDIA ACE Unreal Plugin (NV_ACE_Reference v2.5.0-rc3 verified).
+        // Real module names from its .uplugin — different from my draft
+        // guesses. ACECore = IA2FProvider abstraction + types; ACERuntime
+        // = UACEAudioCurveSourceComponent + Blueprint Library; A2FCommon
+        // = shared parameter types.
+        PublicDefinitions.Add("WITH_ACE_RUNTIME=1");
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "ACECore",
+            "ACERuntime",
+            "A2FCommon",
+        });
     }
 }

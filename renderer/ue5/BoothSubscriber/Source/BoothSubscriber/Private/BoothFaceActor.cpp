@@ -2,12 +2,15 @@
 
 #include "BoothFaceActor.h"
 
-#include "Components/AudioComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Sound/SoundWaveProcedural.h"
-#include "TimerManager.h"
+
+#if WITH_ACE_RUNTIME
+#include "A2FProvider.h"
+#include "ACEAudioCurveSourceComponent.h"
+#include "ACEBlueprintLibrary.h"
+#include "ACETypes.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogBoothFace, Log, All);
 
@@ -27,46 +30,31 @@ void ABoothFaceActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    ProceduralWave = NewObject<USoundWaveProcedural>(this);
-    ProceduralWave->SetSampleRate(TtsSampleRate);
-    ProceduralWave->NumChannels = NumChannels;
-    ProceduralWave->Duration = INDEFINITELY_LOOPING_DURATION;
-    ProceduralWave->SoundGroup = SOUNDGROUP_Default;
-    // Keep the audio engine pulling from our queue even when it's
-    // momentarily empty between TTS chunks; without this the wave can
-    // finish on the first underrun and we never recover.
-    ProceduralWave->bLooping = true;
-    ProceduralWave->Pitch = 1.0f;
-    ProceduralWave->Volume = 1.0f;
+#if WITH_ACE_RUNTIME
+    // Curve-source component plays the orchestrator's audio (via its
+    // internal AudioComponent) AND surfaces blendshape curves for an
+    // anim BP to consume. Attached as the actor root so it has a world
+    // transform — required by SceneComponent base class even though we
+    // don't use 3D positioning here.
+    AceCurveSource = NewObject<UACEAudioCurveSourceComponent>(this, TEXT("AceCurveSource"));
+    SetRootComponent(AceCurveSource);
+    AceCurveSource->RegisterComponent();
+    AceCurveSource->Volume = bMuteAudio ? 0.0f : 1.0f;
 
-    if (!bMuteAudio)
-    {
-        // UGameplayStatics::SpawnSound2D is the canonical UE 5 path for a
-        // procedural / streaming 2D sound — it auto-registers with the
-        // audio mixer, sets up the component correctly, and avoids the
-        // "wave was created but the mixer never picked it up" failure
-        // mode we saw with manual NewObject<UAudioComponent>. We keep a
-        // reference so we can Stop() in EndPlay.
-        AudioComponent = UGameplayStatics::SpawnSound2D(
-            this,
-            ProceduralWave,
-            /*VolumeMultiplier=*/ 1.0f,
-            /*PitchMultiplier=*/ 1.0f,
-            /*StartTime=*/ 0.0f,
-            /*ConcurrencySettings=*/ nullptr,
-            /*bPersistAcrossLevelTransition=*/ false,
-            /*bAutoDestroy=*/ false);
-        if (AudioComponent)
-        {
-            AudioComponent->bAllowSpatialization = false;
-            AudioComponent->bIsUISound = true;
-            UE_LOG(LogBoothFace, Log, TEXT("audio component spawned (2D, non-spatial)"));
-        }
-        else
-        {
-            UE_LOG(LogBoothFace, Warning, TEXT("SpawnSound2D returned null"));
-        }
-    }
+    // Configure the gRPC endpoint for the A2F-3D NIM.
+    FACEConnectionInfo ConnectionInfo;
+    ConnectionInfo.DestURL = A2FUrl;
+    UACEBlueprintLibrary::SetA2XConnectionInfo(ConnectionInfo, A2FProviderName);
+
+    // Pre-warm the gRPC connection so the first utterance's tts_end
+    // doesn't beat the connection establishment. Without this, SID 0
+    // closes its stream before any audio is sent and the NIM logs
+    // "Audio2Face inference instance not provided".
+    UACEBlueprintLibrary::AllocateA2F3DResources(A2FProviderName);
+
+    UE_LOG(LogBoothFace, Log, TEXT("ACE: configured provider %s -> %s (pre-warmed)"),
+        *A2FProviderName.ToString(), *A2FUrl);
+#endif
 
     WSClient = MakeUnique<FBoothWSClient>();
     WSClient->OnAudioSessionStart = [this](const FString& Fmt) { HandleAudioSessionStart(Fmt); };
@@ -79,52 +67,74 @@ void ABoothFaceActor::BeginPlay()
 
 void ABoothFaceActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    if (PrerollTimer.IsValid() && GetWorldTimerManager().IsTimerActive(PrerollTimer))
-    {
-        GetWorldTimerManager().ClearTimer(PrerollTimer);
-    }
     if (WSClient.IsValid())
     {
         WSClient->Shutdown();
         WSClient.Reset();
     }
-    if (AudioComponent)
+#if WITH_ACE_RUNTIME
+    if (AceStreamPtr)
     {
-        AudioComponent->Stop();
+        if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
+        {
+            Provider->EndOutgoingStream(static_cast<IA2FProvider::IA2FStream*>(AceStreamPtr));
+        }
+        AceStreamPtr = nullptr;
     }
+    if (AceCurveSource)
+    {
+        AceCurveSource->Stop();
+    }
+#endif
     Super::EndPlay(EndPlayReason);
 }
 
 void ABoothFaceActor::HandleAudioSessionStart(const FString& Format)
 {
-    const int32 RemainingInQueue = ProceduralWave ? ProceduralWave->GetAvailableAudioByteCount() : 0;
-    UE_LOG(LogBoothFace, Log, TEXT("audio session start: format=%s, queue=%d bytes"), *Format, RemainingInQueue);
+    UE_LOG(LogBoothFace, Log, TEXT("audio session start: format=%s"), *Format);
     Resampler.Reset();
-    SessionStartBuffer.Reset();
     AudioResidue.Reset();
-    bSessionPrerollActive = AudioPlaybackDelaySecs > 0.0f;
-
-    // (Re-)start the AudioComponent so the wave is actively pulling from
-    // our queue when chunks land. Play() is idempotent.
-    if (!bMuteAudio && AudioComponent)
-    {
-        AudioComponent->Play();
-    }
 
 #if WITH_ACE_RUNTIME
-    // TODO(renderer-pc): open a new ACE A2F-3D streaming session here.
-    // Planned shape per the plan:
-    //   FACERuntimeModule::Get().BeginAudioSession(/*sampleRate=*/ AceSampleRate);
-#endif
-
-    if (bSessionPrerollActive)
+    // Close any straggler stream from the previous utterance before
+    // opening a new one. (Idempotent if AceStreamPtr is already null.)
+    if (AceStreamPtr)
     {
-        GetWorldTimerManager().SetTimer(
-            PrerollTimer,
-            FTimerDelegate::CreateUObject(this, &ABoothFaceActor::FlushBufferedAudio),
-            AudioPlaybackDelaySecs,
-            /*bLoop=*/ false);
+        if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
+        {
+            Provider->EndOutgoingStream(static_cast<IA2FProvider::IA2FStream*>(AceStreamPtr));
+        }
+        AceStreamPtr = nullptr;
     }
+    if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
+    {
+        if (AceCurveSource)
+        {
+            AceStreamPtr = Provider->CreateA2FStream(AceCurveSource);
+        }
+        if (!AceStreamPtr)
+        {
+            UE_LOG(LogBoothFace, Warning, TEXT("ACE: CreateA2FStream returned null (provider=%s)"),
+                *A2FProviderName.ToString());
+        }
+        else if (IA2FPassthroughProvider* Passthrough = Provider->GetAudioPassthroughProvider())
+        {
+            // Tell ACE about the *original* audio format so it can play
+            // the orchestrator's 24 kHz audio alongside the blendshapes
+            // (without the resampler-degraded 16 kHz copy we feed to A2F).
+            Passthrough->SetOriginalAudioParams(
+                static_cast<IA2FProvider::IA2FStream*>(AceStreamPtr),
+                /*SampleRate=*/ TtsSampleRate,
+                /*NumChannels=*/ NumChannels,
+                /*SampleByteSize=*/ 2);
+        }
+    }
+    else
+    {
+        UE_LOG(LogBoothFace, Warning, TEXT("ACE: provider %s not registered"),
+            *A2FProviderName.ToString());
+    }
+#endif
 }
 
 void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
@@ -136,9 +146,8 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
 
     // Concatenate any prior odd-byte residue with this frame, then split
     // into an int16-aligned prefix + (optional) one-byte residue carried
-    // to the next call. Without this, the orchestrator's tail chunk per
-    // session (frequently odd-byte) trips the (Size % SampleByteSize)==0
-    // ensure inside USoundWaveProcedural::QueueAudio.
+    // to the next call. Orchestrator emits arbitrary-byte chunks; the
+    // tail per session is frequently odd-byte.
     TArray<uint8> Aligned;
     Aligned.Reserve(AudioResidue.Num() + Size);
     Aligned.Append(AudioResidue);
@@ -148,7 +157,6 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
     const int32 EvenLen = Aligned.Num() & ~1;
     if (EvenLen == 0)
     {
-        // Less than two bytes accumulated; keep all of it as residue.
         AudioResidue = MoveTemp(Aligned);
         return;
     }
@@ -157,40 +165,37 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
         AudioResidue.Add(Aligned[Aligned.Num() - 1]);
     }
 
-    // Branch 1 — resample to 16 kHz and feed to A2F for blendshapes.
+    // Resample 24 -> 16 kHz for A2F input.
     const int32 NumSamples24k = EvenLen / 2;
     const int16* Samples24k = reinterpret_cast<const int16*>(Aligned.GetData());
-
     TArray<int16> Samples16k;
     Samples16k.Reserve((NumSamples24k * 2) / 3 + 4);
     Resampler.Process(Samples24k, NumSamples24k, Samples16k);
 
 #if WITH_ACE_RUNTIME
-    // TODO(renderer-pc): feed to A2F. Planned shape per the plan:
-    //   FACERuntimeModule::Get().AnimateFromAudioSamples(
-    //       MakeArrayView(Samples16k.GetData(), Samples16k.Num()),
-    //       /*bEndOfSamples=*/ false);
-    (void)Samples16k;
+    if (AceStreamPtr)
+    {
+        if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
+        {
+            auto* Stream = static_cast<IA2FProvider::IA2FStream*>(AceStreamPtr);
+            Provider->SendAudioSamples(
+                Stream,
+                TArrayView<const int16>(Samples16k.GetData(), Samples16k.Num()),
+                /*EmotionParameters=*/ TOptional<FAudio2FaceEmotion>{},
+                /*Audio2FaceParameters=*/ nullptr);
+            // Pass the original 24 kHz audio through so ACE plays it
+            // (no resampler artifacts) in sync with the blendshapes.
+            if (IA2FPassthroughProvider* Passthrough = Provider->GetAudioPassthroughProvider())
+            {
+                Passthrough->EnqueueOriginalSamples(
+                    Stream,
+                    TArrayView<const uint8>(Aligned.GetData(), EvenLen));
+            }
+        }
+    }
 #else
     (void)Samples16k;
 #endif
-
-    // Branch 2 — original 24 kHz PCM to procedural sound, with preroll
-    // hold so A2F blendshapes have a head start.
-    if (bMuteAudio || !ProceduralWave)
-    {
-        return;
-    }
-    if (bSessionPrerollActive)
-    {
-        SessionStartBuffer.Append(Aligned.GetData(), EvenLen);
-    }
-    else
-    {
-        ProceduralWave->QueueAudio(Aligned.GetData(), EvenLen);
-        UE_LOG(LogBoothFace, Verbose, TEXT("queued %d bytes; wave queue=%d"),
-            EvenLen, ProceduralWave->GetAvailableAudioByteCount());
-    }
 }
 
 void ABoothFaceActor::HandleAudioSessionEnd()
@@ -198,40 +203,19 @@ void ABoothFaceActor::HandleAudioSessionEnd()
     UE_LOG(LogBoothFace, Log, TEXT("audio session end"));
 
 #if WITH_ACE_RUNTIME
-    // TODO(renderer-pc): signal end-of-samples so A2F flushes its tail.
-    //   FACERuntimeModule::Get().AnimateFromAudioSamples(TArrayView<const int16>(), /*bEndOfSamples=*/ true);
-#endif
-
-    // If the session ended before the preroll timer fired (very short
-    // utterances), play out what we buffered now.
-    if (bSessionPrerollActive)
+    if (AceStreamPtr)
     {
-        FlushBufferedAudio();
-        if (PrerollTimer.IsValid() && GetWorldTimerManager().IsTimerActive(PrerollTimer))
+        if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
         {
-            GetWorldTimerManager().ClearTimer(PrerollTimer);
+            Provider->EndOutgoingStream(static_cast<IA2FProvider::IA2FStream*>(AceStreamPtr));
         }
+        AceStreamPtr = nullptr;
     }
-}
-
-void ABoothFaceActor::FlushBufferedAudio()
-{
-    bSessionPrerollActive = false;
-    if (ProceduralWave && !bMuteAudio && SessionStartBuffer.Num() > 0)
-    {
-        const int32 N = SessionStartBuffer.Num();
-        ProceduralWave->QueueAudio(SessionStartBuffer.GetData(), N);
-        UE_LOG(LogBoothFace, Log, TEXT("preroll flush: %d bytes queued; wave queue=%d"),
-            N, ProceduralWave->GetAvailableAudioByteCount());
-    }
-    SessionStartBuffer.Reset();
+#endif
 }
 
 void ABoothFaceActor::HandleDisplayEvent(const FString& Type, const TSharedPtr<FJsonObject>& Event)
 {
-    // Generic state-display hook. Useful for diagnostics + driving non-face
-    // visuals (e.g. lighting cues) from the same WS feed. Leaving as a
-    // verbose log for now.
     UE_LOG(LogBoothFace, Verbose, TEXT("event: %s"), *Type);
 }
 
