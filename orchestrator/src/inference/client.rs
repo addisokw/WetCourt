@@ -83,6 +83,33 @@ impl LlmClient {
         format!("{}/v1{}", self.base_url, path)
     }
 
+    /// Boot-time probe of the configured LLM endpoint. Distinguishes DNS,
+    /// connect, auth (401/403), and server errors so the operator sees the
+    /// *actual* cause at launch instead of a four-stage cascade of silent
+    /// fallbacks during the first trial.
+    pub async fn health_check(&self) -> Result<()> {
+        let url = self.url("/models");
+        let req = self.build(reqwest::Method::GET, "/models");
+        let resp = tokio::time::timeout(Duration::from_secs(5), req.send())
+            .await
+            .map_err(|_| anyhow!("connect timeout (5s) to {url}"))?
+            .with_context(|| format!("connect failed to {url}"))?;
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let key_state = if self.api_key.is_none() {
+            "no api key configured (set LITELLM_MASTER_KEY or BOOTH__INFERENCE__API_KEY)"
+        } else {
+            "api key configured but rejected"
+        };
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            Err(anyhow!("{url} returned {status}: {key_state}"))
+        } else {
+            Err(anyhow!("{url} returned {status}"))
+        }
+    }
+
     /// Non-streaming structured completion. Returns the parsed `T` extracted
     /// from `choices[0].message.content` as JSON.
     pub async fn chat_structured<T: DeserializeOwned>(

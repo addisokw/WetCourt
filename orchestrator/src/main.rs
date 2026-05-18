@@ -38,6 +38,24 @@ async fn main() -> Result<()> {
         "booting"
     );
 
+    // Boot-time LLM reachability probe. The state machine is happy to run
+    // forever on canned fallbacks if every inference call 401s or DNS-fails;
+    // we lost a debugging session to exactly that. Fail loudly here instead.
+    if cfg.inference.mode == "real" {
+        let client = inference::client::LlmClient::new(&cfg.inference);
+        if let Err(e) = client.health_check().await {
+            tracing::error!(
+                base_url = %cfg.inference.base_url,
+                "LLM endpoint health check FAILED: {e:#}"
+            );
+            tracing::error!(
+                "orchestrator refusing to start — fix the LLM connection or set inference.mode = \"mock\""
+            );
+            return Err(e);
+        }
+        tracing::info!(base_url = %cfg.inference.base_url, "LLM endpoint reachable");
+    }
+
     let (event_tx, event_rx) = mpsc::channel::<state_machine::Event>(64);
     let (inference_tx, inference_rx) = mpsc::channel::<state_machine::Command>(32);
     let (hardware_tx, hardware_rx) = mpsc::channel::<state_machine::Command>(32);
