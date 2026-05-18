@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
@@ -83,7 +83,6 @@ async fn main() -> Result<()> {
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
-        ws_clients: Arc::new(AtomicUsize::new(0)),
         plea_buffer: Arc::new(Mutex::new(Vec::new())),
     };
     let app = display::router(app_state);

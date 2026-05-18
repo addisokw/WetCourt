@@ -1,4 +1,4 @@
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
+use std::sync::Arc;
 
 use axum::{
     extract::{
@@ -21,8 +21,8 @@ pub mod events;
 
 use events::{ClientEvent, DisplayEvent};
 
-/// What the orchestrator pushes down the WebSocket. The display task fans these
-/// out to whichever client is currently connected.
+/// What the orchestrator pushes down the WebSocket. The display task fans
+/// these out to every connected subscriber (operator tablet + renderer host).
 #[derive(Debug, Clone)]
 pub enum DisplayMessage {
     Json(DisplayEvent),
@@ -33,7 +33,6 @@ pub enum DisplayMessage {
 pub struct AppState {
     pub event_tx: mpsc::Sender<Event>,
     pub display_bcast: broadcast::Sender<DisplayMessage>,
-    pub ws_clients: Arc<AtomicUsize>,
     /// Buffer for binary plea audio uploaded by the frontend across multiple
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
@@ -71,12 +70,6 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     AxumState(state): AxumState<AppState>,
 ) -> impl IntoResponse {
-    let prev = state.ws_clients.fetch_add(1, Ordering::SeqCst);
-    if prev > 0 {
-        state.ws_clients.fetch_sub(1, Ordering::SeqCst);
-        warn!("rejecting ws upgrade: client already connected");
-        return (StatusCode::CONFLICT, "single client only").into_response();
-    }
     ws.on_upgrade(move |socket| ws_session(socket, state))
 }
 
@@ -122,7 +115,6 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
         }
     }
 
-    state.ws_clients.fetch_sub(1, Ordering::SeqCst);
     info!("ws client disconnected");
 }
 

@@ -15,6 +15,7 @@ const TTS_SAMPLE_RATE = 24000;
 const TTS_LEAD_IN_SECS = 0.12;
 
 let playCtx: AudioContext | null = null;
+let outputGain: GainNode | null = null;
 let nextStartTime = 0;
 let queueDepth = 0;
 let endingSession = false;
@@ -26,9 +27,33 @@ let sessionStartPending = false;
 // sample and produce bursts of white noise at chunk seams).
 let pcmResidue: number | null = null;
 
+// `?mute=1` silences this tab so a co-located renderer host (UE5 with HDMI
+// audio) is the only source the booth hears. `?mute=0` clears the
+// persisted choice; otherwise we read it from localStorage so a refresh of
+// a no-param URL keeps the last setting.
+function readMute(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mute') === '1') {
+      localStorage.setItem('mute', '1');
+      return true;
+    }
+    if (params.get('mute') === '0') {
+      localStorage.removeItem('mute');
+      return false;
+    }
+    return localStorage.getItem('mute') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function ensureCtx(): AudioContext {
   if (!playCtx) {
     playCtx = new AudioContext({ sampleRate: TTS_SAMPLE_RATE });
+    outputGain = playCtx.createGain();
+    outputGain.gain.value = readMute() ? 0 : 1;
+    outputGain.connect(playCtx.destination);
   }
   // Browser autoplay policies require resumption inside a user gesture; the
   // Start button click handler triggers this.
@@ -72,7 +97,7 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
 
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
-  source.connect(ctx.destination);
+  source.connect(outputGain!);
   const earliest = sessionStartPending
     ? ctx.currentTime + TTS_LEAD_IN_SECS
     : ctx.currentTime;
