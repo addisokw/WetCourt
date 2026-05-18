@@ -70,7 +70,11 @@ void FBoothWSClient::Shutdown()
 
 void FBoothWSClient::Connect()
 {
-    Socket = FWebSocketsModule::Get().CreateWebSocket(Url, TEXT("ws"));
+    // No subprotocol — UE 5.6's libwebsockets builds a malformed upgrade
+    // request (missing `Connection: Upgrade`) when a subprotocol is set,
+    // which axum's WebSocketUpgrade extractor rejects with 400. The
+    // orchestrator's WS endpoint doesn't negotiate subprotocols anyway.
+    Socket = FWebSocketsModule::Get().CreateWebSocket(Url);
 
     Socket->OnConnected().AddRaw(this, &FBoothWSClient::HandleConnected);
     Socket->OnConnectionError().AddRaw(this, &FBoothWSClient::HandleConnectionError);
