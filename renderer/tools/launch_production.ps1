@@ -15,10 +15,29 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# --- 0. Preflight -------------------------------------------------------
+# Surface missing prerequisites with actionable hints rather than the
+# generic command-not-found / connection-refused errors a bare run gives.
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker not on PATH. Install Docker Desktop (https://www.docker.com/products/docker-desktop/) and re-open this shell. See SETUP.md."
+}
+try { docker version --format '{{.Server.Version}}' | Out-Null }
+catch { throw "Docker daemon is not running. Start Docker Desktop and wait for the whale icon to settle, then rerun." }
+
 # --- 1. A2F NIM ---------------------------------------------------------
 $nimStatus = docker inspect -f '{{.State.Status}}' $NimContainerName 2>$null
 if (-not $nimStatus) {
-    throw "Container $NimContainerName not found. Create it first (docker run ... --name $NimContainerName ...)."
+    throw @"
+Container '$NimContainerName' not found. First-time setup needs:
+  docker login nvcr.io   # use ngc \$oauthtoken / NGC_API_KEY
+  docker pull nvcr.io/nim/nvidia/audio2face-3d:2.0
+  docker run -d --name $NimContainerName --gpus all -p 52000:52000 \\
+    --restart unless-stopped \\
+    -v "<repo>\renderer\nim\deployment_config.yaml:/apps/configs/deployment_config.yaml:ro" \\
+    -v "<repo>\renderer\nim\advanced_config.yaml:/apps/configs/advanced_config.yaml:ro" \\
+    nvcr.io/nim/nvidia/audio2face-3d:2.0
+See SETUP.md for the full first-run.
+"@
 }
 if ($nimStatus -ne 'running') {
     Write-Host "Starting NIM container $NimContainerName..." -ForegroundColor Cyan
@@ -34,7 +53,9 @@ if (-not (Test-Path $boothExe)) {
 # Inject the User-scope LiteLLM key so the spawned process inherits it.
 # (Cygwin / non-PowerShell shells don't see User-scope env until reopened.)
 $key = [Environment]::GetEnvironmentVariable('LITELLM_MASTER_KEY','User')
-if (-not $key) { throw "LITELLM_MASTER_KEY missing from User registry." }
+if (-not $key) {
+    throw "LITELLM_MASTER_KEY not set at User scope. Run (once):`n  [Environment]::SetEnvironmentVariable('LITELLM_MASTER_KEY','<your-key>','User')`nSee SETUP.md."
+}
 $env:LITELLM_MASTER_KEY = $key
 
 # Bail if 8080 is already held (a stale booth.exe will silently fail to bind).

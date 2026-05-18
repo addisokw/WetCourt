@@ -3,6 +3,11 @@
 Three components, three rebuild loops. Each can be rebuilt independently;
 only the UE renderer requires the others to be running for an end-to-end test.
 
+> **First time on a new machine?** See [`SETUP.md`](SETUP.md) for the
+> install-from-scratch walkthrough (dependencies, NIM container creation,
+> env vars, UE project setup). `renderer\tools\check_setup.ps1` reports
+> what's missing without modifying anything.
+
 ```
 [Kokoro TTS / Qwen LLM]      <-- runs in dgx-ai-stack (Spark, separate host)
         ^
