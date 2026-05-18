@@ -19,6 +19,44 @@ namespace
     constexpr int32 TtsSampleRate = 24000;
     constexpr int32 AceSampleRate = 16000;
     constexpr int32 NumChannels = 1;
+
+#if WITH_ACE_RUNTIME
+    // Translate the wire-format emotion map (lowercased A2F-3D emotion names
+    // → 0..1 weights) into FAudio2FaceEmotion overrides. Returns unset when
+    // the map is empty so SendAudioSamples falls through to A2E-only mode.
+    TOptional<FAudio2FaceEmotion> BuildEmotion(
+        const TMap<FString, float>& Emotions,
+        float OverallStrength,
+        float OverrideStrength)
+    {
+        if (Emotions.Num() == 0)
+        {
+            return TOptional<FAudio2FaceEmotion>{};
+        }
+        FAudio2FaceEmotion Out;
+        Out.OverallEmotionStrength = FMath::Clamp(OverallStrength, 0.0f, 1.0f);
+        Out.bEnableEmotionOverride = true;
+        Out.EmotionOverrideStrength = FMath::Clamp(OverrideStrength, 0.0f, 1.0f);
+
+        FAudio2FaceEmotionOverride& O = Out.EmotionOverrides;
+        for (const auto& Pair : Emotions)
+        {
+            const float V = FMath::Clamp(Pair.Value, 0.0f, 1.0f);
+            const FString Key = Pair.Key.ToLower();
+            if      (Key == TEXT("amazement"))   { O.bOverrideAmazement = true;   O.Amazement = V; }
+            else if (Key == TEXT("anger"))       { O.bOverrideAnger = true;       O.Anger = V; }
+            else if (Key == TEXT("cheekiness"))  { O.bOverrideCheekiness = true;  O.Cheekiness = V; }
+            else if (Key == TEXT("disgust"))     { O.bOverrideDisgust = true;     O.Disgust = V; }
+            else if (Key == TEXT("fear"))        { O.bOverrideFear = true;        O.Fear = V; }
+            else if (Key == TEXT("grief"))       { O.bOverrideGrief = true;       O.Grief = V; }
+            else if (Key == TEXT("joy"))         { O.bOverrideJoy = true;         O.Joy = V; }
+            else if (Key == TEXT("outofbreath")) { O.bOverrideOutOfBreath = true; O.OutOfBreath = V; }
+            else if (Key == TEXT("pain"))        { O.bOverridePain = true;        O.Pain = V; }
+            else if (Key == TEXT("sadness"))     { O.bOverrideSadness = true;     O.Sadness = V; }
+        }
+        return Out;
+    }
+#endif
 }
 
 ABoothFaceActor::ABoothFaceActor()
@@ -31,15 +69,40 @@ void ABoothFaceActor::BeginPlay()
     Super::BeginPlay();
 
 #if WITH_ACE_RUNTIME
-    // Curve-source component plays the orchestrator's audio (via its
-    // internal AudioComponent) AND surfaces blendshape curves for an
-    // anim BP to consume. Attached as the actor root so it has a world
-    // transform — required by SceneComponent base class even though we
-    // don't use 3D positioning here.
-    AceCurveSource = NewObject<UACEAudioCurveSourceComponent>(this, TEXT("AceCurveSource"));
-    SetRootComponent(AceCurveSource);
-    AceCurveSource->RegisterComponent();
+    // If a TargetCharacter is set in the editor, use ITS curve source
+    // (the Apply ACE Face Animation anim node only finds curve sources
+    // on the same actor it runs on, so this is required for MetaHuman
+    // lipsync). Otherwise, fall back to a local curve source on this
+    // actor — audio plays but no MetaHuman wiring.
+    if (TargetCharacter)
+    {
+        AceCurveSource = TargetCharacter->FindComponentByClass<UACEAudioCurveSourceComponent>();
+        if (AceCurveSource)
+        {
+            UE_LOG(LogBoothFace, Log, TEXT("ACE: using curve source on %s"), *TargetCharacter->GetName());
+        }
+        else
+        {
+            UE_LOG(LogBoothFace, Warning,
+                TEXT("ACE: TargetCharacter %s has no UACEAudioCurveSourceComponent; falling back to local"),
+                *TargetCharacter->GetName());
+        }
+    }
+    if (!AceCurveSource)
+    {
+        AceCurveSource = NewObject<UACEAudioCurveSourceComponent>(this, TEXT("AceCurveSource"));
+        SetRootComponent(AceCurveSource);
+        AceCurveSource->RegisterComponent();
+        UE_LOG(LogBoothFace, Log, TEXT("ACE: using local curve source (no TargetCharacter)"));
+    }
     AceCurveSource->Volume = bMuteAudio ? 0.0f : 1.0f;
+    AceCurveSource->BufferLengthInSeconds = AudioBufferSeconds;
+    UE_LOG(LogBoothFace, Log, TEXT("ACE: audio pre-buffer set to %.2fs"), AudioBufferSeconds);
+
+    // Hook playback lifecycle so we can attribute pipeline latency between
+    // (A) ws/SendAudioSamples time and (B) A2F-3D NIM crunch time.
+    AceCurveSource->OnAnimationStarted.AddDynamic(this, &ABoothFaceActor::HandleAnimationStarted);
+    AceCurveSource->OnAnimationEnded.AddDynamic(this, &ABoothFaceActor::HandleAnimationEnded);
 
     // Configure the gRPC endpoint for the A2F-3D NIM.
     FACEConnectionInfo ConnectionInfo;
@@ -60,6 +123,7 @@ void ABoothFaceActor::BeginPlay()
     WSClient->OnAudioSessionStart = [this](const FString& Fmt) { HandleAudioSessionStart(Fmt); };
     WSClient->OnAudioFrame        = [this](const uint8* D, int32 N) { HandleAudioFrame(D, N); };
     WSClient->OnAudioSessionEnd   = [this]() { HandleAudioSessionEnd(); };
+    WSClient->OnTtsEmotion        = [this](const TMap<FString, float>& E, float O, float V) { HandleTtsEmotion(E, O, V); };
     WSClient->OnDisplayEvent      = [this](const FString& T, const TSharedPtr<FJsonObject>& E) { HandleDisplayEvent(T, E); };
     WSClient->OnConnectionChanged = [this](bool bConn) { HandleConnectionChanged(bConn); };
     WSClient->Initialize(OrchestratorWsUrl);
@@ -91,7 +155,16 @@ void ABoothFaceActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ABoothFaceActor::HandleAudioSessionStart(const FString& Format)
 {
-    UE_LOG(LogBoothFace, Log, TEXT("audio session start: format=%s"), *Format);
+    SessionStartTime = FPlatformTime::Seconds();
+    FirstFrameTime = 0.0;
+    LastFrameTime = 0.0;
+    SessionEndTime = 0.0;
+    BytesThisSession = 0;
+    FramesThisSession = 0;
+    MaxFrameGapSec = 0.0;
+    MaxSendCallSec = 0.0;
+    TotalSendCallSec = 0.0;
+    UE_LOG(LogBoothFace, Log, TEXT("audio session start: format=%s t=%.3f"), *Format, SessionStartTime);
     Resampler.Reset();
     AudioResidue.Reset();
 
@@ -144,6 +217,14 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
         return;
     }
 
+    const double FrameArrivalTime = FPlatformTime::Seconds();
+    const double FrameGapSec = (LastFrameTime > 0.0) ? (FrameArrivalTime - LastFrameTime) : 0.0;
+    if (FirstFrameTime == 0.0) { FirstFrameTime = FrameArrivalTime; }
+    if (FrameGapSec > MaxFrameGapSec) { MaxFrameGapSec = FrameGapSec; }
+    LastFrameTime = FrameArrivalTime;
+    BytesThisSession += Size;
+    FramesThisSession += 1;
+
     // Concatenate any prior odd-byte residue with this frame, then split
     // into an int16-aligned prefix + (optional) one-byte residue carried
     // to the next call. Orchestrator emits arbitrary-byte chunks; the
@@ -178,10 +259,14 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
         if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
         {
             auto* Stream = static_cast<IA2FProvider::IA2FStream*>(AceStreamPtr);
+            TOptional<FAudio2FaceEmotion> Emotion = bHasCurrentEmotion
+                ? BuildEmotion(CurrentEmotions, CurrentEmotionOverallStrength, CurrentEmotionOverrideStrength)
+                : TOptional<FAudio2FaceEmotion>{};
+            const double SendStart = FPlatformTime::Seconds();
             Provider->SendAudioSamples(
                 Stream,
                 TArrayView<const int16>(Samples16k.GetData(), Samples16k.Num()),
-                /*EmotionParameters=*/ TOptional<FAudio2FaceEmotion>{},
+                Emotion,
                 /*Audio2FaceParameters=*/ nullptr);
             // Pass the original 24 kHz audio through so ACE plays it
             // (no resampler artifacts) in sync with the blendshapes.
@@ -190,6 +275,15 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
                 Passthrough->EnqueueOriginalSamples(
                     Stream,
                     TArrayView<const uint8>(Aligned.GetData(), EvenLen));
+            }
+            const double SendDur = FPlatformTime::Seconds() - SendStart;
+            TotalSendCallSec += SendDur;
+            if (SendDur > MaxSendCallSec) { MaxSendCallSec = SendDur; }
+            if (bLogPerFrameTiming)
+            {
+                UE_LOG(LogBoothFace, Log,
+                    TEXT("frame #%d size=%d ws_gap_ms=%.1f send_ms=%.2f"),
+                    FramesThisSession, Size, FrameGapSec * 1000.0, SendDur * 1000.0);
             }
         }
     }
@@ -200,7 +294,21 @@ void ABoothFaceActor::HandleAudioFrame(const uint8* Data, int32 Size)
 
 void ABoothFaceActor::HandleAudioSessionEnd()
 {
-    UE_LOG(LogBoothFace, Log, TEXT("audio session end"));
+    SessionEndTime = FPlatformTime::Seconds();
+    const double SessionDurSec = (SessionStartTime > 0.0) ? (SessionEndTime - SessionStartTime) : 0.0;
+    const double FirstFrameLagSec = (FirstFrameTime > 0.0 && SessionStartTime > 0.0)
+        ? (FirstFrameTime - SessionStartTime) : 0.0;
+    const double InputAudioSec = (BytesThisSession > 0) ? (BytesThisSession / 48000.0) : 0.0;
+    UE_LOG(LogBoothFace, Log,
+        TEXT("audio session end: frames=%d bytes=%lld input_audio=%.2fs "
+             "session_wall=%.2fs first_frame_lag_ms=%.1f "
+             "max_ws_gap_ms=%.1f max_send_ms=%.2f total_send_ms=%.1f"),
+        FramesThisSession, (long long)BytesThisSession, InputAudioSec,
+        SessionDurSec, FirstFrameLagSec * 1000.0,
+        MaxFrameGapSec * 1000.0, MaxSendCallSec * 1000.0, TotalSendCallSec * 1000.0);
+
+    bHasCurrentEmotion = false;
+    CurrentEmotions.Reset();
 
 #if WITH_ACE_RUNTIME
     if (AceStreamPtr)
@@ -212,6 +320,43 @@ void ABoothFaceActor::HandleAudioSessionEnd()
         AceStreamPtr = nullptr;
     }
 #endif
+}
+
+void ABoothFaceActor::HandleTtsEmotion(
+    const TMap<FString, float>& Emotions,
+    float OverallStrength,
+    float OverrideStrength)
+{
+    CurrentEmotions = Emotions;
+    CurrentEmotionOverallStrength = OverallStrength;
+    CurrentEmotionOverrideStrength = OverrideStrength;
+    bHasCurrentEmotion = (Emotions.Num() > 0);
+    UE_LOG(LogBoothFace, Log,
+        TEXT("tts_emotion: %d entries, overall=%.2f override=%.2f"),
+        Emotions.Num(), OverallStrength, OverrideStrength);
+}
+
+void ABoothFaceActor::HandleAnimationStarted()
+{
+    const double Now = FPlatformTime::Seconds();
+    // Two latencies that matter:
+    //  - from_session_start: time since the orchestrator's tts_audio header
+    //    landed = total wall time the user perceives as "press → first audio".
+    //  - from_session_end: time spent waiting on A2F-3D *after* we finished
+    //    sending audio = pure NIM crunch + curve source pre-buffer fill.
+    const double FromStartMs = (SessionStartTime > 0.0) ? (Now - SessionStartTime) * 1000.0 : 0.0;
+    const double FromEndMs   = (SessionEndTime   > 0.0) ? (Now - SessionEndTime)   * 1000.0 : 0.0;
+    UE_LOG(LogBoothFace, Log,
+        TEXT("animation_started: from_session_start_ms=%.1f from_session_end_ms=%.1f"),
+        FromStartMs, FromEndMs);
+}
+
+void ABoothFaceActor::HandleAnimationEnded()
+{
+    const double Now = FPlatformTime::Seconds();
+    const double FromStartMs = (SessionStartTime > 0.0) ? (Now - SessionStartTime) * 1000.0 : 0.0;
+    UE_LOG(LogBoothFace, Log,
+        TEXT("animation_ended: total_wall_ms=%.1f"), FromStartMs);
 }
 
 void ABoothFaceActor::HandleDisplayEvent(const FString& Type, const TSharedPtr<FJsonObject>& Event)

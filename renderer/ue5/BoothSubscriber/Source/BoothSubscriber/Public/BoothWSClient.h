@@ -29,6 +29,15 @@ public:
     TFunction<void(const FString& /*Format*/)> OnAudioSessionStart;
     TFunction<void(const uint8* /*Data*/, int32 /*Size*/)> OnAudioFrame;
     TFunction<void()> OnAudioSessionEnd;
+    /**
+     * Per-utterance emotion vector emitted by the LLM stage right before the
+     * next `tts_audio` event. Keys are lowercased A2F-3D emotion names
+     * (anger, joy, disgust, sadness, ...); values 0..1. OverallStrength /
+     * OverrideStrength map to FAudio2FaceEmotion's same-named fields.
+     */
+    TFunction<void(const TMap<FString, float>& /*Emotions*/,
+                   float /*OverallStrength*/,
+                   float /*OverrideStrength*/)> OnTtsEmotion;
     TFunction<void(const FString& /*Type*/, const TSharedPtr<FJsonObject>& /*Event*/)> OnDisplayEvent;
     TFunction<void(bool /*bConnected*/)> OnConnectionChanged;
 

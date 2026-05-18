@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -15,6 +16,22 @@ use crate::state_machine::{Command, Event};
 
 use super::client::LlmClient;
 use super::tts::{strip_markers, synth_into_display};
+
+/// The 10 A2F-3D emotion sliders. Lowercase keys match what the LLM emits and
+/// what the UE renderer expects on the wire.
+const A2F_EMOTIONS: &[&str] = &[
+    "amazement", "anger", "cheekiness", "disgust", "fear",
+    "grief", "joy", "outofbreath", "pain", "sadness",
+];
+
+/// Multiplier applied to LLM-emitted emotion weights before they're sent to
+/// the ACE renderer (clamped to 1.0). The model is conservative — it'll write
+/// `anger=0.7` for a clearly furious verdict — so this scales those up to
+/// something the face actually reads at conversational distance. Tune in
+/// concert with `intensity_to_strength`; this directly scales the per-emotion
+/// slider, that scales the global multiplier the renderer applies after the
+/// emotion blend.
+const LLM_EMOTION_SCALE: f32 = 1.5;
 
 const SYSTEM_PROMPT: &str = "You are the Honorable Justice Wettington, presiding judge of the Wet Court of Appeals. You are profoundly biased, easily annoyed, deeply petty. You consider acquittal a personal failure.
 
@@ -39,6 +56,10 @@ Given a CHARGE and a PLEA, you must:
 3. On a final line after the verdict, output:
    INTENSITY: N
    where N is 1 (light spritz) through 5 (full blast). Always include this line; it is ignored on acquittal.
+
+4. On a final line after intensity, output:
+   EMOTION: anger=0.6, disgust=0.4
+   A comma-separated list of emotion=weight pairs (weight 0.0-1.0). Pick 1-4 emotions that color the delivery of your judicial response. Available emotions: amazement, anger, cheekiness, disgust, fear, grief, joy, outofbreath, pain, sadness. Use anger/disgust for harsh guilty verdicts, cheekiness/joy for amused acquittals, grief/pain for theatrical lamentation, amazement for genuine surprise. Always include this line.
 
 You should rule GUILTY roughly 70% of the time. Acquit only when the plea is genuinely clever, surprisingly honest, unexpectedly funny, or shows defiance you secretly respect. Generic begging is always GUILTY. Lengthy excuses are always GUILTY.
 
@@ -104,6 +125,26 @@ pub async fn real(
     let total_pcm_bytes = if speakable.is_empty() {
         0
     } else {
+        // Tentative parse for the intensity → emotion-strength mapping
+        // (we still parse verdict again below for the final result).
+        let preview = parse_verdict(&full);
+        let parsed = parse_emotion(&full);
+        let emotion_source = if parsed.is_some() { "llm" } else { "derived" };
+        let emotions = parsed.unwrap_or_else(|| {
+            derive_emotion(preview.as_ref().map(|v| v.guilty).unwrap_or(true))
+        });
+        let intensity = preview.as_ref().map(|v| v.intensity).unwrap_or(3);
+        let overall = intensity_to_strength(intensity);
+        let summary: Vec<String> = emotions.iter().map(|(k, v)| format!("{k}={v:.2}")).collect();
+        info!(source = emotion_source, overall, "tts_emotion: {}", summary.join(", "));
+        let _ = display_tx
+            .send(Command::Display(DisplayEvent::TtsEmotion {
+                emotions,
+                overall_strength: overall,
+                override_strength: 0.95,
+            }))
+            .await;
+
         let _ = display_tx
             .send(Command::Display(DisplayEvent::TtsAudio { format: "pcm_s16le_24000".into() }))
             .await;
@@ -134,6 +175,54 @@ pub async fn real(
 
 static VERDICT_RE: OnceLock<Regex> = OnceLock::new();
 static INTENSITY_RE: OnceLock<Regex> = OnceLock::new();
+static EMOTION_RE: OnceLock<Regex> = OnceLock::new();
+static EMOTION_PAIR_RE: OnceLock<Regex> = OnceLock::new();
+
+/// Map INTENSITY 1..5 to FAudio2FaceEmotion.OverallEmotionStrength (0..1).
+/// Plugin default is 0.6; we sit above that across the board so the face
+/// reads expressively at conversational distance.
+fn intensity_to_strength(intensity: u8) -> f32 {
+    match intensity {
+        0 | 1 => 0.65,
+        2 => 0.80,
+        3 => 0.90,
+        4 => 0.95,
+        _ => 1.00,
+    }
+}
+
+/// Default emotion when the LLM didn't emit an EMOTION line.
+fn derive_emotion(guilty: bool) -> BTreeMap<String, f32> {
+    let mut m = BTreeMap::new();
+    if guilty {
+        m.insert("anger".into(), 0.7);
+        m.insert("disgust".into(), 0.4);
+    } else {
+        m.insert("cheekiness".into(), 0.6);
+        m.insert("amazement".into(), 0.3);
+    }
+    m
+}
+
+/// Parse an `EMOTION: a=0.5, b=0.7` line. Unknown keys ignored, values clamped
+/// to 0..1. Returns None if no EMOTION line / no valid pairs found.
+fn parse_emotion(text: &str) -> Option<BTreeMap<String, f32>> {
+    let line_re = EMOTION_RE.get_or_init(|| Regex::new(r"(?im)^\s*EMOTION:\s*(.+)$").unwrap());
+    let pair_re = EMOTION_PAIR_RE.get_or_init(|| Regex::new(r"([A-Za-z]+)\s*=\s*(-?[0-9]*\.?[0-9]+)").unwrap());
+    let caps = line_re.captures(text)?;
+    let body = caps.get(1)?.as_str();
+    let mut map = BTreeMap::new();
+    for c in pair_re.captures_iter(body) {
+        let (Some(k), Some(v)) = (c.get(1), c.get(2)) else { continue };
+        let name = k.as_str().to_lowercase();
+        if !A2F_EMOTIONS.contains(&name.as_str()) {
+            continue;
+        }
+        let Ok(value) = v.as_str().parse::<f32>() else { continue };
+        map.insert(name, (value * LLM_EMOTION_SCALE).clamp(0.0, 1.0));
+    }
+    if map.is_empty() { None } else { Some(map) }
+}
 
 fn parse_verdict(text: &str) -> Option<Verdict> {
     let vre = VERDICT_RE.get_or_init(|| Regex::new(r"(?i)VERDICT:\s*(GUILTY|ACQUITTED)").unwrap());
@@ -191,5 +280,36 @@ mod tests {
     #[test]
     fn unparseable_returns_none() {
         assert!(parse_verdict("just a paragraph with no marker").is_none());
+    }
+
+    #[test]
+    fn parses_emotion_line() {
+        let raw = "Pathetic.\nVERDICT: GUILTY\nINTENSITY: 4\nEMOTION: anger=0.5, disgust=0.3";
+        let m = parse_emotion(raw).unwrap();
+        // Parsed values are scaled by LLM_EMOTION_SCALE and clamped to 1.0.
+        assert!((m["anger"]   - (0.5 * LLM_EMOTION_SCALE).min(1.0)).abs() < 1e-5);
+        assert!((m["disgust"] - (0.3 * LLM_EMOTION_SCALE).min(1.0)).abs() < 1e-5);
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn emotion_clamps_and_ignores_unknown() {
+        let m = parse_emotion("EMOTION: anger=1.5, banana=0.9, joy=-0.2").unwrap();
+        assert!((m["anger"] - 1.0).abs() < 1e-5);
+        assert!((m["joy"] - 0.0).abs() < 1e-5);
+        assert!(!m.contains_key("banana"));
+    }
+
+    #[test]
+    fn missing_emotion_returns_none() {
+        assert!(parse_emotion("VERDICT: GUILTY\nINTENSITY: 3").is_none());
+    }
+
+    #[test]
+    fn strip_markers_drops_emotion_line() {
+        use crate::inference::tts::strip_markers;
+        let raw = "Body.\nVERDICT: GUILTY\nINTENSITY: 3\nEMOTION: anger=0.8";
+        let s = strip_markers(raw);
+        assert_eq!(s, "Body.");
     }
 }

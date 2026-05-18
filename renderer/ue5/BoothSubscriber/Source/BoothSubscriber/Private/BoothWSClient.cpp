@@ -172,6 +172,27 @@ void FBoothWSClient::DispatchEvent(const FString& Type, const TSharedPtr<FJsonOb
             OnAudioSessionEnd();
         }
     }
+    else if (Type == TEXT("tts_emotion") && OnTtsEmotion)
+    {
+        TMap<FString, float> Emotions;
+        const TSharedPtr<FJsonObject>* EmotionsObj = nullptr;
+        if (JsonObject->TryGetObjectField(TEXT("emotions"), EmotionsObj) && EmotionsObj && (*EmotionsObj).IsValid())
+        {
+            for (const auto& Pair : (*EmotionsObj)->Values)
+            {
+                double V = 0.0;
+                if (Pair.Value.IsValid() && Pair.Value->TryGetNumber(V))
+                {
+                    Emotions.Add(Pair.Key, static_cast<float>(V));
+                }
+            }
+        }
+        double OverallD = 0.6;
+        double OverrideD = 0.5;
+        JsonObject->TryGetNumberField(TEXT("overall_strength"), OverallD);
+        JsonObject->TryGetNumberField(TEXT("override_strength"), OverrideD);
+        OnTtsEmotion(Emotions, static_cast<float>(OverallD), static_cast<float>(OverrideD));
+    }
     else if (Type == TEXT("idle") || Type == TEXT("reset"))
     {
         bAudioStreaming = false;

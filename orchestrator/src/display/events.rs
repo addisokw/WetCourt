@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6,6 +8,17 @@ pub enum DisplayEvent {
     Reset,
     Idle,
     ShowCharge { text: String },
+    /// Per-utterance emotion vector for downstream face animation (ACE
+    /// Audio2Face-3D). Emitted by the LLM stage before `TtsAudio`. Keys are
+    /// the 10 A2F-3D emotion names lowercased (amazement, anger, cheekiness,
+    /// disgust, fear, grief, joy, outofbreath, pain, sadness); values are 0..1.
+    /// Browser frontend ignores it; UE renderer applies it as
+    /// FAudio2FaceEmotion overrides.
+    TtsEmotion {
+        emotions: BTreeMap<String, f32>,
+        overall_strength: f32,
+        override_strength: f32,
+    },
     /// "next binary frame is audio in this format" — emitted before each chunk
     /// so frontend knows how to decode. May appear multiple times per utterance
     /// in the pipelined LLM→TTS path.

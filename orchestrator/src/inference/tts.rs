@@ -98,13 +98,15 @@ pub async fn synth_into_display(
     Ok(total)
 }
 
-/// Strip "VERDICT: …" / "INTENSITY: …" lines from a body of text so they're
-/// never spoken aloud.
+/// Strip "VERDICT: …" / "INTENSITY: …" / "EMOTION: …" lines from a body of
+/// text so they're never spoken aloud.
 pub fn strip_markers(text: &str) -> String {
     text.lines()
         .filter(|l| {
             let t = l.trim_start();
-            !t.starts_with("VERDICT:") && !t.starts_with("INTENSITY:")
+            !t.starts_with("VERDICT:")
+                && !t.starts_with("INTENSITY:")
+                && !t.starts_with("EMOTION:")
         })
         .collect::<Vec<_>>()
         .join("\n")
