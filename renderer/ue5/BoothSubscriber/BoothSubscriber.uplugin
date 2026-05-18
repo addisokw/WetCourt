@@ -1,0 +1,29 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.1.0",
+    "FriendlyName": "Booth Subscriber",
+    "Description": "Subscribes to the WetCourt orchestrator WebSocket and drives a MetaHuman via NVIDIA ACE Audio2Face-3D.",
+    "Category": "WetCourt",
+    "CreatedBy": "WetCourt",
+    "CreatedByURL": "",
+    "DocsURL": "",
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "EngineVersion": "5.6.0",
+    "CanContainContent": false,
+    "IsBetaVersion": true,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "BoothSubscriber",
+            "Type": "Runtime",
+            "LoadingPhase": "Default",
+            "PlatformAllowList": ["Win64", "Linux"]
+        }
+    ],
+    "Plugins": [
+        { "Name": "WebSockets", "Enabled": true }
+    ]
+}
