@@ -27,3 +27,6 @@ __pycache__/
 
 # Plan files / claude state
 .claude/
+
+# Orchestrator runtime logs (booth.out.log / booth.err.log from Start-Process)
+orchestrator/booth.*.log
