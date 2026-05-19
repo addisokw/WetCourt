@@ -115,6 +115,49 @@ void ABoothFaceActor::BeginPlay()
     // "Audio2Face inference instance not provided".
     UACEBlueprintLibrary::AllocateA2F3DResources(A2FProviderName);
 
+    // Silent pre-warm: 3 sessions × 1 s of silence, mirroring the runtime
+    // pattern (CreateA2FStream → SendAudioSamples → EndOutgoingStream).
+    // smoke_a2f shows the NIM itself has TTFB ~13 ms — yet the harness
+    // measures ~5 s audio→anim gap on the first 2 real verdicts after a
+    // fresh renderer launch, dropping to ~1.5 s by verdict 3+. A single
+    // 100 ms pre-warm wasn't sufficient; the warming is cumulative. Three
+    // 1-second silent sessions reproduce enough of the runtime lifecycle
+    // to fully prime ACE/A2F state before any real verdict arrives.
+    if (AceCurveSource)
+    {
+        const float SavedVolume = AceCurveSource->Volume;
+        AceCurveSource->Volume = 0.0f;
+        if (IA2FProvider* Provider = IA2FProvider::FindProvider(A2FProviderName))
+        {
+            const double WarmStart = FPlatformTime::Seconds();
+            // 1 s of 16 kHz silence per session.
+            TArray<int16> Silence;
+            Silence.Init(0, AceSampleRate);
+            constexpr int32 PreWarmSessions = 3;
+            int32 SuccessfulSessions = 0;
+            for (int32 i = 0; i < PreWarmSessions; ++i)
+            {
+                auto* WarmStream = Provider->CreateA2FStream(AceCurveSource);
+                if (WarmStream)
+                {
+                    Provider->SendAudioSamples(
+                        WarmStream,
+                        TArrayView<const int16>(Silence.GetData(), Silence.Num()),
+                        TOptional<FAudio2FaceEmotion>{},
+                        nullptr);
+                    Provider->EndOutgoingStream(WarmStream);
+                    ++SuccessfulSessions;
+                }
+            }
+            const double WarmDone = FPlatformTime::Seconds();
+            UE_LOG(LogBoothFace, Log,
+                TEXT("ACE: silent pre-warm done sessions=%d/%d total_ms=%.1f"),
+                SuccessfulSessions, PreWarmSessions,
+                (WarmDone - WarmStart) * 1000.0);
+        }
+        AceCurveSource->Volume = SavedVolume;
+    }
+
     UE_LOG(LogBoothFace, Log, TEXT("ACE: configured provider %s -> %s (pre-warmed)"),
         *A2FProviderName.ToString(), *A2FUrl);
 #endif

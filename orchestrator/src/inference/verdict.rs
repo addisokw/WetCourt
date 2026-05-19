@@ -46,7 +46,7 @@ Your disposition:
 
 Given a CHARGE and a PLEA, you must:
 
-1. Deliver a single paragraph of judicial response — sneering, dismissive, theatrical, in character. React to specific things the defendant said. Mock weak arguments. Acknowledge strong ones grudgingly. 3-5 sentences. No more.
+1. Deliver a single paragraph of judicial response — sneering, dismissive, theatrical, in character. React to specific things the defendant said. Mock weak arguments. Acknowledge strong ones grudgingly. EXACTLY 4-5 substantive sentences (no fewer than 4, no more than 5). Each sentence should be 10+ words of genuine judicial bloviation, not a clipped pronouncement. A verdict that comes in at 3 sentences or fewer, or relies on terse fragments, fails to dispense proper theatre and is not acceptable.
 
 2. On a final line by itself, output exactly:
    VERDICT: GUILTY
@@ -75,6 +75,13 @@ pub async fn mock(cfg: Arc<Config>, _charge: String, _plea: String, event_tx: mp
 /// synthesize the whole stripped body in a single Kokoro call so tone /
 /// prosody stays coherent across sentences. Trades ~2–4s of first-audio
 /// latency vs. the old per-sentence pipeline for a unified voice.
+///
+/// Pipelined TTS was attempted and reverted: per-sentence synth produces
+/// 700-1000ms intra-stream gaps (Kokoro HTTP setup per sentence), which
+/// cause UE audio buffer underruns (audible as static) and dual
+/// animation_started events (ACE restarts mid-playback). See harness data
+/// in renderer/tools/e2e_harness.py; baseline single-shot fits the 5s
+/// budget already (~4s plea→first-audio).
 pub async fn real(
     cfg: Arc<Config>,
     charge: String,

@@ -123,3 +123,14 @@ async fn schedule_self_ack(event_tx: mpsc::Sender<Event>, pcm_bytes: usize) {
     tokio::time::sleep(Duration::from_secs_f64(secs + 0.5)).await;
     let _ = event_tx.send(Event::TtsFinished).await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_markers_drops_emotion_intensity_and_verdict() {
+        let raw = "EMOTION: anger=0.8\nINTENSITY: 4\n\nYour plea is feeble.\n\nVERDICT: GUILTY";
+        assert_eq!(strip_markers(raw), "Your plea is feeble.");
+    }
+}
