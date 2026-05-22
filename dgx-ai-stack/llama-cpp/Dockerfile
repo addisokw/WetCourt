@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 # llama-server keeps libs alongside the binary; LD_LIBRARY_PATH covers it.
 COPY llama-server /app/llama-server
-COPY libllama.so* libllama-common.so* libmtmd.so* libggml*.so* /app/
+COPY libllama.so* libllama-common.so* libllama-server-impl.so* libmtmd.so* libggml*.so* /app/
 RUN chmod +x /app/llama-server
 
 EXPOSE 8000
