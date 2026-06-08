@@ -107,3 +107,30 @@ services:
     volumes:
       - ../orchestrator/config.toml:/app/config.toml:ro
       - booth-logs:/var/log/booth
+
+  llama-vl:
+    image: local/llama.cpp:server-cuda-fresh
+    container_name: llama-vl
+    restart: unless-stopped
+    networks: [ai]
+    <<: *gpu
+    volumes:
+      - ${LLAMA_MODEL_DIR}:/models:ro
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --jinja
+      - --flash-attn
+      - "on"
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - "16384"
+      - --alias
+      - qwen3-vl
+      - -m
+      - /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
+      - --mmproj
+      - /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
