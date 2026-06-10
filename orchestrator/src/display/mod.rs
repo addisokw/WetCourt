@@ -8,7 +8,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use bytes::Bytes;
@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 use crate::config::InferenceConfig;
+use crate::crimes::{Crime, CrimeStore};
 use crate::inference::client::LlmClient;
 use crate::personas::{verdict_parse, Persona, PersonaRegistry};
 use crate::state_machine::{Command, Event};
@@ -44,6 +45,7 @@ pub struct AppState {
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
     pub personas: Arc<RwLock<PersonaRegistry>>,
+    pub crimes: Arc<RwLock<CrimeStore>>,
     pub inference_cfg: InferenceConfig,
 }
 
@@ -60,6 +62,11 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/persona/{id}/select", post(select_persona))
         .route("/operator/persona/{id}/save", post(save_persona))
         .route("/operator/persona/{id}/test", post(test_persona))
+        .route("/operator/crimes", get(list_crimes).post(add_crime))
+        .route("/operator/crimes/filter", post(set_crime_filter))
+        .route("/operator/crimes/queue", post(queue_charge))
+        .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
+        .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -400,6 +407,129 @@ async fn test_persona(
         None => TestResp { deliberation: full.trim().to_string(), guilty: false, intensity: 0 },
     };
     (StatusCode::OK, Json(resp)).into_response()
+}
+
+// ---- Crime list operator endpoints ----
+
+#[derive(Serialize)]
+struct CrimesResp {
+    crimes: Vec<Crime>,
+    categories: Vec<String>,
+    category_filter: Option<String>,
+    queue: Vec<String>,
+}
+
+async fn crimes_snapshot(s: &AppState) -> CrimesResp {
+    let store = s.crimes.read().await;
+    CrimesResp {
+        crimes: store.list().to_vec(),
+        categories: store.categories(),
+        category_filter: store.category_filter().map(str::to_string),
+        queue: store.queue().map(str::to_string).collect(),
+    }
+}
+
+async fn list_crimes(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    (StatusCode::OK, Json(crimes_snapshot(&s).await)).into_response()
+}
+
+#[derive(Deserialize)]
+struct AddCrimeReq {
+    category: String,
+    charge: String,
+}
+
+async fn add_crime(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<AddCrimeReq>,
+) -> impl IntoResponse {
+    let mut store = s.crimes.write().await;
+    match store.add(body.category, body.charge) {
+        Ok(c) => {
+            info!(id = c.id, "crime added");
+            (StatusCode::CREATED, Json(c.clone())).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+async fn update_crime(
+    AxumState(s): AxumState<AppState>,
+    Path(id): Path<u32>,
+    Json(body): Json<Crime>,
+) -> impl IntoResponse {
+    let mut store = s.crimes.write().await;
+    if store.get(id).is_none() {
+        return (StatusCode::NOT_FOUND, format!("unknown crime id {id}")).into_response();
+    }
+    match store.update(id, body) {
+        Ok(c) => (StatusCode::OK, Json(c.clone())).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+async fn delete_crime(
+    AxumState(s): AxumState<AppState>,
+    Path(id): Path<u32>,
+) -> impl IntoResponse {
+    let mut store = s.crimes.write().await;
+    match store.remove(id) {
+        Ok(()) => {
+            info!(id, "crime removed");
+            (StatusCode::NO_CONTENT, String::new()).into_response()
+        }
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct FilterReq {
+    /// None / null clears the filter (draw from all categories).
+    category: Option<String>,
+}
+
+async fn set_crime_filter(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<FilterReq>,
+) -> impl IntoResponse {
+    let mut store = s.crimes.write().await;
+    match store.set_category_filter(body.category) {
+        Ok(()) => {
+            info!(filter = ?store.category_filter(), "crime category filter set");
+            (StatusCode::NO_CONTENT, String::new()).into_response()
+        }
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct QueueReq {
+    charge: String,
+}
+
+async fn queue_charge(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<QueueReq>,
+) -> impl IntoResponse {
+    let mut store = s.crimes.write().await;
+    match store.queue_push(body.charge) {
+        Ok(()) => {
+            info!(depth = store.queue().count(), "charge queued for next trial");
+            (StatusCode::NO_CONTENT, String::new()).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+async fn unqueue_charge(
+    AxumState(s): AxumState<AppState>,
+    Path(index): Path<usize>,
+) -> impl IntoResponse {
+    let mut store = s.crimes.write().await;
+    match store.queue_remove(index) {
+        Ok(()) => (StatusCode::NO_CONTENT, String::new()).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
 }
 
 /// Forwards Display + DisplayBinary commands from the state machine and the

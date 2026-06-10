@@ -16,9 +16,40 @@ pub struct Config {
     pub logging: LoggingConfig,
     #[serde(default = "d_default_persona_id")]
     pub default_persona_id: String,
+    #[serde(default)]
+    pub crimes: CrimesConfig,
 }
 
 fn d_default_persona_id() -> String { "wettington".into() }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CrimesConfig {
+    /// Crimes file, relative to the config file's directory.
+    #[serde(default = "d_crimes_file")]
+    pub file: String,
+    /// "list" (default) draws charges from the curated file; "llm" restores
+    /// the legacy on-the-fly generation. Operator-queued charges take
+    /// precedence either way.
+    #[serde(default = "d_crimes_source")]
+    pub source: String,
+    /// How many recent draws to avoid repeating.
+    #[serde(default = "d_no_repeat_window")]
+    pub no_repeat_window: usize,
+}
+
+impl Default for CrimesConfig {
+    fn default() -> Self {
+        Self {
+            file: d_crimes_file(),
+            source: d_crimes_source(),
+            no_repeat_window: d_no_repeat_window(),
+        }
+    }
+}
+
+fn d_crimes_file() -> String { "crimes/wet_court_crimes.json".into() }
+fn d_crimes_source() -> String { "list".into() }
+fn d_no_repeat_window() -> usize { 15 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InferenceConfig {

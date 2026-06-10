@@ -1,10 +1,11 @@
 # Wet Court of Appeals
 
-A courtroom-themed interactive booth. An operator triggers a trial, the LLM
-invents an absurd charge against the next visitor, the visitor pleads their
-case into a microphone, the judge deliberates aloud, and a verdict is rendered
-theatrically — on guilty findings, a computer-aimed squirt gun fires. Audio,
-LLM, and TTS all run locally on an NVIDIA DGX Spark; no cloud round-trip.
+A courtroom-themed interactive booth. An operator triggers a trial, an absurd
+charge is drawn against the next visitor from an operator-curated crime list,
+the visitor pleads their case into a microphone, the judge deliberates aloud
+(LLM), and a verdict is rendered theatrically — on guilty findings, a
+computer-aimed squirt gun fires. Audio, LLM, and TTS all run locally on an
+NVIDIA DGX Spark; no cloud round-trip.
 
 ## Repo layout
 

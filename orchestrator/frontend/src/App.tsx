@@ -14,6 +14,7 @@ import {
   startTrial,
 } from './ws';
 import PersonaPanel from './PersonaPanel';
+import CrimesPanel from './CrimesPanel';
 import JudgeFace from './JudgeFace';
 import { CaseContent } from './CaseView';
 
@@ -107,6 +108,7 @@ export default function App() {
         <section class="deliberation">{deliberation()}</section>
       </Show>
       <PersonaPanel />
+      <CrimesPanel />
       <section class="log">
         <For each={log().slice().reverse()}>
           {(entry) => (

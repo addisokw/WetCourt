@@ -287,6 +287,7 @@ mod tests {
             display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
             logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },
             default_persona_id: "wettington".into(),
+            crimes: CrimesConfig::default(),
         }
     }
 

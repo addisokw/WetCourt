@@ -41,6 +41,13 @@ level_3 = 150
 level_4 = 200
 level_5 = 280
 
+[crimes]
+# Curated charge list (dir mounted into the container; operator edits
+# persist back into the repo checkout via the bind mount).
+file = "crimes/wet_court_crimes.json"
+source = "list"
+no_repeat_window = 15
+
 [trial]
 plea_window_secs = 20
 charge_display_secs = 5

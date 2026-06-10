@@ -124,4 +124,7 @@ services:
       RUST_LOG: info
     volumes:
       - ../orchestrator/config.toml:/app/config.toml:ro
+      # Writable: persona Save and crime curation persist back into the checkout.
+      - ../orchestrator/personas:/app/personas
+      - ../orchestrator/crimes:/app/crimes
       - booth-logs:/var/log/booth

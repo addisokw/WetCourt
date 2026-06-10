@@ -1,10 +1,12 @@
 # Ideas
 
-## Manual charge input
+## Manual charge input — ✅ implemented
 The operator panel should have an interface to queue up charges (manually type in charges and submit for next case).
+*(Crimes panel → "queue a charge for the next trial".)*
 
-## Creator mode
+## Creator mode — ✅ implemented (as category filter)
 Special mode that runs charges that are specific to a youtuber.
+*(Tag the creator's charges with a category in the crime list, then "draw only from" that category in the Crimes panel.)*
 
 ## Verdict drop
 A mechanical “GUILTY / INNOCENT” placard that physically drops from above the bench at verdict time. Wile E. Coyote energy. More committed than a screen.

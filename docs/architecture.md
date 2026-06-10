@@ -12,7 +12,10 @@ This document captures architectural decisions and is intended to inform an impl
 
 1. **Idle**: Booth runs an attractor mode on the display.
 2. **Operator triggers** a new trial (button press / keyboard).
-3. **Charge generation**: LLM produces an absurd charge against the next visitor.
+3. **Charge selection**: an absurd charge is drawn from the curated list in
+   `orchestrator/crimes/wet_court_crimes.json` — operator-queued charges first,
+   then a random draw honoring an optional category filter. (Originally
+   LLM-generated on the fly; `[crimes] source = "llm"` restores that.)
 4. **Charge displayed** on the big screen and read aloud via TTS.
 5. **Plea window**: Visitor has ~20 seconds to plead their case into a microphone (push-to-talk).
 6. **Transcription**: Audio → text via local STT.

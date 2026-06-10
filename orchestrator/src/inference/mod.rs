@@ -4,6 +4,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 
 use crate::config::Config;
+use crate::crimes::CrimeStore;
 use crate::personas::PersonaRegistry;
 use crate::state_machine::{Command, Event};
 
@@ -16,6 +17,7 @@ pub mod verdict;
 pub async fn run(
     cfg: Arc<Config>,
     personas: Arc<RwLock<PersonaRegistry>>,
+    crimes: Arc<RwLock<CrimeStore>>,
     mut cmd_rx: mpsc::Receiver<Command>,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
@@ -29,13 +31,13 @@ pub async fn run(
     while let Some(cmd) = cmd_rx.recv().await {
         let cfg = cfg.clone();
         let personas = personas.clone();
+        let crimes = crimes.clone();
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
         match cmd {
             Command::GenerateCharge => {
                 tokio::spawn(async move {
-                    if real { charge::real(cfg, event_tx).await }
-                    else    { charge::mock(cfg, event_tx).await }
+                    charge::next(cfg, crimes, real, event_tx).await;
                 });
             }
             Command::Transcribe(audio) => {

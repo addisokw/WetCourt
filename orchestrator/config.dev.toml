@@ -48,6 +48,14 @@ level_3 = 150
 level_4 = 200
 level_5 = 280
 
+[crimes]
+# Charges are drawn from this curated list (path relative to this file).
+# source = "llm" restores legacy on-the-fly generation; operator-queued
+# charges take precedence either way.
+file = "crimes/wet_court_crimes.json"
+source = "list"
+no_repeat_window = 15
+
 [trial]
 plea_window_secs = 20
 charge_display_secs = 5

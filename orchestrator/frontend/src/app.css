@@ -637,3 +637,70 @@ button.plea.recording:hover { background: #8b2326; }
   padding-top: 0.4rem;
 }
 .status-line .status { color: #56d364; }
+
+/* ---- Crimes panel ---- */
+.crimes-panel .charge-queue {
+  margin: 0.3rem 0 0;
+  padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.crimes-panel .charge-queue li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #e3b341;
+}
+.crimes-panel .row-line input[type="text"] { flex: 1; }
+.crimes-panel .category-input { max-width: 12ch; flex: 0 1 auto !important; }
+.crime-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+}
+.crime-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px dotted #21262d;
+}
+.crime-list li:last-child { border-bottom: none; }
+.crime-list li.disabled .crime-text,
+.crime-list li.disabled .crime-cat { color: #484f58; text-decoration: line-through; }
+.crime-cat {
+  color: #d2a8ff;
+  font-size: 0.75rem;
+  min-width: 8ch;
+  text-transform: uppercase;
+}
+.crime-text { flex: 1; color: #c9d1d9; font-size: 0.85rem; }
+.crime-list button.mini {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+}
+.crime-list button.mini.danger:hover,
+.charge-queue button.mini:hover { background: #6e1b1b; border-color: #f85149; }
+.charge-queue button.mini {
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid #30363d;
+}
+.crime-edit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.2rem 0;
+}
+.crime-edit textarea { resize: vertical; }

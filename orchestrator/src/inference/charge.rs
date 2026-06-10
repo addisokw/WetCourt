@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 
 use crate::config::Config;
+use crate::crimes::CrimeStore;
 use crate::fallbacks;
 use crate::state_machine::Event;
 
@@ -26,6 +27,42 @@ Output JSON only, no preamble.";
 #[derive(Debug, Deserialize)]
 struct ChargeOut {
     charge: String,
+}
+
+/// Charge for the next trial. Operator-queued charges always win; then the
+/// curated list (when `crimes.source = "list"`, the default); LLM generation
+/// only when `source = "llm"`. An empty/filtered-out list falls back to the
+/// canned charges rather than stalling the trial.
+pub async fn next(
+    cfg: Arc<Config>,
+    crimes: Arc<RwLock<CrimeStore>>,
+    real_llm: bool,
+    event_tx: mpsc::Sender<Event>,
+) {
+    let from_list = cfg.crimes.source != "llm";
+    let picked = {
+        let mut store = crimes.write().await;
+        if from_list { store.draw() } else { store.queue_pop() }
+    };
+    match picked {
+        Some(charge) => {
+            info!(%charge, "charge selected");
+            let _ = event_tx.send(Event::ChargeReady(charge)).await;
+        }
+        None if from_list => {
+            warn!("crime list empty or fully filtered; using canned fallback");
+            let _ = event_tx
+                .send(Event::ChargeReady(fallbacks::charges::random()))
+                .await;
+        }
+        None => {
+            if real_llm {
+                real(cfg, event_tx).await
+            } else {
+                mock(cfg, event_tx).await
+            }
+        }
+    }
 }
 
 pub async fn mock(cfg: Arc<Config>, event_tx: mpsc::Sender<Event>) {

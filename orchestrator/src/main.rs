@@ -7,6 +7,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod config;
+mod crimes;
 mod display;
 mod fallbacks;
 mod hardware;
@@ -57,15 +58,33 @@ async fn main() -> Result<()> {
     let personas = Arc::new(tokio::sync::RwLock::new(registry));
     tracing::info!(dir = %personas_dir.display(), active = %cfg.default_persona_id, "personas loaded");
 
+    // Crime list: same convention as personas — resolved relative to the
+    // config file so the curated file travels with the deployment.
+    let crimes_path = cli
+        .config
+        .parent()
+        .map(|p| p.join(&cfg.crimes.file))
+        .unwrap_or_else(|| PathBuf::from(&cfg.crimes.file));
+    let store = crimes::CrimeStore::load_from_file(&crimes_path, cfg.crimes.no_repeat_window)
+        .map_err(|e| anyhow::anyhow!("loading crimes from {}: {e:#}", crimes_path.display()))?;
+    tracing::info!(
+        path = %crimes_path.display(),
+        count = store.list().len(),
+        source = %cfg.crimes.source,
+        "crimes loaded"
+    );
+    let crimes = Arc::new(tokio::sync::RwLock::new(store));
+
     // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
     // still mocked. Set [inference] mode = "mock" for offline dev.
     {
         let cfg = cfg.clone();
         let personas = personas.clone();
+        let crimes = crimes.clone();
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
         tokio::spawn(async move {
-            inference::run(cfg, personas, inference_rx, event_tx, display_tx).await;
+            inference::run(cfg, personas, crimes, inference_rx, event_tx, display_tx).await;
         });
     }
 
@@ -101,6 +120,7 @@ async fn main() -> Result<()> {
         ws_clients: Arc::new(AtomicUsize::new(0)),
         plea_buffer: Arc::new(Mutex::new(Vec::new())),
         personas,
+        crimes,
         inference_cfg: cfg.inference.clone(),
     };
     let app = display::router(app_state);

@@ -1,10 +1,10 @@
 # Wet Court orchestrator
 
 The booth's brain: a Rust state machine driving the full trial pipeline —
-charge generation (LLM), plea recording (browser mic), transcription (STT),
-deliberation (streamed LLM), verdict pronunciation (pipelined TTS), and the
-sentence (squirt hardware) — plus an axum HTTP/WS server and a SolidJS
-frontend with operator console, judge face, and case view.
+charge selection (curated list), plea recording (browser mic), transcription
+(STT), deliberation (streamed LLM), verdict pronunciation (pipelined TTS),
+and the sentence (squirt hardware) — plus an axum HTTP/WS server and a
+SolidJS frontend with operator console, judge face, and case view.
 
 See `../docs/architecture.md` for the full design. All phases through 4
 (WiFi hardware) are implemented; only the USB-serial hardware driver remains
@@ -87,8 +87,35 @@ PUT  /operator/persona/{id}             edit a persona
 POST /operator/persona/{id}/select      make it the active judge
 POST /operator/persona/{id}/save        persist to personas/{id}.toml
 POST /operator/persona/{id}/test        dry-run a charge+plea, returns deliberation/verdict/intensity
+GET  /operator/crimes                   full crime list + categories + draw filter + queue
+POST /operator/crimes                   add a crime {category, charge} (persists)
+PUT  /operator/crimes/{id}              edit a crime (text/category/enabled, persists)
+DELETE /operator/crimes/{id}            remove a crime (persists)
+POST /operator/crimes/filter            {category} restricts random draws; {category: null} clears
+POST /operator/crimes/queue             {charge} queue a manual charge for the next trial
+DELETE /operator/crimes/queue/{index}   drop a queued charge
 GET  /health                            liveness probe
 ```
+
+## Charges (curated crime list)
+
+Charges are drawn from `crimes/wet_court_crimes.json` — a flat list of
+`{id, category, charge, enabled}` entries — instead of being LLM-generated,
+so operators control exactly what the booth can accuse people of. Selection
+order at trial start:
+
+1. **Operator queue** — charges typed into the console's Crimes panel run
+   next, in order (the "manual charge input" idea).
+2. **Random draw** from enabled crimes, honoring the optional **category
+   filter** (set "draw only from" in the panel — this is how creator-specific
+   charge sets work: tag them with a category and filter to it), and avoiding
+   the last `no_repeat_window` draws.
+3. **Canned fallback** if the list is empty or fully filtered out.
+
+The Crimes panel on the operator console is the curation tool: add, edit,
+delete, enable/disable per crime, all persisted straight back to the JSON
+file. `[crimes] source = "llm"` in config restores the old on-the-fly
+generation (the queue still takes precedence).
 
 ## Judge personas
 

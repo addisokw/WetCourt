@@ -1,0 +1,360 @@
+{
+  "exhibit": "Wet Court",
+  "description": "Crimes drawn randomly for the AI judge. Each charge is read via TTS and displayed on the dashboard.",
+  "crimes": [
+    {
+      "id": 2,
+      "category": "tech",
+      "charge": "The defendant stands accused of claiming to have read the terms and conditions.",
+      "enabled": true
+    },
+    {
+      "id": 3,
+      "category": "tech",
+      "charge": "The defendant stands accused of maintaining 247 open browser tabs with intent to never read them.",
+      "enabled": true
+    },
+    {
+      "id": 4,
+      "category": "tech",
+      "charge": "The defendant stands accused of clicking 'Remind me tomorrow' on a software update for eleven consecutive months.",
+      "enabled": true
+    },
+    {
+      "id": 5,
+      "category": "tech",
+      "charge": "The defendant stands accused of typing 'lol' with a completely straight face.",
+      "enabled": true
+    },
+    {
+      "id": 6,
+      "category": "tech",
+      "charge": "The defendant stands accused of watching a tutorial at 2x speed and claiming mastery of the subject.",
+      "enabled": true
+    },
+    {
+      "id": 7,
+      "category": "tech",
+      "charge": "The defendant stands accused of unplugging it and plugging it back in, and billing this as technical expertise.",
+      "enabled": true
+    },
+    {
+      "id": 8,
+      "category": "tech",
+      "charge": "The defendant stands accused of owning a drawer of cables for devices they no longer possess.",
+      "enabled": true
+    },
+    {
+      "id": 9,
+      "category": "tech",
+      "charge": "The defendant stands accused of replying to a group chat three days late with 'sorry, just saw this.'",
+      "enabled": true
+    },
+    {
+      "id": 10,
+      "category": "tech",
+      "charge": "The defendant stands accused of using their smart TV's on-screen keyboard without filing for emotional damages.",
+      "enabled": true
+    },
+    {
+      "id": 11,
+      "category": "tech",
+      "charge": "The defendant stands accused of taking 14 nearly identical photos and deleting none of them.",
+      "enabled": true
+    },
+    {
+      "id": 12,
+      "category": "tech",
+      "charge": "The defendant stands accused of rating an app 5 stars solely to make the popup go away.",
+      "enabled": true
+    },
+    {
+      "id": 13,
+      "category": "social",
+      "charge": "The defendant stands accused of saying 'we should hang out soon' with no intention of following through.",
+      "enabled": true
+    },
+    {
+      "id": 14,
+      "category": "social",
+      "charge": "The defendant stands accused of waving at someone who was waving at the person behind them, then committing to the wave.",
+      "enabled": true
+    },
+    {
+      "id": 15,
+      "category": "social",
+      "charge": "The defendant stands accused of saying 'you too' when the waiter said 'enjoy your meal.'",
+      "enabled": true
+    },
+    {
+      "id": 16,
+      "category": "social",
+      "charge": "The defendant stands accused of pretending not to see an acquaintance in the grocery store.",
+      "enabled": true
+    },
+    {
+      "id": 17,
+      "category": "social",
+      "charge": "The defendant stands accused of asking 'how are you' while continuing to walk away.",
+      "enabled": true
+    },
+    {
+      "id": 18,
+      "category": "social",
+      "charge": "The defendant stands accused of laughing at a joke they did not hear.",
+      "enabled": true
+    },
+    {
+      "id": 19,
+      "category": "social",
+      "charge": "The defendant stands accused of rehearsing an argument in the shower against an opponent who was not present.",
+      "enabled": true
+    },
+    {
+      "id": 20,
+      "category": "social",
+      "charge": "The defendant stands accused of saying 'I'm five minutes away' while still at home.",
+      "enabled": true
+    },
+    {
+      "id": 21,
+      "category": "social",
+      "charge": "The defendant stands accused of holding the door for someone slightly too far away, forcing them to jog.",
+      "enabled": true
+    },
+    {
+      "id": 22,
+      "category": "social",
+      "charge": "The defendant stands accused of forgetting a person's name immediately upon introduction, then knowing them for six years.",
+      "enabled": true
+    },
+    {
+      "id": 23,
+      "category": "social",
+      "charge": "The defendant stands accused of clapping when the airplane landed.",
+      "enabled": true
+    },
+    {
+      "id": 24,
+      "category": "social",
+      "charge": "The defendant stands accused of telling a long story that had no ending, point, or discernible structure.",
+      "enabled": true
+    },
+    {
+      "id": 25,
+      "category": "food",
+      "charge": "The defendant stands accused of eating fries out of the bag before arriving home.",
+      "enabled": true
+    },
+    {
+      "id": 26,
+      "category": "food",
+      "charge": "The defendant stands accused of microwaving fish in a shared workplace.",
+      "enabled": true
+    },
+    {
+      "id": 27,
+      "category": "food",
+      "charge": "The defendant stands accused of double-dipping at a social gathering while maintaining eye contact.",
+      "enabled": true
+    },
+    {
+      "id": 28,
+      "category": "food",
+      "charge": "The defendant stands accused of putting an empty container back in the refrigerator.",
+      "enabled": true
+    },
+    {
+      "id": 29,
+      "category": "food",
+      "charge": "The defendant stands accused of claiming they were 'not hungry' and then eating half of someone else's fries.",
+      "enabled": true
+    },
+    {
+      "id": 30,
+      "category": "food",
+      "charge": "The defendant stands accused of letting a banana achieve full decomposition on the counter while claiming they would 'make banana bread.'",
+      "enabled": true
+    },
+    {
+      "id": 31,
+      "category": "food",
+      "charge": "The defendant stands accused of biting into a chocolate chip cookie that was, in fact, oatmeal raisin, and blaming the cookie.",
+      "enabled": true
+    },
+    {
+      "id": 32,
+      "category": "food",
+      "charge": "The defendant stands accused of drinking directly from the carton in the presence of cups.",
+      "enabled": true
+    },
+    {
+      "id": 33,
+      "category": "food",
+      "charge": "The defendant stands accused of taking the last slice without performing the customary offer ritual.",
+      "enabled": true
+    },
+    {
+      "id": 34,
+      "category": "food",
+      "charge": "The defendant stands accused of owning seventeen spices and using exclusively salt.",
+      "enabled": true
+    },
+    {
+      "id": 35,
+      "category": "household",
+      "charge": "The defendant stands accused of operating a chair that functions solely as a clothing repository.",
+      "enabled": true
+    },
+    {
+      "id": 36,
+      "category": "household",
+      "charge": "The defendant stands accused of setting seven alarms and respecting none of them.",
+      "enabled": true
+    },
+    {
+      "id": 37,
+      "category": "household",
+      "charge": "The defendant stands accused of cleaning their room by relocating one pile to a different location.",
+      "enabled": true
+    },
+    {
+      "id": 38,
+      "category": "household",
+      "charge": "The defendant stands accused of saving a glass jar for a purpose that has never materialized.",
+      "enabled": true
+    },
+    {
+      "id": 39,
+      "category": "household",
+      "charge": "The defendant stands accused of leaving one square of toilet paper on the roll to avoid replacement duty.",
+      "enabled": true
+    },
+    {
+      "id": 40,
+      "category": "household",
+      "charge": "The defendant stands accused of running the dishwasher at 40% capacity in a time of crisis.",
+      "enabled": true
+    },
+    {
+      "id": 41,
+      "category": "household",
+      "charge": "The defendant stands accused of stepping over the same item on the stairs for three weeks.",
+      "enabled": true
+    },
+    {
+      "id": 42,
+      "category": "absurd",
+      "charge": "The defendant stands accused of walking suspiciously.",
+      "enabled": true
+    },
+    {
+      "id": 43,
+      "category": "absurd",
+      "charge": "The defendant stands accused of existing in a manner unbecoming.",
+      "enabled": true
+    },
+    {
+      "id": 44,
+      "category": "absurd",
+      "charge": "The defendant stands accused of thinking about crime.",
+      "enabled": true
+    },
+    {
+      "id": 45,
+      "category": "absurd",
+      "charge": "The defendant stands accused of having a face that suggests they did it.",
+      "enabled": true
+    },
+    {
+      "id": 46,
+      "category": "absurd",
+      "charge": "The defendant stands accused of blinking in a courtroom. This courtroom.",
+      "enabled": true
+    },
+    {
+      "id": 47,
+      "category": "absurd",
+      "charge": "The defendant stands accused of standing where they are currently standing.",
+      "enabled": true
+    },
+    {
+      "id": 48,
+      "category": "absurd",
+      "charge": "The defendant stands accused of breathing audibly with malice aforethought.",
+      "enabled": true
+    },
+    {
+      "id": 49,
+      "category": "absurd",
+      "charge": "The defendant stands accused of being dry. The court finds this suspicious.",
+      "enabled": true
+    },
+    {
+      "id": 50,
+      "category": "absurd",
+      "charge": "The defendant stands accused of crimes. You know what you did.",
+      "enabled": true
+    },
+    {
+      "id": 51,
+      "category": "absurd",
+      "charge": "The defendant stands accused of approaching this exhibit voluntarily, which implies guilt.",
+      "enabled": true
+    },
+    {
+      "id": 52,
+      "category": "absurd",
+      "charge": "The defendant stands accused of conspiracy to remain un-squirted.",
+      "enabled": true
+    },
+    {
+      "id": 53,
+      "category": "event",
+      "charge": "The defendant stands accused of saying 'I could build that' at a maker faire and building nothing.",
+      "enabled": true
+    },
+    {
+      "id": 54,
+      "category": "event",
+      "charge": "The defendant stands accused of collecting free stickers for a laptop that has no remaining surface area.",
+      "enabled": true
+    },
+    {
+      "id": 55,
+      "category": "event",
+      "charge": "The defendant stands accused of starting a project with great enthusiasm and abandoning it at 90% completion.",
+      "enabled": true
+    },
+    {
+      "id": 56,
+      "category": "event",
+      "charge": "The defendant stands accused of buying a Raspberry Pi with no plan, no purpose, and no remorse.",
+      "enabled": true
+    },
+    {
+      "id": 57,
+      "category": "event",
+      "charge": "The defendant stands accused of explaining their hobby to someone who asked a simple yes-or-no question.",
+      "enabled": true
+    },
+    {
+      "id": 58,
+      "category": "event",
+      "charge": "The defendant stands accused of owning a 3D printer that exclusively prints upgrades for itself.",
+      "enabled": true
+    },
+    {
+      "id": 59,
+      "category": "event",
+      "charge": "The defendant stands accused of saying 'it works on my machine' as a legal defense.",
+      "enabled": true
+    },
+    {
+      "id": 60,
+      "category": "event",
+      "charge": "The defendant stands accused of hoarding components for a project scheduled to begin 'someday.'",
+      "enabled": true
+    }
+  ]
+}
