@@ -84,7 +84,7 @@ All processes run as containers on the Spark via the existing `dgx-ai-stack/dock
 |---|---|---|
 | `orchestrator` | Rust state machine, WS server, serial owner | `docker compose up -d` |
 | `litellm` | OpenAI-compatible router on `:4000` (LAN-exposed) | `restart: unless-stopped` |
-| `llama-server` | Qwen3.6-35B-A3B chat (`/v1/chat/completions`) | `restart: unless-stopped` |
+| `vllm-nvfp4` | Qwen3.6-35B-A3B-NVFP4 chat + vision (`/v1/chat/completions`) | `restart: unless-stopped` |
 | `parakeet` | NeMo Parakeet TDT 0.6B v2 STT (`/v1/audio/transcriptions`) | `restart: unless-stopped` |
 | `kokoro` | Kokoro-FastAPI TTS, 67 voices (`/v1/audio/speech`) | `restart: unless-stopped` |
 | Browser (Chrome kiosk) | Display, mic, speakers | Launched outside compose by a small `kiosk.service` systemd unit on the Spark's display |
@@ -278,13 +278,13 @@ Send audio over the WebSocket as binary frames. The backend converts to f32 PCM 
 
 TTS audio arrives as a binary blob (WAV or raw PCM). Decode via `AudioContext.decodeAudioData` and play via `BufferSource`. Notify backend with `{ type: 'tts_finished' }` on `onended`.
 
-### 4.3 Inference Stack (LiteLLM + llama-server + Parakeet + Kokoro)
+### 4.3 Inference Stack (LiteLLM + vllm-nvfp4 + Parakeet + Kokoro)
 
 All model inference runs as containers on the Spark behind a single OpenAI-compatible router. The orchestrator hits one base URL (`http://litellm:4000` from inside the docker network) and authenticates with a bearer token from `LITELLM_MASTER_KEY`.
 
 | Endpoint | Backend container | Model |
 |---|---|---|
-| `/v1/chat/completions` | `llama-server` (`local/llama.cpp:server-cuda-fresh`) | Qwen3.6-35B-A3B (UD-Q4_K_M GGUF) |
+| `/v1/chat/completions` | `vllm-nvfp4` (`nvcr.io/nvidia/vllm:26.05.post1-py3`) | Qwen3.6-35B-A3B-NVFP4 (vLLM) |
 | `/v1/audio/speech` | `kokoro` (`kokoro-tts-arm64`) | Kokoro 82M, voice `bm_george` (default judge) |
 | `/v1/audio/transcriptions` | `parakeet` (NeMo on NGC pytorch:25.11) | Parakeet TDT 0.6B v2, exposed as `whisper-1` |
 | `/v1/models` | litellm | lists the three above |
@@ -295,16 +295,16 @@ This is exactly the stack documented in [`dgx-ai-stack/README.md`](dgx-ai-stack/
 
 `POST /v1/chat/completions` with:
 - `model: "qwen3.6-35b-a3b"`
-- `chat_template_kwargs: {"enable_thinking": false}` — **booth default**. With thinking on, expect 30+ s while the model reasons silently before producing any output. The booth needs <8 s end-to-end.
-- `response_format: {"type": "json_schema", "json_schema": …}` for structured charge/verdict output. llama-server honors JSON Schema via grammar-constrained decoding through the OpenAI-compat path.
+- **Thinking is off by default** — litellm injects `enable_thinking: false` for this model, so callers don't send it. With thinking on the model reasons silently for 30+ s; the booth needs <8 s end-to-end. Pass `chat_template_kwargs: {"enable_thinking": true}` only when you explicitly want reasoning.
+- `response_format: {"type": "json_schema", "json_schema": …}` for structured charge/verdict output. vLLM honors JSON Schema via guided/structured-outputs decoding through the OpenAI-compat path.
 - `stream: true` for the verdict deliberation (so the frontend can render tokens live via SSE).
 - `stream: false` for charge generation.
 
-Throughput on the Spark: ~65 tokens/sec decode, ~2 s for a typical short reply with thinking off.
+Throughput on the Spark: **~70 tokens/sec** decode (NVFP4 on vLLM), ~2 s for a typical short reply.
 
 #### Why not Ollama
 
-Earlier drafts assumed Ollama. The Spark stack uses llama-server directly because (a) it's already running and tuned for Qwen3.6 MoE on Blackwell, (b) LiteLLM gives us OpenAI compatibility for free, and (c) putting STT and TTS behind the same router means one client, one auth model.
+Earlier drafts assumed Ollama. The Spark stack uses **vLLM (NVFP4)** directly because (a) it's the fastest path on Blackwell (FP4 weights + CUDA graphs, ~70 vs ~48 tok/s on the old llama.cpp Q4) and serves chat + vision from one model, (b) LiteLLM gives us OpenAI compatibility for free, and (c) putting STT and TTS behind the same router means one client, one auth model.
 
 ### 4.4 Microcontroller
 
@@ -846,7 +846,7 @@ WantedBy=graphical.target
 
 Suggested phasing — each phase produces a working artifact you can demo.
 
-The DGX Spark inference stack (LiteLLM + llama-server + parakeet + kokoro) is **already running** — see `dgx-ai-stack/README.md` and the `dgx-ai-stack/sample-benchmark.py` end-to-end check. The roadmap below is for everything *above* that line: the orchestrator, frontend, microcontroller, and the booth itself.
+The DGX Spark inference stack (LiteLLM + vllm-nvfp4 + parakeet + kokoro) is **already running** — see `dgx-ai-stack/README.md` and the `dgx-ai-stack/sample-benchmark.py` end-to-end check. The roadmap below is for everything *above* that line: the orchestrator, frontend, microcontroller, and the booth itself.
 
 ### Phase 1: Skeleton with mocks
 

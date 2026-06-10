@@ -17,39 +17,53 @@ networks:
 volumes:
   parakeet-cache: {}
   booth-logs: {}
+  vllm-cache: {}   # persists vLLM's compiled CUDA graphs so restarts skip the ~2 min compile
 
 services:
-  llama-server:
-    image: local/llama.cpp:server-cuda-fresh
-    build:
-      context: ${LLAMA_BUILD_CONTEXT}
-      dockerfile: ${PWD:-.}/llama-cpp/Dockerfile
-    container_name: llama-server
+  # NVFP4 Qwen3.6-35B-A3B on vLLM — serves BOTH chat (qwen3.6-35b-a3b) and Frigate
+  # vision (qwen3-vl alias) via litellm. NVFP4 uses Blackwell's FP4 tensor cores:
+  # ~48% faster text decode than the old llama.cpp Q4, and multimodal in one model.
+  # MoE backend auto-selects (MARLIN on SM121) — do NOT set VLLM_*MOE* env (breaks the
+  # selection oracle on this container). First start compiles ~2 min (cached after).
+  vllm-nvfp4:
+    image: nvcr.io/nvidia/vllm:26.05.post1-py3
+    container_name: vllm-nvfp4
     restart: unless-stopped
     networks: [ai]
     <<: *gpu
+    ipc: host
+    environment:
+      VLLM_CACHE_ROOT: /cache
     volumes:
       - ${LLAMA_MODEL_DIR}:/models:ro
+      - vllm-cache:/cache
     command:
+      - vllm
+      - serve
+      - /models/Qwen3.6-35B-A3B-NVFP4
+      - --served-model-name
+      - qwen3.6-nvfp4
       - --host
       - 0.0.0.0
       - --port
       - "8000"
-      - --jinja
-      - --flash-attn
-      - "on"
-      - --n-gpu-layers
-      - "${LLAMA_NGL}"
-      - --ctx-size
-      - "${LLAMA_CTX}"
-      - --alias
-      - qwen3.6-35b-a3b
-      - -m
-      - /models/${LLAMA_MODEL_FILE}
-      # Qwen3.6-35B-A3B is multimodal; load its vision projector so the chat
-      # endpoint can also accept images. mmproj from the same Unsloth GGUF repo.
-      - --mmproj
-      - /models/mmproj-Qwen3.6-35B-A3B-BF16.gguf
+      - --quantization
+      - modelopt
+      - --gpu-memory-utilization
+      - "0.5"
+      - --max-model-len
+      - "16384"
+      - --kv-cache-dtype
+      - fp8_e4m3
+      - --reasoning-parser
+      - qwen3
+      # MoE backend is left to vLLM's auto-oracle (picks MARLIN weight-only FP4 on sm_121).
+      # We tested forcing native FP4 via `--moe-backend flashinfer_b12x`: it loads but gives
+      # IDENTICAL single-stream decode (71.0 vs 70.7 tok/s) because decode is memory-bandwidth
+      # bound, not compute bound — native FP4 only helps compute-bound high-concurrency/large
+      # prefill. Add `--moe-backend flashinfer_b12x` if the booth ever needs high batch.
+    ports:
+      - "0.0.0.0:8003:8000"
 
   parakeet:
     image: local/parakeet:latest
@@ -80,7 +94,7 @@ services:
     restart: unless-stopped
     networks: [ai]
     depends_on:
-      - llama-server
+      - vllm-nvfp4
       - parakeet
       - kokoro
     ports:
@@ -111,30 +125,3 @@ services:
     volumes:
       - ../orchestrator/config.toml:/app/config.toml:ro
       - booth-logs:/var/log/booth
-
-  llama-vl:
-    image: local/llama.cpp:server-cuda-fresh
-    container_name: llama-vl
-    restart: unless-stopped
-    networks: [ai]
-    <<: *gpu
-    volumes:
-      - ${LLAMA_MODEL_DIR}:/models:ro
-    command:
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8001"
-      - --jinja
-      - --flash-attn
-      - "on"
-      - --n-gpu-layers
-      - "99"
-      - --ctx-size
-      - "16384"
-      - --alias
-      - qwen3-vl
-      - -m
-      - /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
-      - --mmproj
-      - /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf

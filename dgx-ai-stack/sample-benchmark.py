@@ -12,7 +12,7 @@ memory is snapshotted via `docker stats` once steady state is reached.
 
 The Spark's GB10 uses unified memory: nvidia-smi reports memory.used as N/A,
 so the closest analogue to "VRAM use" is the resident memory of the model
-containers (kokoro, whisper-server, llama-server) which we report explicitly.
+containers (kokoro, parakeet, vllm-nvfp4) which we report explicitly.
 """
 
 import os
@@ -36,9 +36,9 @@ LLM_MODEL = "qwen3.6-35b-a3b"
 TTS_MODEL = "kokoro-tts"
 TTS_VOICE = "bm_george"  # gravelly British judge
 
-LLM_MAX_TOKENS = 4000  # Qwen3 reasoning chews ~1500-1750 tokens before the verdict; this leaves ample answer headroom inside the 32k ctx
+LLM_MAX_TOKENS = 4000  # thinking is off by default (litellm injects enable_thinking:false); well inside the 16k served ctx
 
-CONTAINER_NAMES = ["llama-server", "whisper-server", "kokoro", "litellm"]
+CONTAINER_NAMES = ["vllm-nvfp4", "parakeet", "kokoro", "litellm"]
 
 # A realistic plea audio file you've pre-recorded. ~15-20 seconds is representative.
 SAMPLE_PLEA_AUDIO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_plea.wav")

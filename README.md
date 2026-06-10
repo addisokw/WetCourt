@@ -14,7 +14,7 @@ LLM, and TTS all run locally on an NVIDIA DGX Spark; no cloud round-trip.
 │   ├── architecture.md         Design doc: state machine, protocols, boundaries
 │   └── judge-persona-notes.md  Notes on judge characters and TTS delivery
 ├── dgx-ai-stack/               Self-hosted AI stack on the Spark
-│                               (LiteLLM + llama.cpp + Kokoro TTS + Parakeet STT)
+│                               (LiteLLM + vLLM NVFP4 + Kokoro TTS + Parakeet STT)
 │                               plus the end-to-end pipeline benchmark
 ├── orchestrator/               Rust state machine, axum WS server, SolidJS kiosk UI
 └── firmware/                   Rust firmware for M5Stack NanoC6 (squirt valve, gavel, button)

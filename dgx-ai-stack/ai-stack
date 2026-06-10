@@ -5,7 +5,7 @@
 #   ./ai-stack down        # stop and remove containers
 #   ./ai-stack status      # show service health
 #   ./ai-stack logs        # follow combined logs
-#   ./ai-stack logs llama-server   # follow one service
+#   ./ai-stack logs vllm-nvfp4     # follow one service
 #   ./ai-stack restart kokoro      # restart one service
 #   ./ai-stack ssh         # drop into the ai-stack dir on the Spark
 set -euo pipefail
