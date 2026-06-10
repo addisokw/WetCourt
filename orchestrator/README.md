@@ -21,7 +21,42 @@ Any failure drops into `Error` (auto-recovers) with canned fallback charges
 and verdicts, so the booth never stalls in front of a visitor. An e-stop is
 honored from every state.
 
-## Dev (no MCU, no Docker)
+## Deployment topologies
+
+The orchestrator's location is a config knob, not an architectural
+assumption — same binary, same code path, different `inference.base_url`.
+Two shapes are supported, and the checked-in config files are the starting
+points for each:
+
+**A. Everything on the Spark** (`config.toml`) — the orchestrator runs as a
+container in `../dgx-ai-stack/docker-compose.yml` next to the inference
+stack. `./ai-stack` brings it all up together.
+
+**B. Inference on the Spark, orchestrator anywhere** (`config.dev.toml`) —
+`cargo run` on a laptop or booth PC that reaches LiteLLM over the network.
+This is the everyday dev loop, but it's equally valid for production: the
+MCU dials the orchestrator over WiFi, so real hardware works from any host
+the MCU can reach. (Today this shape needs *no* compose change for hardware,
+unlike A — see the `:8090` gap note under Production.)
+
+What actually differs:
+
+| Knob | A: co-located (`config.toml`) | B: remote (`config.dev.toml`) |
+|---|---|---|
+| `inference.base_url` | `http://litellm:4000` (docker network) | Spark's LAN/Tailscale address, e.g. `http://100.86.115.53:4000` |
+| API key | injected by compose from the Spark's `.env` | auto-loaded from `.env` (repo root or `dgx-ai-stack/.env`) |
+| `hardware.driver` | `tcp` — MCU dials the Spark's `:8090` | `mock` by default; set `tcp` and the MCU dials this machine's `:8090` |
+| Personas + crime list | bind-mounted from the Spark's checkout | read/written in the local checkout |
+| Logs / transcripts | `booth-logs` volume (`/var/log/booth/`) | `./booth.log`, `./transcripts.jsonl` |
+| Kiosk / monitor URLs | `http://<spark>:8080` | `http://<this machine>:8080` |
+
+Prefer overriding single knobs with `BOOTH__…` env vars (e.g.
+`BOOTH__HARDWARE__DRIVER=tcp`) over editing the files. If you run shape B
+against a Spark whose own orchestrator container is up, stop the Spark's
+copy so there aren't two consoles:
+`cd ../dgx-ai-stack && ./ai-stack stop orchestrator`.
+
+## Dev quick start — shape B (no MCU, no Docker)
 
 ```powershell
 # One-time
@@ -146,7 +181,7 @@ config you're using. Then flash and configure the firmware in `../firmware/`
 `Event::OperatorStart`, so pressing it kicks off a trial without the
 browser. `driver = "serial"` (USB) is declared in config but unimplemented.
 
-## Production (on the Spark)
+## Production on the Spark — shape A
 
 The `orchestrator` service is wired into `../dgx-ai-stack/docker-compose.yml`
 (multi-stage Dockerfile: frontend build → Rust build → slim runtime). From

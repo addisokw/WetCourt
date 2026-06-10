@@ -66,6 +66,10 @@ reboot of the Spark the stack comes back automatically — you only need
 | `litellm` | `ghcr.io/berriai/litellm:main-stable` | 4000 (LAN-exposed) | ~1 GiB | OpenAI router |
 | `orchestrator` | `local/booth-orchestrator:latest` (built from `../orchestrator`) | 8080 (LAN-exposed) | small | Booth state machine + operator/visitor UI |
 
+The orchestrator can instead run on another machine against this stack
+(`../orchestrator/README.md` § Deployment topologies). In that shape, stop
+the Spark's copy: `./ai-stack stop orchestrator`.
+
 Working set: ~67 GiB out of 121 GiB — vLLM reserves ~60 GiB up front (model ~20 GiB +
 KV cache at `--gpu-memory-utilization 0.5`), parakeet ~3 GiB, the rest small. Lower the
 util if you need more headroom. Power: ~15 W idle, higher under active inference.

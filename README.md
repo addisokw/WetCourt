@@ -50,7 +50,9 @@ Once up, the LAN endpoint is `http://10.10.1.221:4000` (the Spark; mDNS
 doesn't resolve reliably). It speaks the OpenAI API: `/v1/chat/completions`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/models`.
 
-For laptop dev without rebuilding the Spark image:
+The orchestrator can also run on a different machine than the Spark — the
+everyday dev loop, and a valid production shape too (the MCU dials the
+orchestrator over WiFi, wherever it is):
 
 ```powershell
 cd orchestrator
@@ -59,9 +61,11 @@ cargo run -- --config config.dev.toml
 # judge face / case view monitors: /face and /case on the same port
 ```
 
-This points the orchestrator at the Spark's LiteLLM over LAN and runs
-hardware in mock mode. See `orchestrator/README.md` for failure injection
-and pairing with real firmware over WiFi.
+This points the orchestrator at the Spark's LiteLLM over the network and
+runs hardware in mock mode. The two shapes — everything on the Spark vs.
+inference-only on the Spark — and exactly which knobs differ are laid out in
+[`orchestrator/README.md` § Deployment topologies](orchestrator/README.md#deployment-topologies);
+failure injection and firmware pairing are covered there too.
 
 ## Benchmarking the pipeline
 

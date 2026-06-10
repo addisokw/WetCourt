@@ -31,7 +31,7 @@ This document captures architectural decisions and is intended to inform an impl
 - **Hardware actions are timing-critical and isolated.** A microcontroller owns the squirt valve, gavel servo, and lights. The host never directly drives a solenoid.
 - **The browser is part of the architecture.** It handles display, mic capture, and audio playback. This sidesteps native audio I/O integration in the backend.
 - **Inference is a service, not a library.** STT, LLM, and TTS run as containerized services behind a single OpenAI-compatible endpoint (LiteLLM). The orchestrator is just an HTTP client. This trades the "single static binary" ideal for a clean separation that matches what's already running on the DGX Spark.
-- **The orchestrator's location is a config knob, not an architectural assumption.** Production: orchestrator runs as a fifth container on the Spark, talking to LiteLLM over the private docker network. Dev: orchestrator runs on the developer's laptop with `cargo run`, talking to the Spark's LiteLLM over LAN at `http://dgx-spark.local:4000`. Same binary, same code path, different `inference.base_url`. The microcontroller and kiosk follow the orchestrator (whichever machine has the USB cable plugged in is the one running the orchestrator).
+- **The orchestrator's location is a config knob, not an architectural assumption.** Co-located: the orchestrator runs as a fifth container on the Spark, talking to LiteLLM over the private docker network. Remote (a dev laptop, or a separate booth PC in production): the orchestrator runs with `cargo run`, talking to the Spark's LiteLLM over LAN/Tailscale. Same binary, same code path, different `inference.base_url`. The microcontroller dials the orchestrator over WiFi TCP and the kiosk browser points at the orchestrator's `:8080`, so both follow it to whichever host it runs on. See `orchestrator/README.md` § Deployment topologies for the knob-by-knob breakdown.
 
 ---
 
@@ -93,17 +93,17 @@ All processes run as containers on the Spark via the existing `dgx-ai-stack/dock
 | Browser (Chrome kiosk) | Display, mic, speakers | Launched outside compose by a small `kiosk.service` systemd unit on the Spark's display |
 | Microcontroller | Realtime hardware control | Always-on once powered; appears at `/dev/ttyUSB0` and is passed into the orchestrator container via `devices:` |
 
-The orchestrator does **no in-process model inference**. It speaks HTTP to LiteLLM at a configurable `inference.base_url`. In production that's `http://litellm:4000` over the private `ai` docker network; in dev it's `http://dgx-spark.local:4000` over the LAN, with the orchestrator running outside Docker (`cargo run`) on the developer's machine. Either way the orchestrator is the only thing besides litellm that the browser kiosk talks to (WebSocket on `:8080`).
+The orchestrator does **no in-process model inference**. It speaks HTTP to LiteLLM at a configurable `inference.base_url`. Co-located that's `http://litellm:4000` over the private `ai` docker network; remote it's the Spark's LAN/Tailscale address, with the orchestrator running outside Docker (`cargo run`). Either way the orchestrator is the only thing besides litellm that the browser kiosk talks to (WebSocket on `:8080`).
 
 ### Deployment modes
 
-| Mode | Where orchestrator runs | Inference URL | MCU plugged into | Kiosk points at |
+| Mode | Where orchestrator runs | Inference URL | Hardware | Kiosk points at |
 |---|---|---|---|---|
-| Production | Container on the Spark | `http://litellm:4000` | Spark USB | `http://localhost:8080` |
-| Dev (laptop) | `cargo run` on dev machine | `http://dgx-spark.local:4000` | Dev machine USB (or mocked) | `http://localhost:8080` |
-| Dev (no MCU) | `cargo run` on dev machine | `http://dgx-spark.local:4000` | none — `mock` driver in config | `http://localhost:8080` |
+| Co-located (production) | Container on the Spark | `http://litellm:4000` | `tcp` — MCU dials the Spark's `:8090` | `http://<spark>:8080` |
+| Remote (dev **or** production) | `cargo run` on laptop / booth PC | Spark's LAN/Tailscale address `:4000` | `tcp` — MCU dials that machine's `:8090` | `http://localhost:8080` |
+| Remote, no MCU | `cargo run` on dev machine | Spark's LAN/Tailscale address `:4000` | none — `mock` driver fakes acks | `http://localhost:8080` |
 
-The `hardware` section of `config.toml` accepts a `driver` field — `serial` (real MCU) or `mock` (logs commands, fakes acks) — so a developer with no MCU on hand can still exercise the full state machine against the live AI stack.
+The `hardware` section of the config accepts a `driver` field — `tcp` (real MCU dials in over WiFi), `mock` (logs commands, fakes acks), or `serial` (USB, declared but not implemented) — so a developer with no MCU on hand can still exercise the full state machine against the live AI stack. The two checked-in config files are starting points for the two shapes: `config.toml` co-located, `config.dev.toml` remote.
 
 ---
 
