@@ -558,7 +558,7 @@ Time-to-first-word becomes:
 
 ```
 LLM TTFT  +  time-to-first-sentence-boundary  +  TTS TTFB for sentence 1
-~300 ms       ~700 ms (≈10 tokens at 65 tok/s)     ~300 ms
+~300 ms       ~700 ms (decode at ~70 tok/s)        ~300 ms
 ≈ 1.3 s
 ```
 

@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1.7
+# LEGACY (2026-06-10): the stack moved to Qwen3.6-35B-A3B-NVFP4 on vLLM (see ../README.md).
+# This image is no longer built or referenced by docker-compose.yml — kept only as a
+# llama.cpp fallback. Do not rebuild unless you are reverting to the GGUF path.
 # Packages the pre-built llama-server binary + libs from
 # ~/ken-test/opensauce/llama.cpp/build/bin (HEAD has qwen35moe support).
 # Build context must be that build/bin directory.

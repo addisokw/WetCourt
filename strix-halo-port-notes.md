@@ -1,5 +1,11 @@
 # Strix Halo port — feasibility notes
 
+> **Note (2026-06-10):** this plan was written against the *original* DGX stack
+> (llama.cpp GGUF, ~65 tok/s). The DGX has since migrated to **Qwen3.6-35B-A3B-NVFP4
+> on vLLM** (~70 tok/s, MARLIN FP4). A Strix Halo port would need re-baselining —
+> vLLM NVFP4 targets Blackwell FP4 tensor cores, not AMD; the Vulkan-llama.cpp path
+> below is the relevant analogue. Baseline numbers here are historical.
+
 **Status:** discussed, plan drafted and refined, **not yet ready to proceed**.
 No green-light to build. Holding for a later decision on whether Strix Halo is the
 right target hardware before committing engineering time. The plan below can be

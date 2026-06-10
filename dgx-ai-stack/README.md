@@ -63,8 +63,9 @@ reboot of the Spark the stack comes back automatically — you only need
 | `kokoro` | `kokoro-tts-arm64:latest` | 8880 | ~2 GiB | TTS / `/v1/audio/speech` |
 | `litellm` | `ghcr.io/berriai/litellm:main-stable` | 4000 (LAN-exposed) | ~1 GiB | OpenAI router |
 
-Working set under live load: ~28 GiB out of 121 GiB. Power: ~10 W idle,
-~36 W during inference, ~43 W peak.
+Working set: ~67 GiB out of 121 GiB — vLLM reserves ~60 GiB up front (model ~20 GiB +
+KV cache at `--gpu-memory-utilization 0.5`), parakeet ~3 GiB, the rest small. Lower the
+util if you need more headroom. Power: ~15 W idle, higher under active inference.
 
 ## Calling the endpoint
 
