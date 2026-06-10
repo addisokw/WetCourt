@@ -21,7 +21,7 @@ volumes:
 
 services:
   # NVFP4 Qwen3.6-35B-A3B on vLLM — serves BOTH chat (qwen3.6-35b-a3b) and Frigate
-  # vision (qwen3-vl alias) via litellm. NVFP4 uses Blackwell's FP4 tensor cores:
+  # vision (qwen3.6-35b-a3b alias) via litellm. NVFP4 uses Blackwell's FP4 tensor cores:
   # ~48% faster text decode than the old llama.cpp Q4, and multimodal in one model.
   # MoE backend auto-selects (MARLIN on SM121) — do NOT set VLLM_*MOE* env (breaks the
   # selection oracle on this container). First start compiles ~2 min (cached after).

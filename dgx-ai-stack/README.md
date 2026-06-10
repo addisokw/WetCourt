@@ -98,7 +98,7 @@ reference for this model). To re-enable reasoning for a specific call, pass
 
 **Vision:** the NVFP4 checkpoint is multimodal (`image_url` content works on
 `qwen3.6-35b-a3b`). **The Frigate camera pipeline uses the same model** via the
-`qwen3-vl` alias (~0.6 s for a 720p doorstep image) — see
+`qwen3.6-35b-a3b` alias (~0.6 s for a 720p doorstep image) — see
 `homelab/services/frigate.md`. A 720p doorstep package describes in ~0.6 s.
 
 **NVFP4 backend note:** vLLM auto-selects the **MARLIN** weight-only FP4 MoE backend on
