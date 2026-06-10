@@ -28,6 +28,8 @@ dgx-ai-stack/
 ├── parakeet/
 │   ├── Dockerfile            NeMo ASR on top of nvcr pytorch:25.11-py3
 │   └── server.py             OpenAI /v1/audio/transcriptions wrapper
+├── sample-benchmark.py       End-to-end pipeline benchmark (see Benchmarking)
+├── sample_plea.wav           Test clip the benchmark feeds to STT
 └── whisper-cpp/Dockerfile    whisper.cpp built for arm64 + CUDA 13 + sm_121
                               (kept as a fallback STT — not in the active compose)
 ```
@@ -62,6 +64,7 @@ reboot of the Spark the stack comes back automatically — you only need
 | `parakeet` | `local/parakeet:latest` (NeMo on NGC pytorch:25.11) | 8082 | ~2 GiB | STT / `/v1/audio/transcriptions` |
 | `kokoro` | `kokoro-tts-arm64:latest` | 8880 | ~2 GiB | TTS / `/v1/audio/speech` |
 | `litellm` | `ghcr.io/berriai/litellm:main-stable` | 4000 (LAN-exposed) | ~1 GiB | OpenAI router |
+| `orchestrator` | `local/booth-orchestrator:latest` (built from `../orchestrator`) | 8080 (LAN-exposed) | small | Booth state machine + operator/visitor UI |
 
 Working set: ~67 GiB out of 121 GiB — vLLM reserves ~60 GiB up front (model ~20 GiB +
 KV cache at `--gpu-memory-utilization 0.5`), parakeet ~3 GiB, the rest small. Lower the

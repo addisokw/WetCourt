@@ -5,12 +5,17 @@ over WiFi via plain TCP and speaks the line protocol from §5.2 of
 `../docs/architecture.md`.
 
 First-cut hardware mapping:
-- **Built-in SK6812 RGB LED** stands in for the squirt valve. `FIRE <ms>`
-  paints it red for the requested duration. `LIGHTS <state>` colors it dim
-  when no FIRE is in flight.
-- **Built-in BOOT button (GPIO9)** is the lectern trial-start button. On
-  press the firmware sends `BUTTON\n`, which the orchestrator routes to
-  `Event::OperatorStart`.
+- **Built-in BOOT button (GPIO9)** is the lectern trial-start button and is
+  fully functional. On press (50 ms debounce) the firmware sends `BUTTON\n`,
+  which the orchestrator routes to `Event::OperatorStart`.
+- **Actuation commands are log-only stubs.** `FIRE <ms>` tracks the fire
+  window with a timer and `GAVEL` / `LIGHTS <state>` / `PANEL <pattern>` are
+  acknowledged with `OK <cmd>`, but nothing is driven yet — the built-in
+  SK6812 RGB LED needs an RMT driver whose ecosystem versioning is currently
+  a mess (the ws2812 crate was dropped over a `links =` conflict). Wiring
+  real GPIO actuation is a follow-up.
+- `PING` is answered with `PONG`. On disconnect the firmware retries the
+  orchestrator every 2 s indefinitely.
 
 ## One-time toolchain setup
 
@@ -54,8 +59,6 @@ I (xxx) wet_court_firmware: connecting to orchestrator: 192.168.x.z:8090
 I (xxx) wet_court_firmware: connected
 ```
 
-The LED blinks green when the TCP session opens.
-
 ## Pairing with the orchestrator
 
 In `orchestrator/config.toml` (or `config.dev.toml` for laptop dev), set:
@@ -70,7 +73,7 @@ ack_timeout_ms = 3000
 Start the orchestrator, then power up the NanoC6 — the MCU will dial in and
 the orchestrator logs `tcp_hw: MCU connected from <ip>`.
 
-## Known issue (2026-05-15)
+## Known issue (2026-05-15, still unresolved)
 
 The firmware builds and flashes cleanly, but boots into a panic loop:
 

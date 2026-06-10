@@ -12,12 +12,17 @@ LLM, and TTS all run locally on an NVIDIA DGX Spark; no cloud round-trip.
 .
 ├── docs/
 │   ├── architecture.md         Design doc: state machine, protocols, boundaries
-│   └── judge-persona-notes.md  Notes on judge characters and TTS delivery
+│   ├── judge-persona-notes.md  Notes on judge characters and TTS delivery
+│   └── ideas.md                Scratchpad of future exhibit ideas
 ├── dgx-ai-stack/               Self-hosted AI stack on the Spark
 │                               (LiteLLM + vLLM NVFP4 + Kokoro TTS + Parakeet STT)
 │                               plus the end-to-end pipeline benchmark
-├── orchestrator/               Rust state machine, axum WS server, SolidJS kiosk UI
-└── firmware/                   Rust firmware for M5Stack NanoC6 (squirt valve, gavel, button)
+├── orchestrator/               Rust state machine, axum WS server, SolidJS UI
+│                               (operator console, judge face, case view, personas)
+├── firmware/                   Rust firmware for M5Stack NanoC6 (trial button works;
+│                               valve/gavel actuation still stubbed)
+└── strix-halo-port-notes.md    Feasibility notes for porting the AI stack to
+                                Strix Halo (Vulkan/x86_64) — drafted, not greenlit
 ```
 
 Start with [`docs/architecture.md`](docs/architecture.md) for the big picture.
@@ -49,7 +54,8 @@ For laptop dev without rebuilding the Spark image:
 ```powershell
 cd orchestrator
 cargo run -- --config config.dev.toml
-# kiosk UI: http://localhost:8080
+# operator console: http://localhost:8080
+# judge face / case view monitors: /face and /case on the same port
 ```
 
 This points the orchestrator at the Spark's LiteLLM over LAN and runs
@@ -59,6 +65,9 @@ and pairing with real firmware over WiFi.
 ## Benchmarking the pipeline
 
 ```sh
+# One-time: the benchmark needs a venv with the openai client
+python3 -m venv .venv && .venv/bin/pip install openai
+
 cd dgx-ai-stack
 set -a; . .env; set +a
 ../.venv/bin/python sample-benchmark.py --runs 5 --no-think
