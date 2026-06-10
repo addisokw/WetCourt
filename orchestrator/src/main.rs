@@ -125,11 +125,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Load `.env` from the current directory or any ancestor, then alias the
-/// stack's standard `LITELLM_MASTER_KEY` into the figment-prefixed
-/// `BOOTH__INFERENCE__API_KEY` so the dev loop is a single `cargo run`.
+/// Load `.env` from the current directory or any ancestor, falling back to
+/// the stack's `dgx-ai-stack/.env` so the same file serves the ai-stack
+/// tooling and the orchestrator dev loop. Then alias the stack's standard
+/// `LITELLM_MASTER_KEY` into the figment-prefixed `BOOTH__INFERENCE__API_KEY`
+/// so the dev loop is a single `cargo run`.
 fn load_dotenv() {
-    let _ = dotenvy::dotenv(); // walks parents for .env; silently ignored if absent
+    if dotenvy::dotenv().is_err() {
+        // No .env in CWD or ancestors — try the stack's copy, from either
+        // orchestrator/ or the repo root. Silently ignored if absent.
+        for path in ["../dgx-ai-stack/.env", "dgx-ai-stack/.env"] {
+            if dotenvy::from_path(path).is_ok() {
+                break;
+            }
+        }
+    }
     if std::env::var("BOOTH__INFERENCE__API_KEY").is_err() {
         if let Ok(key) = std::env::var("LITELLM_MASTER_KEY") {
             std::env::set_var("BOOTH__INFERENCE__API_KEY", key);

@@ -30,7 +30,9 @@ npm install
 npm run build
 cd ..
 
-# Run (auto-loads ../.env for LITELLM_MASTER_KEY → BOOTH__INFERENCE__API_KEY)
+# Run (loads LITELLM_MASTER_KEY → BOOTH__INFERENCE__API_KEY from a .env in
+# any ancestor dir, falling back to ../dgx-ai-stack/.env — so the one file
+# created from dgx-ai-stack/.env.example covers this too)
 cargo run -- --config config.dev.toml
 ```
 

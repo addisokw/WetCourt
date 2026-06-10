@@ -5,10 +5,11 @@
 # "real" hits LiteLLM. "mock" uses canned responses with simulated latency
 # (no network) — set this when working offline from the Spark.
 mode = "real"
-# Spark LAN IP. (`dgx-spark.local` mDNS doesn't resolve from this laptop.)
+# Spark Tailscale IP (dgx-spark.tail984ae9.ts.net) — the laptop is no longer
+# on the Spark's LAN, so the old 10.10.1.221 address is unreachable.
 # api_key is read from BOOTH__INFERENCE__API_KEY, which main.rs auto-populates
-# from LITELLM_MASTER_KEY in a `.env` file at the repo root.
-base_url = "http://10.10.1.221:4000"
+# from LITELLM_MASTER_KEY in a `.env` (repo root or dgx-ai-stack/.env).
+base_url = "http://100.86.115.53:4000"
 chat_model = "qwen3.6-35b-a3b"
 stt_model = "whisper-1"
 tts_model = "kokoro-tts"
