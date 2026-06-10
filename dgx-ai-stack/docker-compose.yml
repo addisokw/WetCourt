@@ -46,6 +46,10 @@ services:
       - qwen3.6-35b-a3b
       - -m
       - /models/${LLAMA_MODEL_FILE}
+      # Qwen3.6-35B-A3B is multimodal; load its vision projector so the chat
+      # endpoint can also accept images. mmproj from the same Unsloth GGUF repo.
+      - --mmproj
+      - /models/mmproj-Qwen3.6-35B-A3B-BF16.gguf
 
   parakeet:
     image: local/parakeet:latest

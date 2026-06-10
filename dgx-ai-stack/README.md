@@ -58,7 +58,7 @@ reboot of the Spark the stack comes back automatically — you only need
 
 | Service | Image | Port (internal) | Resident memory | Role |
 |---|---|---|---|---|
-| `llama-server` | `local/llama.cpp:server-cuda-fresh` | 8000 | 1.8 – 23 GiB (MoE, scales with expert routing) | Qwen3.6-35B-A3B chat |
+| `llama-server` | `local/llama.cpp:server-cuda-fresh` | 8000 | 1.8 – 23 GiB (MoE, scales with expert routing) | Qwen3.6-35B-A3B chat **+ vision** (mmproj loaded) |
 | `parakeet` | `local/parakeet:latest` (NeMo on NGC pytorch:25.11) | 8082 | ~2 GiB | STT / `/v1/audio/transcriptions` |
 | `kokoro` | `kokoro-tts-arm64:latest` | 8880 | ~2 GiB | TTS / `/v1/audio/speech` |
 | `litellm` | `ghcr.io/berriai/litellm:main-stable` | 4000 (LAN-exposed) | ~1 GiB | OpenAI router |
@@ -92,6 +92,14 @@ curl -s $BASE/v1/chat/completions -H "Authorization: Bearer $KEY" \
 
 Throughput: ~65 tokens/sec decode. With thinking off, ~120 tokens output for a
 typical short reply ≈ ~2 s LLM time.
+
+**Vision:** Qwen3.6-35B-A3B is multimodal. The compose loads its vision projector
+(`--mmproj /models/mmproj-Qwen3.6-35B-A3B-BF16.gguf`), so `qwen3.6-35b-a3b` also
+accepts `image_url` content. **Keep `enable_thinking: false`** for image captioning —
+with thinking on it returns an empty `content` (the token budget is spent reasoning)
+or takes ~6 s. With it off, a 720p doorstep image describes in ~0.6 s. (Frigate's own
+camera pipeline uses the dedicated `qwen3-vl` model — faster at 0.2 s, 30B vs 35B — not
+this one; the vision here is a bonus capability on the chat endpoint.)
 
 ### TTS — Kokoro
 
@@ -137,13 +145,22 @@ curl -s $BASE/v1/models -H "Authorization: Bearer $KEY" | jq '.data[].id'
 |---|---|---|
 | `LITELLM_MASTER_KEY` | litellm | Bearer token for the LAN endpoint |
 | `LLAMA_MODEL_DIR` | llama-server | Host path mounted read-only at `/models` |
-| `LLAMA_MODEL_FILE` | llama-server | GGUF filename inside `LLAMA_MODEL_DIR` |
+| `LLAMA_MODEL_FILE` | llama-server | Chat GGUF filename inside `LLAMA_MODEL_DIR` (e.g. `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`) |
 | `LLAMA_CTX` | llama-server | KV cache size (default 32768) |
 | `LLAMA_NGL` | llama-server | `--n-gpu-layers` (default 99 = all) |
 | `WHISPER_MODEL_DIR`, `WHISPER_MODEL_FILE` | (legacy whisper.cpp) | Unused by Parakeet but kept for the fallback whisper service |
 | `LITELLM_PORT` | litellm | LAN-exposed port (default 4000) |
 
-`litellm/config.yaml` declares the three models and where to route them. Edit
+Files expected in `LLAMA_MODEL_DIR` (`/models`):
+
+| File | For | Source |
+|---|---|---|
+| `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` | chat backbone | [unsloth/Qwen3.6-35B-A3B-GGUF](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF) |
+| `mmproj-Qwen3.6-35B-A3B-BF16.gguf` | chat vision projector | `mmproj-BF16.gguf` from the same repo (renamed) |
+| `Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` | Frigate VLM (`llama-vl`) | [unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF](https://huggingface.co/unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF) |
+| `mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf` | Frigate VLM vision projector | same repo |
+
+`litellm/config.yaml` declares the models and where to route them. Edit
 this file then `./ai-stack restart litellm` to pick up changes (LiteLLM does
 not hot-reload its config).
 
