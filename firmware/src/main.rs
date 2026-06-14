@@ -17,7 +17,9 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::gpio::{Input, Level, PinDriver, Pull};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi};
+use esp_idf_svc::wifi::{
+    AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, PmfConfiguration,
+};
 use log::{info, warn};
 
 mod wifi_config;
@@ -25,6 +27,7 @@ use wifi_config::{ORCH_HOST, ORCH_PORT, WIFI_PASS, WIFI_SSID};
 
 const BUTTON_DEBOUNCE: Duration = Duration::from_millis(50);
 const RECONNECT_BACKOFF: Duration = Duration::from_secs(2);
+const WIFI_RETRY_BACKOFF: Duration = Duration::from_secs(3);
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(20);
 
 fn main() -> Result<()> {
@@ -43,6 +46,9 @@ fn main() -> Result<()> {
         EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
         sys_loop,
     )?;
+    // AuthMethod::None sets the scan auth-threshold to OPEN, letting the driver
+    // pick whatever the AP advertises (WPA2-PSK *or* WPA3-SAE on mixed APs).
+    // PMF Capable lets the WPA3-SAE path complete when the AP picks that one.
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
         ssid: WIFI_SSID
             .try_into()
@@ -50,13 +56,35 @@ fn main() -> Result<()> {
         password: WIFI_PASS
             .try_into()
             .map_err(|_| anyhow!("WIFI_PASS too long"))?,
-        auth_method: AuthMethod::WPA2Personal,
+        auth_method: AuthMethod::None,
+        pmf_cfg: PmfConfiguration::Capable { required: false },
         ..Default::default()
     }))?;
     wifi.start()?;
-    wifi.connect()?;
-    wifi.wait_netif_up()?;
+
+    loop {
+        match wifi.connect().and_then(|()| wifi.wait_netif_up()) {
+            Ok(()) => break,
+            Err(e) => {
+                warn!("wifi associate failed: {e:#}; retrying");
+                std::thread::sleep(WIFI_RETRY_BACKOFF);
+            }
+        }
+    }
     info!("wifi up: {:?}", wifi.wifi().sta_netif().get_ip_info()?.ip);
+
+    // Disable WiFi power save. With WIFI_PS_MIN_MODEM (the esp-idf default)
+    // the radio sleeps between DTIM beacons, and on some APs missed beacons
+    // cause the station's BSS state to be silently dropped — leaving the
+    // chip's TCP socket "established" locally but unreachable. The
+    // orchestrator only notices when it tries to write the next command,
+    // which is exactly the failure pattern we observed.
+    unsafe {
+        esp_idf_svc::sys::esp!(esp_idf_svc::sys::esp_wifi_set_ps(
+            esp_idf_svc::sys::wifi_ps_type_t_WIFI_PS_NONE
+        ))?;
+    }
+    info!("wifi power-save disabled");
 
     loop {
         match run_session(&mut btn) {

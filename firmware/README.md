@@ -46,11 +46,14 @@ with `hardware.driver = "tcp"`). `wifi_config.rs` is gitignored.
 Plug the NanoC6 into USB-C. From `firmware/`:
 
 ```powershell
-cargo run --release
+cargo espflash flash --release --port COM4 --monitor
 ```
 
-`cargo run` invokes `espflash flash --monitor` per `.cargo/config.toml`, so
-this both flashes and opens the serial monitor. Expected boot log:
+Use `cargo espflash` (not `cargo run` / plain `espflash flash`) so the
+bootloader, partition table, and app are written together from the same
+ESP-IDF build. Flashing the app alone over a stale bootloader produces the
+`mmu_hal_map_region` panic noted below. Install once with
+`cargo install cargo-espflash`. Expected boot log:
 
 ```
 I (xxx) wet_court_firmware: connecting to wifi: <your-ssid>
@@ -73,32 +76,77 @@ ack_timeout_ms = 3000
 Start the orchestrator, then power up the NanoC6 — the MCU will dial in and
 the orchestrator logs `tcp_hw: MCU connected from <ip>`.
 
-## Known issue (2026-05-15, still unresolved)
+## Resolved: MMU boot panic (fixed 2026-05-16)
 
-The firmware builds and flashes cleanly, but boots into a panic loop:
+The earlier panic loop on boot —
 
 ```
 assert failed: mmu_hal_map_region /IDF/components/hal/mmu_hal.c:84 (paddr % page_size_in_bytes == 0)
 ```
 
-The chip *did* briefly connect to the orchestrator once after a full
-erase + bootloader + partition table + app flash, before crashing — so
-WiFi + TCP + the protocol all work in principle. The panic is in the
-ESP-IDF early-boot path, not our `main` body.
-
-Most likely cause: bootloader / partition-table / app version mismatch
-from using plain `espflash flash` (writes app only, leaves stale
-bootloader). Next session should:
-
-1. Install `cargo-espflash` (`cargo install cargo-espflash`), which
-   bundles the bootloader + partition table + app from the same
-   ESP-IDF build in one image, and use `cargo espflash flash --monitor`
-   instead of `cargo run`.
-2. If that still panics, suspect ESP_IDF_VERSION pinning: the runtime
-   boot log reported `v5.5.1` even though `.cargo/config.toml` requests
-   `v5.2.2`. Embuild may be ignoring the pin.
+— was caused by `espflash flash` (and `cargo run` via `.cargo/config.toml`)
+writing only the app over a stale bootloader. Flashing with
+`cargo espflash flash --release --port COM4` writes the bootloader,
+partition table, and app from the same ESP-IDF v5.2.2 build, and the chip
+now boots cleanly, joins WiFi, and dials the orchestrator.
 
 The toolchain wrestling to get here is captured in commit history
 (rust-toolchain.toml pinned to `nightly-2025-09-15`, esp-idf-svc bumped
 to 0.52, ws2812 driver dropped due to `links =` conflict, USB-Serial-JTAG
 console enabled via `sdkconfig.defaults`).
+
+App partition headroom is tight (1,047,088 / 1,048,576 bytes — 99.86%
+used at `--release`). New code or larger ESP-IDF features may require
+growing the `factory` partition in `sdkconfig.defaults` /
+`partitions.csv`.
+
+## Resolved: WiFi auth fail on WPA2/WPA3 mixed APs (fixed 2026-05-17)
+
+After the MMU fix the chip booted but failed association the moment the
+test AP was reconfigured to WPA2/WPA3-PSK mixed mode (`dot11_authmode:0x6`):
+
+```
+wifi:state: init -> auth (b0)
+wifi:state: auth -> init (600)
+... wifi associate failed: ESP_ERR_TIMEOUT
+```
+
+Two changes in `src/main.rs` fixed it:
+
+1. **`AuthMethod::None`** for the `ClientConfiguration` — this sets the
+   ESP-IDF scan auth-*threshold* to `WIFI_AUTH_OPEN`, letting the driver
+   pick whichever auth the AP actually advertises (WPA2-PSK *or* WPA3-SAE
+   on mixed APs). Hardcoding `WPA2Personal` made the threshold reject
+   the AP's announced WPA2/WPA3 mode; hardcoding `WPA2WPA3Personal` then
+   broke fallback to pure WPA2 APs. `None` works for both.
+2. **`PmfConfiguration::Capable { required: false }`** — WPA3 SAE
+   requires PMF (Protected Management Frames). `Capable, not required`
+   lets WPA3 complete on a mixed AP and still permits non-PMF WPA2.
+
+Also wrapped `wifi.connect()` + `wait_netif_up()` in a retry loop so a
+transient associate failure no longer kicks the firmware out of
+`app_main` with `ESP_ERR_TIMEOUT`. Previously the `?` on those calls
+propagated to `main`, which returned and ended the program.
+
+Sanity-check log after the fix:
+
+```
+wet_court_firmware: connecting to wifi: test_lan
+wifi:(connect)dot11_authmode:0x6, pairwise_cipher:0x3, group_cipher:0x3
+wifi:state: init -> auth -> assoc -> run
+wifi:connected with test_lan, aid = 7, channel 1
+wet_court_firmware: wifi up: 192.168.50.182
+wet_court_firmware: connecting to orchestrator: 192.168.50.179:8090
+```
+
+## Operator gotcha: orchestrator must run with `driver = "tcp"`
+
+If the chip joins WiFi but logs `session error: connection timed out`
+in a loop, the orchestrator is probably running in mock mode. `booth`'s
+TCP hardware listener only binds when `[hardware] driver = "tcp"`; with
+`driver = "mock"` (the default in `config.dev.toml`) port 8090 is never
+opened and the only listener is the frontend on 8080. Start `booth` with
+`cargo run -- --config config.toml`, or flip `driver` to `"tcp"` in the
+dev config. Successful pair-up logs `tcp_hw: listening on 0.0.0.0:8090`
+on the host and `connected` on the MCU. On Windows, allow the listener
+on the **Private** profile when the firewall prompts.

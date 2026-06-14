@@ -1,5 +1,8 @@
 # Ideas
 
+## Manual TTS mode
+input field for operators to type arbitrary text in that will be spoken outloud (to draw people in as a puppet mode for example)
+
 ## Manual charge input — ✅ implemented
 The operator panel should have an interface to queue up charges (manually type in charges and submit for next case).
 *(Crimes panel → "queue a charge for the next trial".)*
