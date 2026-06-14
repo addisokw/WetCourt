@@ -23,7 +23,7 @@ Capacitive sensor in a (rubber chicken / McMaster catalog or similar). Hand must
 ## Directional speakers 
 The judge’s voice comes from a mono speaker behind the bust. When the prosecutor talks, audio shifts to the other side of the booth. Spatial separation makes multiple AI characters feel like distinct entities even though they share one LLM.
 
-## Deliberation theater 
+## Deliberation theater — ✅ implemented 
 Lights dim, judge’s eyes pulse, dramatic synth pad plays for 4–6 seconds, then snap back for verdict. Costs nothing, adds enormous gravitas.
 Slow-motion verdict reveal. “The court finds the defendant… [3-second beat]… GUILTY.” Music swells, squirt gun fires on the final syllable.
 
