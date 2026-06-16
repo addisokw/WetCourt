@@ -49,6 +49,16 @@ header {
   cursor: pointer;
   user-select: none;
 }
+.robot-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #8b949e;
+  user-select: none;
+}
+.robot-slider input[type='range'] { width: 90px; }
+.robot-val { font-variant-numeric: tabular-nums; min-width: 3ch; color: #d29922; }
 
 .banner-group {
   display: flex;

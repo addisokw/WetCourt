@@ -17,22 +17,29 @@
 import glitchUrl from './glitch-processor.js?url';
 
 // ---- Tuning knobs (the "glitchy / degraded" preset) ----
-const ROBOT_AMOUNT = 0.72; // wet/dry blend of the native robot colour
+const ROBOT_AMOUNT = 0.72; // default wet/dry blend; the operator slider overrides
 const RING_HZ = 52; // ring-mod carrier — the core metallic buzz
 const PEAK_HZ = 2200; // resonant honk frequency
 const COMB_SECS = 0.004; // short comb delay → tube/metal resonance
 const COMB_FEEDBACK = 0.35;
 const SATURATION = 0.5; // soft-clip amount
+const MAX_GLITCH_RATE = 1.8; // glitches/sec at full intensity
 
 interface RobotChain {
   ctx: AudioContext;
   input: GainNode;
   tail: GainNode;
+  wet: GainNode;
+  dry: GainNode;
   glitch?: AudioWorkletNode;
 }
 
 let chain: RobotChain | null = null;
 let workletLoading: Promise<void> | null = null;
+// Single 0..1 "robot intensity" knob driven by the operator slider: scales the
+// native wet/dry blend and the glitch tail together. 0 = clean voice, 1 = full
+// robot + glitch.
+let intensity = ROBOT_AMOUNT;
 
 /// Soft-clip transfer curve for the WaveShaper (digital harshness without
 /// hard-clipping crunch).
@@ -55,9 +62,7 @@ export function getRobotInput(ctx: AudioContext): AudioNode {
   const input = ctx.createGain();
   const tail = ctx.createGain();
   const dry = ctx.createGain();
-  dry.gain.value = 1 - ROBOT_AMOUNT;
   const wet = ctx.createGain();
-  wet.gain.value = ROBOT_AMOUNT;
 
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
@@ -108,9 +113,35 @@ export function getRobotInput(ctx: AudioContext): AudioNode {
   // Until the worklet loads, the native chain feeds the speakers directly.
   tail.connect(ctx.destination);
 
-  chain = { ctx, input, tail };
+  chain = { ctx, input, tail, wet, dry };
+  applyIntensity();
   maybeInsertGlitch();
   return input;
+}
+
+/// Push the current intensity onto the live AudioParams. Safe to call before
+/// the chain or worklet exist — it applies to whatever is present.
+function applyIntensity(): void {
+  if (!chain) return;
+  chain.wet.gain.value = intensity;
+  chain.dry.gain.value = 1 - intensity;
+  const params = chain.glitch?.parameters;
+  if (params) {
+    const wetParam = params.get('wet');
+    if (wetParam) wetParam.value = intensity;
+    const rateParam = params.get('glitchRate');
+    if (rateParam) rateParam.value = intensity * MAX_GLITCH_RATE;
+  }
+}
+
+/// Live operator control: 0 = clean voice, 1 = full robot + glitch.
+export function setRobotIntensity(amount: number): void {
+  intensity = Math.min(1, Math.max(0, amount));
+  applyIntensity();
+}
+
+export function getRobotIntensity(): number {
+  return intensity;
 }
 
 /// Begin loading the glitch worklet module. Safe to call repeatedly and before
@@ -152,6 +183,8 @@ function maybeInsertGlitch(): void {
       chain.tail.connect(glitch);
       glitch.connect(chain.ctx.destination);
       chain.glitch = glitch;
+      applyIntensity(); // sync the worklet's wet/glitchRate to the slider
+
     } catch (e) {
       console.warn('could not construct glitch node; using native robot only', e);
     }

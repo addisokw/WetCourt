@@ -51,5 +51,8 @@ every PCM chunk routes through a persistent graph — bandpass/peak EQ → soft-
 saturation → ring modulation (~52 Hz carrier) → comb resonance, wet/dry blended —
 then an AudioWorklet tail (`glitch-processor.js`) adds bitcrush, sample-rate
 decimation, and occasional stutter/dropout glitches. Uniform across personas,
-continuous across chunk seams. Tuning knobs live at the top of `robot.ts` and in
-the worklet's `parameterDescriptors`.
+continuous across chunk seams. A live operator-console slider ("Robot", 0–100%)
+scales the whole effect by ear and persists to localStorage; since only the
+operator `/ws` client plays PCM, it's a local audio control with no backend
+round-trip. Per-effect tuning lives at the top of `robot.ts` and in the
+worklet's `parameterDescriptors`.

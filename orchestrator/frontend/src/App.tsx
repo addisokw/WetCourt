@@ -1,5 +1,6 @@
 import { createMemo, createSignal, onCleanup, onMount, For, Show } from 'solid-js';
 import {
+  applyRobotIntensity,
   beginPlea,
   connect,
   crossExamEnabled,
@@ -13,6 +14,7 @@ import {
   phaseDeadlineLabel,
   pleaWindowOpen,
   recording,
+  robotIntensity,
   setCrossExam,
   startTrial,
 } from './ws';
@@ -98,6 +100,18 @@ export default function App() {
               onChange={(e) => void setCrossExam(e.currentTarget.checked)}
             />
             Cross-exam
+          </label>
+          <label class="robot-slider" title="TTS robot/glitch intensity (this console's audio)">
+            Robot
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={robotIntensity()}
+              onInput={(e) => applyRobotIntensity(parseFloat(e.currentTarget.value))}
+            />
+            <span class="robot-val">{Math.round(robotIntensity() * 100)}%</span>
           </label>
         </div>
       </header>
