@@ -202,6 +202,13 @@ export default function CrimesPanel() {
                         </label>
                         <span class="crime-cat">{c.category}</span>
                         <span class="crime-text">{c.charge}</span>
+                        <button
+                          class="mini"
+                          title="queue this charge for the next trial"
+                          onClick={() => run('queue', () => queueCharge(c.charge))}
+                        >
+                          queue
+                        </button>
                         <button class="mini" onClick={() => setEditing({ ...c })}>edit</button>
                         <button
                           class="mini danger"
