@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
+/// Sentinel transcript used when the defendant said nothing intelligible. Shared
+/// by the STT path (which emits it) and the state machine (which skips
+/// cross-examination on it). Single source of truth for the literal.
+pub const NO_DEFENSE: &str = "[no defense offered]";
+
+/// One judge follow-up and the defendant's reply, threaded into deliberation
+/// when cross-examination ran.
+#[derive(Debug, Clone)]
+pub struct CrossExam {
+    pub question: String,
+    pub answer: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Verdict {
     pub guilty: bool,
@@ -24,6 +37,18 @@ pub enum State {
     /// committing to transcription with whatever bytes (if any) we have.
     FlushingPlea { charge: String, hard_deadline: Instant },
     Transcribing { charge: String, audio: Vec<u8>, started_at: Instant },
+    /// Cross-examination: the judge is composing one pointed follow-up question
+    /// from the charge + first plea.
+    CrossGeneratingQuestion { charge: String, plea: String, started_at: Instant },
+    /// The question is being displayed and spoken; we open the answer window
+    /// once its TTS drains (or a watchdog fires).
+    CrossSpeaking { charge: String, plea: String, question: String, started_at: Instant },
+    /// Recording the defendant's answer (reuses the plea-recording machinery).
+    CrossAwaitingAnswer { charge: String, plea: String, question: String, deadline: Instant },
+    /// Answer window elapsed; brief grace for the in-flight audio upload.
+    CrossFlushingAnswer { charge: String, plea: String, question: String, hard_deadline: Instant },
+    /// Transcribing the answer before deliberation.
+    CrossTranscribing { charge: String, plea: String, question: String, audio: Vec<u8>, started_at: Instant },
     Deliberating { charge: String, plea: String, started_at: Instant },
     PronouncingVerdict { verdict: Verdict, audio_done: bool },
     ExecutingSentence { verdict: Verdict, deadline: Instant, hardware_done: bool },
@@ -39,6 +64,11 @@ impl State {
             State::AwaitingPlea { .. } => "awaiting_plea",
             State::FlushingPlea { .. } => "awaiting_plea",
             State::Transcribing { .. } => "transcribing",
+            State::CrossGeneratingQuestion { .. } => "cross_examining",
+            State::CrossSpeaking { .. } => "cross_examining",
+            State::CrossAwaitingAnswer { .. } => "cross_answer",
+            State::CrossFlushingAnswer { .. } => "cross_answer",
+            State::CrossTranscribing { .. } => "transcribing",
             State::Deliberating { .. } => "deliberating",
             State::PronouncingVerdict { .. } => "pronouncing_verdict",
             State::ExecutingSentence { .. } => "executing_sentence",

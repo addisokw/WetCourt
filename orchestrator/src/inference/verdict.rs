@@ -11,16 +11,36 @@ use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::fallbacks;
 use crate::personas::PersonaRegistry;
-use crate::state_machine::states::Verdict;
+use crate::state_machine::states::{CrossExam, Verdict};
 use crate::state_machine::{Command, Event};
 
 use super::client::LlmClient;
 use super::tts::{strip_markers, synth_into_display};
 
-pub async fn mock(cfg: Arc<Config>, _charge: String, _plea: String, event_tx: mpsc::Sender<Event>) {
+pub async fn mock(
+    cfg: Arc<Config>,
+    _charge: String,
+    _plea: String,
+    _cross: Option<CrossExam>,
+    event_tx: mpsc::Sender<Event>,
+) {
     tokio::time::sleep(Duration::from_millis(cfg.mock_inference.deliberate_latency_ms)).await;
     let v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
     let _ = event_tx.send(Event::VerdictReady(v)).await;
+}
+
+/// Assemble the verdict user message, folding in the cross-examination exchange
+/// when one took place so the judge can weigh the answer.
+fn build_user_msg(charge: &str, plea: &str, cross: &Option<CrossExam>) -> String {
+    let mut msg = format!("CHARGE: {charge}\n\nPLEA: {plea}");
+    if let Some(c) = cross {
+        msg.push_str(&format!(
+            "\n\nCROSS-EXAMINATION:\nYou asked: {}\nThe defendant answered: {}",
+            c.question, c.answer
+        ));
+    }
+    msg.push_str("\n\nRender your verdict.");
+    msg
 }
 
 /// Stream the LLM deliberation to the display for the live caption, then
@@ -32,6 +52,7 @@ pub async fn real(
     personas: Arc<RwLock<PersonaRegistry>>,
     charge: String,
     plea: String,
+    cross: Option<CrossExam>,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
 ) {
@@ -46,7 +67,7 @@ pub async fn real(
     };
 
     let client = LlmClient::new(&cfg.inference);
-    let user_msg = format!("CHARGE: {charge}\n\nPLEA: {plea}\n\nRender your verdict.");
+    let user_msg = build_user_msg(&charge, &plea, &cross);
     let first_to = Duration::from_secs(cfg.inference.verdict_first_token_timeout_secs);
     let total_to = Duration::from_secs(cfg.inference.verdict_total_timeout_secs);
     let tts_connect_to = Duration::from_secs(cfg.inference.tts_timeout_secs);

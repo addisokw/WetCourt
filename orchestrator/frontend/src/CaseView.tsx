@@ -2,6 +2,7 @@ import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } fro
 import {
   charge,
   connect,
+  crossQuestion,
   currentState,
   deliberation,
   lastVerdictGuilty,
@@ -44,6 +45,9 @@ function StateInstruction() {
       </Match>
       <Match when={currentState() === 'transcribing'}>
         <p class="instruction">Transcribing your plea…</p>
+      </Match>
+      <Match when={currentState() === 'cross_examining'}>
+        <p class="instruction big">The judge has a question for you.</p>
       </Match>
       <Match when={currentState() === 'deliberating'}>
         <p class="instruction">The court is deliberating.</p>
@@ -112,6 +116,13 @@ export function CaseContent() {
   const showPlea = () =>
     pleaTranscript().length > 0 &&
     (currentState() === 'deliberating' || currentState() === 'transcribing');
+  // The cross-exam question stays up through the question, the answer window,
+  // and the answer transcription, then clears as deliberation begins.
+  const showCrossQuestion = () =>
+    crossQuestion().length > 0 &&
+    (currentState() === 'cross_examining' ||
+      currentState() === 'awaiting_plea' ||
+      currentState() === 'transcribing');
   const cleanedDeliberation = () => stripMarkers(deliberation());
   // Hide the deliberation as soon as the verdict reveals — otherwise it sits
   // below the GUILTY panel for the post-fire hold, which crowds the screen.
@@ -143,6 +154,13 @@ export function CaseContent() {
           <section class="plea-block">
             <div class="plea-label">YOUR PLEA</div>
             <div class="plea-text">“{pleaTranscript()}”</div>
+          </section>
+        </Show>
+
+        <Show when={showCrossQuestion()}>
+          <section class="cross-block">
+            <div class="cross-label">THE JUDGE ASKS</div>
+            <div class="cross-text">“{crossQuestion()}”</div>
           </section>
         </Show>
 

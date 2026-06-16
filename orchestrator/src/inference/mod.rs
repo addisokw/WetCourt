@@ -10,6 +10,7 @@ use crate::state_machine::{Command, Event};
 
 pub mod charge;
 pub mod client;
+pub mod cross;
 pub mod stt;
 pub mod tts;
 pub mod verdict;
@@ -46,10 +47,16 @@ pub async fn run(
                     else    { stt::mock(cfg, audio, event_tx).await }
                 });
             }
-            Command::Deliberate { charge: c, plea } => {
+            Command::CrossExamine { charge: c, plea } => {
                 tokio::spawn(async move {
-                    if real { verdict::real(cfg, personas, c, plea, event_tx, display_tx).await }
-                    else    { verdict::mock(cfg, c, plea, event_tx).await }
+                    if real { cross::real(cfg, personas, c, plea, event_tx).await }
+                    else    { cross::mock(cfg, c, plea, event_tx).await }
+                });
+            }
+            Command::Deliberate { charge: c, plea, cross } => {
+                tokio::spawn(async move {
+                    if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx).await }
+                    else    { verdict::mock(cfg, c, plea, cross, event_tx).await }
                 });
             }
             Command::Speak(text) => {

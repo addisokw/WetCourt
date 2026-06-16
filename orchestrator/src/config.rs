@@ -12,6 +12,8 @@ pub struct Config {
     pub mock_inference: MockInferenceConfig,
     pub squirt: SquirtConfig,
     pub trial: TrialConfig,
+    #[serde(default)]
+    pub cross_examination: CrossExamConfig,
     pub display: DisplayConfig,
     pub logging: LoggingConfig,
     #[serde(default = "d_default_persona_id")]
@@ -125,6 +127,23 @@ pub struct TrialConfig {
     pub charge_display_secs: u64,
     pub cooldown_secs: u64,
     pub guilty_bias: f64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CrossExamConfig {
+    /// Startup default for the operator-toggleable cross-examination feature.
+    pub enabled: bool,
+    /// Seconds the defendant gets to answer the judge's follow-up question.
+    pub answer_window_secs: u64,
+    /// Cap on the question-generation LLM call (also the speak/await watchdog);
+    /// on expiry the trial skips cross-exam and proceeds straight to verdict.
+    pub question_timeout_secs: u64,
+}
+
+impl Default for CrossExamConfig {
+    fn default() -> Self {
+        Self { enabled: true, answer_window_secs: 10, question_timeout_secs: 12 }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

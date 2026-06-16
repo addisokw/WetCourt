@@ -14,6 +14,9 @@ pub enum Event {
     TranscriptReady(String),
     #[allow(dead_code)]
     TranscriptFailed(String),
+    CrossQuestionReady(String),
+    #[allow(dead_code)]
+    CrossQuestionFailed(String),
     VerdictReady(Verdict),
     #[allow(dead_code)]
     VerdictFailed(String),

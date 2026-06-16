@@ -25,6 +25,11 @@ export const [charge, setCharge] = createSignal<string>('');
 export const [pleaTranscript, setPleaTranscript] = createSignal<string>('');
 export const [verdictRemarks, setVerdictRemarks] = createSignal<string>('');
 export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolean>(false);
+// The judge's cross-examination follow-up question (empty when no cross-exam
+// this trial). Set on the `cross_question` event, cleared at idle/reset.
+export const [crossQuestion, setCrossQuestion] = createSignal<string>('');
+// Operator toggle state for cross-examination (mirrors /operator/cross_exam).
+export const [crossExamEnabled, setCrossExamEnabled] = createSignal<boolean>(true);
 // Generic per-phase deadline countdown. Captured from server `phase_deadline`
 // events; absolute Date.now() timestamp at which the current state will time
 // out (or 0 if the active state has no deadline).
@@ -42,6 +47,7 @@ const STATE_LABEL: Record<string, string> = {
   start_plea_recording: 'awaiting_plea',
   stop_plea_recording: 'transcribing',
   transcribing: 'transcribing',
+  cross_question: 'cross_examining',
   transcript_ready: 'deliberating',
   verdict: 'pronouncing_verdict',
   execute_sentence: 'executing_sentence',
@@ -131,6 +137,7 @@ function handleEvent(ev: DisplayEvent) {
       setCharge('');
       setPleaTranscript('');
       setVerdictRemarks('');
+      setCrossQuestion('');
       setPleaRecordingActive(false);
       setPhaseDeadlineAt(0);
       setPhaseDeadlineLabel('');
@@ -145,6 +152,9 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'transcript_ready':
       setPleaTranscript(String(ev.text ?? ''));
+      break;
+    case 'cross_question':
+      setCrossQuestion(String(ev.text ?? ''));
       break;
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
@@ -219,6 +229,33 @@ export async function endPlea() {
     socket?.send(await blob.arrayBuffer());
   }
   socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
+}
+
+export async function fetchCrossExam(): Promise<void> {
+  try {
+    const res = await fetch('/operator/cross_exam');
+    if (!res.ok) return;
+    const data = (await res.json()) as { enabled: boolean };
+    setCrossExamEnabled(Boolean(data.enabled));
+  } catch {
+    // leave the optimistic default in place
+  }
+}
+
+export async function setCrossExam(enabled: boolean): Promise<void> {
+  setCrossExamEnabled(enabled); // optimistic
+  try {
+    const res = await fetch('/operator/cross_exam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) { await fetchCrossExam(); return; }
+    const data = (await res.json()) as { enabled: boolean };
+    setCrossExamEnabled(Boolean(data.enabled));
+  } catch {
+    await fetchCrossExam();
+  }
 }
 
 export async function startTrial() {

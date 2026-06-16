@@ -41,7 +41,8 @@ A second LLM persona that argues against the defendant. After the defense, the p
 Public defender AI. For defendants who freeze at the mic, the option to have an AI argue for them. Lets the chronically shy participate, and the persona can be played as overworked and half-hearted for comedy.
 Bailiff voice. TTS voice handling “All rise” / “Order in the court” / “The defendant will state their name.” Frees the judge to be the heavy and stages proceedings properly without one AI doing every voice.
 
-## Cross-examination
+## Cross-examination — ✅ implemented
 After the defense, the judge asks one pointed follow-up question based on what they actually said, defendant gets 10 seconds to answer. This is where the LLM really earns its keep — it can engage specifically with the weakest part of the argument. Adds maybe 15 seconds and dramatically lifts perceived intelligence.
+*(Inserts a question→answer loop between the plea and the verdict; the answer is folded into the deliberation prompt. Operator-toggleable in the console (and `[cross_examination]` in config); skipped automatically when the defendant offered no plea. Any timeout falls through to the verdict so it can't stall a trial.)*
 
 ## Post processing glitchiness filters on audio TTS

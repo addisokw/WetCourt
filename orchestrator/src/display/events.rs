@@ -29,6 +29,9 @@ pub enum DisplayEvent {
     TheaterEnd,
     Transcribing,
     TranscriptReady { text: String },
+    /// The judge's cross-examination follow-up question; shown to viewers while
+    /// it's spoken, before the answer-recording window opens.
+    CrossQuestion { text: String },
     DeliberationToken { text: String },
     DeliberationComplete,
     Verdict { guilty: bool, remarks: String },

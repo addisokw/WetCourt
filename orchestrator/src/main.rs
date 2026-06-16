@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::{atomic::{AtomicBool, AtomicUsize}, Arc};
 
 use anyhow::Result;
 use clap::Parser;
@@ -114,6 +114,10 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { display::forwarder(display_rx, bcast).await });
     }
 
+    // Operator-toggleable cross-examination, shared between the HTTP endpoint
+    // (writes) and the state machine (reads). Seeded from config.
+    let cross_enabled = Arc::new(AtomicBool::new(cfg.cross_examination.enabled));
+
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -122,6 +126,7 @@ async fn main() -> Result<()> {
         personas,
         crimes,
         inference_cfg: cfg.inference.clone(),
+        cross_enabled: cross_enabled.clone(),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;
@@ -133,7 +138,7 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), event_rx, inference_tx, hardware_tx, display_tx);
+    let runtime = Runtime::new(cfg.clone(), cross_enabled, event_rx, inference_tx, hardware_tx, display_tx);
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {

@@ -2,12 +2,15 @@ use bytes::Bytes;
 
 use crate::display::events::DisplayEvent;
 use crate::hardware::protocol::HardwareCommand;
+use crate::state_machine::states::CrossExam;
 
 #[derive(Debug)]
 pub enum Command {
     GenerateCharge,
     Transcribe(Vec<u8>),
-    Deliberate { charge: String, plea: String },
+    /// Generate the judge's one cross-examination follow-up question.
+    CrossExamine { charge: String, plea: String },
+    Deliberate { charge: String, plea: String, cross: Option<CrossExam> },
     Speak(String),
 
     Hardware(HardwareCommand),

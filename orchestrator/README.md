@@ -14,8 +14,15 @@ a stub.
 
 ```
 Idle ─► GeneratingCharge ─► DisplayingCharge ─► AwaitingPlea ─► FlushingPlea
-     ─► Transcribing ─► Deliberating ─► PronouncingVerdict ─► ExecutingSentence ─► Idle
+     ─► Transcribing ─► [Cross-examination] ─► Deliberating ─► PronouncingVerdict
+     ─► ExecutingSentence ─► Idle
 ```
+
+When cross-examination is enabled (operator-toggleable; see below), the first
+plea routes through a one-question loop — `CrossGeneratingQuestion ─►
+CrossSpeaking ─► CrossAwaitingAnswer ─► CrossTranscribing` — and the answer is
+folded into the deliberation prompt. It's skipped when the defendant offered no
+plea, and any cross-exam timeout falls straight through to the verdict.
 
 Any failure drops into `Error` (auto-recovers) with canned fallback charges
 and verdicts, so the booth never stalls in front of a visitor. An e-stop is
@@ -129,6 +136,8 @@ DELETE /operator/crimes/{id}            remove a crime (persists)
 POST /operator/crimes/filter            {category} restricts random draws; {category: null} clears
 POST /operator/crimes/queue             {charge} queue a manual charge for the next trial
 DELETE /operator/crimes/queue/{index}   drop a queued charge
+GET  /operator/cross_exam               {enabled} current cross-examination toggle
+POST /operator/cross_exam               {enabled} turn cross-examination on/off (live)
 GET  /health                            liveness probe
 ```
 

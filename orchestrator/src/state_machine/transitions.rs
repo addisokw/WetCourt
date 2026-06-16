@@ -7,9 +7,12 @@ use crate::hardware::protocol::{HardwareCommand, LightState, PanelPattern};
 
 use super::commands::Command;
 use super::events::Event;
-use super::states::{State, Verdict};
+use super::states::{CrossExam, State, Verdict, NO_DEFENSE};
 
-pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
+/// Sentinel for an empty/unintelligible cross-examination answer.
+const NO_ANSWER: &str = "[no answer given]";
+
+pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (State, Vec<Command>) {
     use Event::*;
     use State::*;
 
@@ -102,18 +105,99 @@ pub fn step(state: State, event: Event, cfg: &Config) -> (State, Vec<Command>) {
         }
         (s @ FlushingPlea { .. }, _) => (s, vec![]),
 
-        (Transcribing { charge, .. }, TranscriptReady(text)) => begin_deliberating(charge, text, cfg),
+        (Transcribing { charge, .. }, TranscriptReady(text)) => after_plea(charge, text, cross_enabled, cfg),
         (Transcribing { charge, started_at, audio }, Tick) => {
             if started_at.elapsed() > Duration::from_secs(cfg.inference.stt_timeout_secs) {
-                begin_deliberating(charge, "[no defense offered]".into(), cfg)
+                begin_deliberating(charge, NO_DEFENSE.into(), None, cfg)
             } else {
                 (Transcribing { charge, started_at, audio }, vec![])
             }
         }
         (Transcribing { charge, .. }, TranscriptFailed(_)) => {
-            begin_deliberating(charge, "[no defense offered]".into(), cfg)
+            begin_deliberating(charge, NO_DEFENSE.into(), None, cfg)
         }
         (s @ Transcribing { .. }, _) => (s, vec![]),
+
+        // ---- Cross-examination ----
+        // The judge composes one pointed follow-up. Any timeout/failure here
+        // falls straight through to the verdict so cross-exam can't wedge a trial.
+        (CrossGeneratingQuestion { charge, plea, .. }, CrossQuestionReady(q)) => {
+            begin_cross_speaking(charge, plea, q)
+        }
+        (CrossGeneratingQuestion { charge, plea, started_at }, Tick) => {
+            if started_at.elapsed() > Duration::from_secs(cfg.cross_examination.question_timeout_secs) {
+                begin_deliberating(charge, plea, None, cfg)
+            } else {
+                (CrossGeneratingQuestion { charge, plea, started_at }, vec![])
+            }
+        }
+        (CrossGeneratingQuestion { charge, plea, .. }, CrossQuestionFailed(_)) => {
+            begin_deliberating(charge, plea, None, cfg)
+        }
+        (s @ CrossGeneratingQuestion { .. }, _) => (s, vec![]),
+
+        // Question is displayed + spoken; open the answer window once its TTS
+        // drains (TtsFinished), with a watchdog if that ack never arrives.
+        (CrossSpeaking { charge, plea, question, .. }, TtsFinished) => {
+            begin_cross_answer(charge, plea, question, cfg)
+        }
+        (CrossSpeaking { charge, plea, question, started_at }, Tick) => {
+            if started_at.elapsed() > Duration::from_secs(cfg.cross_examination.question_timeout_secs) {
+                begin_cross_answer(charge, plea, question, cfg)
+            } else {
+                (CrossSpeaking { charge, plea, question, started_at }, vec![])
+            }
+        }
+        (s @ CrossSpeaking { .. }, _) => (s, vec![]),
+
+        // Recording the answer — reuses the plea-recording machinery verbatim.
+        (CrossAwaitingAnswer { charge, plea, question, .. }, PleaAudioReceived(audio)) => {
+            begin_cross_transcribing(charge, plea, question, audio, cfg)
+        }
+        (CrossAwaitingAnswer { charge, plea, question, .. }, PleaRecordingStarted) => {
+            let window = cfg.cross_examination.answer_window_secs;
+            let deadline = Instant::now() + Duration::from_secs(window);
+            (
+                CrossAwaitingAnswer { charge, plea, question, deadline },
+                vec![
+                    Command::Display(DisplayEvent::PleaRecording { active: true }),
+                    Command::Display(DisplayEvent::PhaseDeadline {
+                        phase: "cross_answer".into(),
+                        deadline_ms: window * 1000,
+                    }),
+                ],
+            )
+        }
+        (CrossAwaitingAnswer { charge, plea, question, deadline }, Tick) if Instant::now() >= deadline => {
+            begin_cross_flushing(charge, plea, question)
+        }
+        (CrossAwaitingAnswer { charge, plea, question, .. }, PleaTimeout) => {
+            begin_cross_flushing(charge, plea, question)
+        }
+        (s @ CrossAwaitingAnswer { .. }, _) => (s, vec![]),
+
+        (CrossFlushingAnswer { charge, plea, question, .. }, PleaAudioReceived(audio)) => {
+            begin_cross_transcribing(charge, plea, question, audio, cfg)
+        }
+        (CrossFlushingAnswer { charge, plea, question, hard_deadline }, Tick) if Instant::now() >= hard_deadline => {
+            begin_cross_transcribing(charge, plea, question, Vec::new(), cfg)
+        }
+        (s @ CrossFlushingAnswer { .. }, _) => (s, vec![]),
+
+        (CrossTranscribing { charge, plea, question, .. }, TranscriptReady(answer)) => {
+            begin_deliberating(charge, plea, Some(CrossExam { question, answer }), cfg)
+        }
+        (CrossTranscribing { charge, plea, question, started_at, audio }, Tick) => {
+            if started_at.elapsed() > Duration::from_secs(cfg.inference.stt_timeout_secs) {
+                begin_deliberating(charge, plea, Some(CrossExam { question, answer: NO_ANSWER.into() }), cfg)
+            } else {
+                (CrossTranscribing { charge, plea, question, started_at, audio }, vec![])
+            }
+        }
+        (CrossTranscribing { charge, plea, question, .. }, TranscriptFailed(_)) => {
+            begin_deliberating(charge, plea, Some(CrossExam { question, answer: NO_ANSWER.into() }), cfg)
+        }
+        (s @ CrossTranscribing { .. }, _) => (s, vec![]),
 
         (Deliberating { .. }, VerdictReady(v)) => begin_pronouncing(v),
         (Deliberating { started_at, charge, plea }, Tick) => {
@@ -215,7 +299,12 @@ fn begin_flushing_plea(charge: String, _cfg: &Config) -> (State, Vec<Command>) {
     )
 }
 
-fn begin_deliberating(charge: String, plea: String, cfg: &Config) -> (State, Vec<Command>) {
+fn begin_deliberating(
+    charge: String,
+    plea: String,
+    cross: Option<CrossExam>,
+    cfg: &Config,
+) -> (State, Vec<Command>) {
     (
         State::Deliberating { charge: charge.clone(), plea: plea.clone(), started_at: Instant::now() },
         vec![
@@ -224,7 +313,86 @@ fn begin_deliberating(charge: String, plea: String, cfg: &Config) -> (State, Vec
                 phase: "deliberating".into(),
                 deadline_ms: cfg.inference.verdict_total_timeout_secs * 1000,
             }),
-            Command::Deliberate { charge, plea },
+            Command::Deliberate { charge, plea, cross },
+        ],
+    )
+}
+
+/// First plea is in. Branch into cross-examination when it's enabled and the
+/// defendant actually said something; otherwise go straight to the verdict.
+fn after_plea(charge: String, plea: String, cross_enabled: bool, cfg: &Config) -> (State, Vec<Command>) {
+    if cross_enabled && plea.trim() != NO_DEFENSE {
+        begin_cross(charge, plea, cfg)
+    } else {
+        begin_deliberating(charge, plea, None, cfg)
+    }
+}
+
+fn begin_cross(charge: String, plea: String, cfg: &Config) -> (State, Vec<Command>) {
+    (
+        State::CrossGeneratingQuestion { charge: charge.clone(), plea: plea.clone(), started_at: Instant::now() },
+        vec![
+            Command::CrossExamine { charge, plea },
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "cross_examining".into(),
+                deadline_ms: cfg.cross_examination.question_timeout_secs * 1000,
+            }),
+            Command::Hardware(HardwareCommand::Panel(PanelPattern::Thinking)),
+        ],
+    )
+}
+
+fn begin_cross_speaking(charge: String, plea: String, question: String) -> (State, Vec<Command>) {
+    (
+        State::CrossSpeaking { charge, plea, question: question.clone(), started_at: Instant::now() },
+        vec![
+            Command::Display(DisplayEvent::CrossQuestion { text: question.clone() }),
+            Command::Speak(question),
+        ],
+    )
+}
+
+fn begin_cross_answer(charge: String, plea: String, question: String, cfg: &Config) -> (State, Vec<Command>) {
+    let window = cfg.cross_examination.answer_window_secs;
+    let deadline = Instant::now() + Duration::from_secs(window);
+    (
+        State::CrossAwaitingAnswer { charge, plea, question, deadline },
+        vec![
+            Command::Display(DisplayEvent::StartPleaRecording { deadline_ms: window * 1000 }),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "cross_answer".into(),
+                deadline_ms: window * 1000,
+            }),
+            Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
+        ],
+    )
+}
+
+fn begin_cross_flushing(charge: String, plea: String, question: String) -> (State, Vec<Command>) {
+    let hard_deadline = Instant::now() + Duration::from_millis(PLEA_FLUSH_GRACE_MS);
+    (
+        State::CrossFlushingAnswer { charge, plea, question, hard_deadline },
+        vec![Command::Display(DisplayEvent::StopPleaRecording)],
+    )
+}
+
+fn begin_cross_transcribing(
+    charge: String,
+    plea: String,
+    question: String,
+    audio: Vec<u8>,
+    cfg: &Config,
+) -> (State, Vec<Command>) {
+    (
+        State::CrossTranscribing { charge, plea, question, audio: audio.clone(), started_at: Instant::now() },
+        vec![
+            Command::Display(DisplayEvent::StopPleaRecording),
+            Command::Display(DisplayEvent::Transcribing),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "transcribing".into(),
+                deadline_ms: cfg.inference.stt_timeout_secs * 1000,
+            }),
+            Command::Transcribe(audio),
         ],
     )
 }
@@ -281,6 +449,7 @@ mod tests {
             mock_inference: MockInferenceConfig::default(),
             squirt: SquirtConfig { duration_ms: 150 },
             trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 1, cooldown_secs: 1, guilty_bias: 1.0 },
+            cross_examination: CrossExamConfig { enabled: true, answer_window_secs: 1, question_timeout_secs: 1 },
             display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
             logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },
             default_persona_id: "wettington".into(),
@@ -291,7 +460,7 @@ mod tests {
     #[test]
     fn idle_to_generating_charge_on_start() {
         let cfg = test_cfg();
-        let (s, cmds) = step(State::Idle, Event::OperatorStart, &cfg);
+        let (s, cmds) = step(State::Idle, Event::OperatorStart, &cfg, false);
         assert!(matches!(s, State::GeneratingCharge { .. }));
         assert!(matches!(cmds[0], Command::GenerateCharge));
     }
@@ -300,7 +469,7 @@ mod tests {
     fn estop_anywhere_returns_to_idle() {
         let cfg = test_cfg();
         let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
-        let (s2, _) = step(s, Event::OperatorEmergencyStop, &cfg);
+        let (s2, _) = step(s, Event::OperatorEmergencyStop, &cfg, false);
         assert!(matches!(s2, State::Idle));
     }
 
@@ -308,7 +477,7 @@ mod tests {
     fn charge_ready_transitions_to_displaying() {
         let cfg = test_cfg();
         let (s, _) = step(State::GeneratingCharge { started_at: Instant::now() },
-                          Event::ChargeReady("you stand accused".into()), &cfg);
+                          Event::ChargeReady("you stand accused".into()), &cfg, false);
         assert!(matches!(s, State::DisplayingCharge { .. }));
     }
 
@@ -316,9 +485,10 @@ mod tests {
     fn charge_text_threads_through_to_deliberating() {
         let cfg = test_cfg();
         let charge = "you ate the last donut".to_string();
+        // cross-exam off → straight to deliberation.
         let (s, _) = step(
             State::Transcribing { charge: charge.clone(), audio: vec![], started_at: Instant::now() },
-            Event::TranscriptReady("i did not".into()), &cfg);
+            Event::TranscriptReady("i did not".into()), &cfg, false);
         if let State::Deliberating { charge: c, plea, .. } = s {
             assert_eq!(c, charge);
             assert_eq!(plea, "i did not");
@@ -333,7 +503,63 @@ mod tests {
             State::ExecutingSentence { verdict: v, deadline: Instant::now(), hardware_done: true },
             Event::Tick,
             &cfg,
+            false,
         );
         assert!(matches!(s, State::Idle));
+    }
+
+    #[test]
+    fn cross_enabled_routes_first_plea_to_question() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(
+            State::Transcribing { charge: "c".into(), audio: vec![], started_at: Instant::now() },
+            Event::TranscriptReady("a real defense".into()), &cfg, true);
+        assert!(matches!(s, State::CrossGeneratingQuestion { .. }));
+        assert!(cmds.iter().any(|c| matches!(c, Command::CrossExamine { .. })));
+    }
+
+    #[test]
+    fn cross_skipped_when_no_defense() {
+        let cfg = test_cfg();
+        let (s, _) = step(
+            State::Transcribing { charge: "c".into(), audio: vec![], started_at: Instant::now() },
+            Event::TranscriptReady(NO_DEFENSE.into()), &cfg, true);
+        assert!(matches!(s, State::Deliberating { .. }));
+    }
+
+    #[test]
+    fn cross_question_threads_answer_into_deliberation() {
+        let cfg = test_cfg();
+        // question ready → speaking
+        let (s, _) = step(
+            State::CrossGeneratingQuestion { charge: "c".into(), plea: "p".into(), started_at: Instant::now() },
+            Event::CrossQuestionReady("really?".into()), &cfg, true);
+        assert!(matches!(s, State::CrossSpeaking { .. }));
+        // tts done → open answer window
+        let (s, _) = step(s, Event::TtsFinished, &cfg, true);
+        assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
+        // answer audio → transcribing
+        let (s, _) = step(s, Event::PleaAudioReceived(vec![1, 2, 3]), &cfg, true);
+        assert!(matches!(s, State::CrossTranscribing { .. }));
+        // answer transcript → deliberate carrying the full exchange
+        let (s, cmds) = step(s, Event::TranscriptReady("yes".into()), &cfg, true);
+        assert!(matches!(s, State::Deliberating { .. }));
+        let cross = cmds.iter().find_map(|c| match c {
+            Command::Deliberate { cross, .. } => Some(cross.clone()),
+            _ => None,
+        }).expect("deliberate command");
+        let cross = cross.expect("cross present");
+        assert_eq!(cross.question, "really?");
+        assert_eq!(cross.answer, "yes");
+    }
+
+    #[test]
+    fn cross_question_timeout_falls_through_to_verdict() {
+        let cfg = test_cfg();
+        let started = Instant::now() - Duration::from_secs(cfg.cross_examination.question_timeout_secs + 1);
+        let (s, _) = step(
+            State::CrossGeneratingQuestion { charge: "c".into(), plea: "p".into(), started_at: started },
+            Event::Tick, &cfg, true);
+        assert!(matches!(s, State::Deliberating { .. }));
     }
 }

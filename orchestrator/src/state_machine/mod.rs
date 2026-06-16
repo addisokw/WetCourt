@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,6 +20,9 @@ pub use states::State;
 pub struct Runtime {
     state: State,
     cfg: Arc<Config>,
+    /// Operator-toggleable cross-examination switch, shared with the display
+    /// server's `/operator/cross_exam` endpoint. Read once per event.
+    cross_enabled: Arc<AtomicBool>,
     event_rx: mpsc::Receiver<Event>,
     inference_tx: mpsc::Sender<Command>,
     hardware_tx: mpsc::Sender<Command>,
@@ -28,12 +32,13 @@ pub struct Runtime {
 impl Runtime {
     pub fn new(
         cfg: Arc<Config>,
+        cross_enabled: Arc<AtomicBool>,
         event_rx: mpsc::Receiver<Event>,
         inference_tx: mpsc::Sender<Command>,
         hardware_tx: mpsc::Sender<Command>,
         display_tx: mpsc::Sender<Command>,
     ) -> Self {
-        Self { state: State::Idle, cfg, event_rx, inference_tx, hardware_tx, display_tx }
+        Self { state: State::Idle, cfg, cross_enabled, event_rx, inference_tx, hardware_tx, display_tx }
     }
 
     pub async fn run(mut self) {
@@ -52,7 +57,8 @@ impl Runtime {
         let prev_name = self.state.name();
         let interesting = !matches!(ev, Event::Tick);
         let prev = std::mem::replace(&mut self.state, State::Idle);
-        let (next, cmds) = transitions::step(prev, ev, &self.cfg);
+        let cross_enabled = self.cross_enabled.load(Ordering::Relaxed);
+        let (next, cmds) = transitions::step(prev, ev, &self.cfg, cross_enabled);
         if next.name() != prev_name {
             info!(from = prev_name, to = next.name(), "state_transition");
         } else if interesting && !cmds.is_empty() {
@@ -66,7 +72,7 @@ impl Runtime {
 
     async fn dispatch(&self, cmd: Command) {
         match cmd {
-            Command::GenerateCharge | Command::Transcribe(_) | Command::Deliberate { .. } | Command::Speak(_) => {
+            Command::GenerateCharge | Command::Transcribe(_) | Command::CrossExamine { .. } | Command::Deliberate { .. } | Command::Speak(_) => {
                 if self.inference_tx.send(cmd).await.is_err() {
                     tracing::error!("inference channel closed");
                 }

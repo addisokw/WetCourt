@@ -1,4 +1,4 @@
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
+use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
 use std::time::Duration;
 
 use axum::{
@@ -47,6 +47,9 @@ pub struct AppState {
     pub personas: Arc<RwLock<PersonaRegistry>>,
     pub crimes: Arc<RwLock<CrimeStore>>,
     pub inference_cfg: InferenceConfig,
+    /// Operator-toggleable cross-examination switch, shared with the state
+    /// machine `Runtime`, which reads it when a plea comes in.
+    pub cross_enabled: Arc<AtomicBool>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -67,6 +70,7 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/crimes/queue", post(queue_charge))
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
+        .route("/operator/cross_exam", get(get_cross_exam).post(set_cross_exam))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -88,6 +92,25 @@ async fn operator_estop(AxumState(s): AxumState<AppState>) -> impl IntoResponse 
         return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
     }
     (StatusCode::NO_CONTENT, "")
+}
+
+#[derive(Serialize, Deserialize)]
+struct CrossExamState {
+    enabled: bool,
+}
+
+async fn get_cross_exam(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let enabled = s.cross_enabled.load(Ordering::Relaxed);
+    (StatusCode::OK, Json(CrossExamState { enabled }))
+}
+
+async fn set_cross_exam(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<CrossExamState>,
+) -> impl IntoResponse {
+    s.cross_enabled.store(body.enabled, Ordering::Relaxed);
+    info!(enabled = body.enabled, "operator: cross-examination toggled");
+    (StatusCode::OK, Json(CrossExamState { enabled: body.enabled }))
 }
 
 async fn ws_handler(

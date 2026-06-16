@@ -61,6 +61,15 @@ charge_display_secs = 5
 cooldown_secs = 4
 guilty_bias = 0.7
 
+[cross_examination]
+# After the defense, the judge asks one pointed follow-up question and the
+# defendant gets answer_window_secs to respond before the verdict. The
+# operator console can toggle this live; `enabled` here is just the startup
+# default. Skipped automatically when the defendant offered no plea.
+enabled = true
+answer_window_secs = 10
+question_timeout_secs = 12
+
 [display]
 listen_addr = "0.0.0.0:8080"
 

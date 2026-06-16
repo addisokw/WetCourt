@@ -2,15 +2,18 @@ import { createMemo, createSignal, onCleanup, onMount, For, Show } from 'solid-j
 import {
   beginPlea,
   connect,
+  crossExamEnabled,
   currentState,
   deliberation,
   emergencyStop,
   endPlea,
+  fetchCrossExam,
   log,
   phaseDeadlineAt,
   phaseDeadlineLabel,
   pleaWindowOpen,
   recording,
+  setCrossExam,
   startTrial,
 } from './ws';
 import PersonaPanel from './PersonaPanel';
@@ -48,6 +51,7 @@ function PhaseCountdown() {
 export default function App() {
   onMount(() => {
     connect();
+    void fetchCrossExam();
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       // Escape is always global — it's an emergency stop.
@@ -87,6 +91,14 @@ export default function App() {
             {pleaButtonLabel()}
           </button>
           <button class="estop" onClick={emergencyStop}>E-Stop (Esc)</button>
+          <label class="cross-toggle" title="Judge asks one follow-up question after the plea">
+            <input
+              type="checkbox"
+              checked={crossExamEnabled()}
+              onChange={(e) => void setCrossExam(e.currentTarget.checked)}
+            />
+            Cross-exam
+          </label>
         </div>
       </header>
       <Show when={recording()}>
