@@ -8,6 +8,8 @@
 // upload as one binary frame followed by a `plea_audio_complete` JSON event.
 // Parakeet on the backend accepts standard formats — no client-side resampling.
 
+import { getRobotInput, initRobotWorklet } from './robot';
+
 const TTS_SAMPLE_RATE = 24000;
 // Small lead-in for the first chunk of each TTS session so the output device
 // has time to warm up; without it the leading ~100ms (often the first word)
@@ -29,6 +31,9 @@ let pcmResidue: number | null = null;
 function ensureCtx(): AudioContext {
   if (!playCtx) {
     playCtx = new AudioContext({ sampleRate: TTS_SAMPLE_RATE });
+    // Preload the glitch worklet now (inside the Start-click gesture) so the
+    // robot chain is fully armed well before the first TTS chunk arrives.
+    initRobotWorklet(playCtx);
   }
   // Browser autoplay policies require resumption inside a user gesture; the
   // Start button click handler triggers this.
@@ -78,7 +83,7 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
 
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
-  source.connect(ctx.destination);
+  source.connect(getRobotInput(ctx));
   const earliest = sessionStartPending
     ? ctx.currentTime + TTS_LEAD_IN_SECS
     : ctx.currentTime;

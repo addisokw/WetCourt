@@ -45,4 +45,11 @@ Bailiff voice. TTS voice handling “All rise” / “Order in the court” / �
 After the defense, the judge asks one pointed follow-up question based on what they actually said, defendant gets 10 seconds to answer. This is where the LLM really earns its keep — it can engage specifically with the weakest part of the argument. Adds maybe 15 seconds and dramatically lifts perceived intelligence.
 *(Inserts a question→answer loop between the plea and the verdict; the answer is folded into the deliberation prompt. Operator-toggleable in the console (and `[cross_examination]` in config); skipped automatically when the defendant offered no plea. Any timeout falls through to the verdict so it can't stall a trial.)*
 
-## Post processing glitchiness filters on audio TTS
+## Post processing glitchiness filters on audio TTS — ✅ implemented
+A robot-aesthetic Web Audio chain applied to all TTS playback (`frontend/src/robot.ts`):
+every PCM chunk routes through a persistent graph — bandpass/peak EQ → soft-clip
+saturation → ring modulation (~52 Hz carrier) → comb resonance, wet/dry blended —
+then an AudioWorklet tail (`glitch-processor.js`) adds bitcrush, sample-rate
+decimation, and occasional stutter/dropout glitches. Uniform across personas,
+continuous across chunk seams. Tuning knobs live at the top of `robot.ts` and in
+the worklet's `parameterDescriptors`.
