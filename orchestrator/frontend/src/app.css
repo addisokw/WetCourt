@@ -628,6 +628,7 @@ button.plea.recording:hover { background: #8b2326; }
 }
 .crimes-panel .row-line input[type="text"] { flex: 1; }
 .crimes-panel .category-input { max-width: 12ch; flex: 0 1 auto !important; }
+.crimes-panel .crime-search { flex: 1 1 16ch; min-width: 12ch; }
 .crime-list {
   list-style: none;
   margin: 0;

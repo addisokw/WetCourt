@@ -28,6 +28,8 @@ export default function CrimesPanel() {
   const [newCharge, setNewCharge] = createSignal('');
   // list view filter (client-side browsing only; separate from the draw filter)
   const [viewCategory, setViewCategory] = createSignal('');
+  // free-text search over the visible list (client-side only)
+  const [search, setSearch] = createSignal('');
   // inline edit
   const [editing, setEditing] = createSignal<Crime | null>(null);
 
@@ -57,9 +59,14 @@ export default function CrimesPanel() {
   }
 
   const enabledCount = createMemo(() => crimes().filter((c) => c.enabled).length);
-  const visible = createMemo(() =>
-    viewCategory() ? crimes().filter((c) => c.category === viewCategory()) : crimes()
-  );
+  const visible = createMemo(() => {
+    const q = search().trim().toLowerCase();
+    return crimes().filter(
+      (c) =>
+        (!viewCategory() || c.category === viewCategory()) &&
+        (!q || c.charge.toLowerCase().includes(q) || c.category.toLowerCase().includes(q))
+    );
+  });
 
   const queueErr = () => (queueText() ? validateCharge(queueText()) : null);
   const addErr = () =>
@@ -179,6 +186,16 @@ export default function CrimesPanel() {
                 )}
               </For>
             </select>
+            <input
+              type="search"
+              class="crime-search"
+              placeholder="search charges…"
+              value={search()}
+              onInput={(e) => setSearch(e.currentTarget.value)}
+            />
+            <Show when={search().trim()}>
+              <span class="muted small">{visible().length} match{visible().length === 1 ? '' : 'es'}</span>
+            </Show>
           </div>
 
           <ul class="crime-list">
