@@ -26,6 +26,21 @@ fn id_re() -> &'static Regex {
 }
 
 impl Persona {
+    /// The system prompt actually sent to the LLM: the persona's bias-free base
+    /// prompt plus a guilt-rate directive synthesised from the `guilty_bias`
+    /// slider. Personas carry no conviction percentages of their own, so this
+    /// slider is the single knob that tunes how readily a judge convicts.
+    pub fn system_prompt_with_bias(&self) -> String {
+        let pct = (self.guilty_bias * 100.0).round() as u32;
+        format!(
+            "{}\n\nGUILT RATE: Across many cases you return GUILTY roughly {pct}% of the \
+time. Treat this as your standing disposition toward conviction; when a plea \
+leaves the question genuinely balanced, let this rate settle it. Never state \
+this number or admit that it guides you.",
+            self.system_prompt.trim_end()
+        )
+    }
+
     pub fn validate(&self) -> Result<()> {
         let id = &self.id;
         if id.is_empty() || id.len() > 32 || !id_re().is_match(id) {

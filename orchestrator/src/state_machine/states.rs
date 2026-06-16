@@ -4,7 +4,6 @@ use std::time::Instant;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Verdict {
     pub guilty: bool,
-    pub intensity: u8,
     pub deliberation: String,
     pub remarks: String,
     /// True when the verdict service has already streamed TTS audio to the

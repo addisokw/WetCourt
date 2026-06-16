@@ -37,10 +37,12 @@ pub async fn real(
 ) {
     // Snapshot the active persona once at trial start; mid-trial changes
     // don't apply by design.
+    // The guilty_bias slider is injected into the prompt here (not baked into
+    // the persona text) so it is the sole knob governing conviction rate.
     let (system_prompt, voice, guilty_bias) = {
         let reg = personas.read().await;
         let p = reg.active();
-        (p.system_prompt.clone(), p.tts_voice.clone(), p.guilty_bias as f64)
+        (p.system_prompt_with_bias(), p.tts_voice.clone(), p.guilty_bias as f64)
     };
 
     let client = LlmClient::new(&cfg.inference);
@@ -98,7 +100,6 @@ pub async fn real(
     });
     v.pre_announced = true;
     let guilty = v.guilty;
-    let intensity = v.intensity;
     let remarks = v.remarks.clone();
     let verdict_word: &str = if guilty { "Guilty." } else { "Not guilty." };
 
@@ -145,7 +146,6 @@ pub async fn real(
     let _ = display_tx
         .send(Command::Display(DisplayEvent::Verdict {
             guilty,
-            intensity,
             remarks,
         }))
         .await;
@@ -212,25 +212,17 @@ async fn play_through(start: Instant, bytes: usize) {
 }
 
 static VERDICT_RE: OnceLock<Regex> = OnceLock::new();
-static INTENSITY_RE: OnceLock<Regex> = OnceLock::new();
 
 fn parse_verdict(text: &str) -> Option<Verdict> {
     let vre = VERDICT_RE.get_or_init(|| Regex::new(r"(?i)VERDICT:\s*(GUILTY|ACQUITTED)").unwrap());
-    let ire = INTENSITY_RE.get_or_init(|| Regex::new(r"(?i)INTENSITY:\s*([1-5])").unwrap());
 
     let m = vre.captures(text)?;
     let guilty = m.get(1)?.as_str().eq_ignore_ascii_case("GUILTY");
-    let intensity = ire
-        .captures(text)
-        .and_then(|c| c.get(1))
-        .and_then(|m| m.as_str().parse().ok())
-        .unwrap_or(if guilty { 3 } else { 0 });
 
     let deliberation = strip_markers(text);
 
     Some(Verdict {
         guilty,
-        intensity,
         deliberation,
         remarks: if guilty { "Justice, as ever, is wet.".into() } else { "Acquitted. Do not let it happen again.".into() },
         pre_announced: false,
@@ -242,29 +234,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_guilty_with_intensity() {
-        let raw = "Your plea is feeble nonsense.\nVERDICT: GUILTY\nINTENSITY: 4";
+    fn parses_guilty() {
+        let raw = "Your plea is feeble nonsense.\nVERDICT: GUILTY";
         let v = parse_verdict(raw).unwrap();
         assert!(v.guilty);
-        assert_eq!(v.intensity, 4);
         assert!(v.deliberation.contains("feeble"));
         assert!(!v.deliberation.contains("VERDICT"));
-        assert!(!v.deliberation.contains("INTENSITY"));
     }
 
     #[test]
     fn parses_acquitted() {
-        let raw = "Surprisingly clever. VERDICT: ACQUITTED\nINTENSITY: 1";
+        let raw = "Surprisingly clever. VERDICT: ACQUITTED";
         let v = parse_verdict(raw).unwrap();
         assert!(!v.guilty);
     }
 
     #[test]
-    fn missing_intensity_defaults() {
-        let raw = "Pathetic.\nVERDICT: GUILTY";
+    fn strips_stray_intensity_line() {
+        let raw = "Pathetic.\nVERDICT: GUILTY\nINTENSITY: 4";
         let v = parse_verdict(raw).unwrap();
         assert!(v.guilty);
-        assert_eq!(v.intensity, 3);
+        assert!(!v.deliberation.contains("INTENSITY"));
     }
 
     #[test]

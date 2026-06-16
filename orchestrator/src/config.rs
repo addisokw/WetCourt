@@ -10,7 +10,7 @@ pub struct Config {
     pub mock_hw: MockHwConfig,
     #[serde(default)]
     pub mock_inference: MockInferenceConfig,
-    pub squirt_intensity: SquirtIntensity,
+    pub squirt: SquirtConfig,
     pub trial: TrialConfig,
     pub display: DisplayConfig,
     pub logging: LoggingConfig,
@@ -113,24 +113,10 @@ fn d_deliberate() -> u64 { 1200 }
 fn d_tts() -> u64 { 200 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct SquirtIntensity {
-    pub level_1: u32,
-    pub level_2: u32,
-    pub level_3: u32,
-    pub level_4: u32,
-    pub level_5: u32,
-}
-
-impl SquirtIntensity {
-    pub fn duration_ms(&self, intensity: u8) -> u32 {
-        match intensity.clamp(1, 5) {
-            1 => self.level_1,
-            2 => self.level_2,
-            3 => self.level_3,
-            4 => self.level_4,
-            _ => self.level_5,
-        }
-    }
+pub struct SquirtConfig {
+    /// The squirt gun is binary — every guilty verdict fires for this fixed
+    /// duration (ms). There is no per-verdict intensity.
+    pub duration_ms: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]

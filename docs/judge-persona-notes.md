@@ -2,8 +2,18 @@
 
 Design notes for future iteration on the judge character and Kokoro TTS
 delivery. Not a spec — a snapshot of exploration so we don't lose the
-thread. The live prompt is in `orchestrator/src/inference/verdict.rs`
-(`SYSTEM_PROMPT`).
+thread. Personas now live as TOML files in `orchestrator/personas/*.toml`
+(one `system_prompt` per file), not as a hardcoded `SYSTEM_PROMPT`.
+
+> **Update (2026-06):** Two mechanics below are now stale. (1) The squirt
+> gun is **binary** — there is no `INTENSITY: N` line anymore; a guilty
+> verdict fires one fixed duration. (2) Conviction rate is no longer baked
+> into the prompt as a percentage — persona prompts are **bias-free**, and
+> the `guilty_bias` slider is injected at trial start as the sole guilt-rate
+> knob (see `Persona::system_prompt_with_bias`). The sample prompts further
+> down still show the old `INTENSITY` contract and a "rule guilty ~70%" line;
+> treat those as historical. Six personas now ship in-repo (Wettington, Bom,
+> Sunny Vale, Magnus Thorne, Remy Calhoun, Beatrix Plume).
 
 ## Current persona: Justice Wettington
 

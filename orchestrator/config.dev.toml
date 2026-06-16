@@ -42,12 +42,10 @@ transcribe_latency_ms = 400
 deliberate_latency_ms = 1200
 tts_latency_ms = 200
 
-[squirt_intensity]
-level_1 = 60
-level_2 = 100
-level_3 = 150
-level_4 = 200
-level_5 = 280
+[squirt]
+# The squirt gun is binary: every guilty verdict fires for this fixed
+# duration (ms).
+duration_ms = 150
 
 [crimes]
 # Charges are drawn from this curated list (path relative to this file).

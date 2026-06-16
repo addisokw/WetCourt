@@ -26,14 +26,8 @@ Given a CHARGE and a PLEA:
    or
    VERDICT: ACQUITTED
 
-3. On a final line after the verdict, output:
-   INTENSITY: N
-   where N is 1 (light spritz) through 5 (full blast). Always include this
-   line; it is ignored on acquittal.
-
-Rule GUILTY about 50% of time. Acquit when plea is true, brave, or makes
-you laugh small. Long excuse: guilty. Begging: guilty. Story that does not
-answer charge: guilty, friend."""
+Acquit when plea is true, brave, or makes you laugh small. Long excuse:
+guilty. Begging: guilty. Story that does not answer charge: guilty, friend."""
 guilty_bias = 0.5
 tts_voice = "am_onyx"
 tts_speed = 0.699999988079071

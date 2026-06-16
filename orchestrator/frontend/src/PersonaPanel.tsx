@@ -324,7 +324,6 @@ export default function PersonaPanel() {
                     <span class={`verdict ${r().guilty ? 'guilty' : 'not-guilty'}`}>
                       {r().guilty ? 'GUILTY' : 'NOT GUILTY'}
                     </span>
-                    <span class="intensity">intensity: {r().intensity.toFixed(2)}</span>
                   </div>
                   <div class="test-deliberation">{r().deliberation}</div>
                 </div>

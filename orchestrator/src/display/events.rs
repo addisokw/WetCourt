@@ -31,7 +31,7 @@ pub enum DisplayEvent {
     TranscriptReady { text: String },
     DeliberationToken { text: String },
     DeliberationComplete,
-    Verdict { guilty: bool, intensity: u8, remarks: String },
+    Verdict { guilty: bool, remarks: String },
     ExecuteSentence { guilty: bool },
     PlayCue { name: String },
     #[allow(dead_code)]

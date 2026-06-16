@@ -9,7 +9,6 @@ import {
   pleaRecordingActive,
   pleaTranscript,
   theaterActive,
-  verdictIntensity,
   verdictRemarks,
 } from './ws';
 
@@ -91,15 +90,6 @@ function VerdictPanel() {
         <div class="verdict-word">{guilty() ? 'GUILTY' : 'NOT GUILTY'}</div>
         <Show when={verdictRemarks().length > 0}>
           <div class="verdict-remarks">{verdictRemarks()}</div>
-        </Show>
-        <Show when={!!guilty() && verdictIntensity() > 0}>
-          <div class="intensity">
-            <span class="intensity-label">Sentence intensity</span>
-            <div class="intensity-bar">
-              <div class="intensity-fill" style={{ width: `${Math.min(100, verdictIntensity() * 10)}%` }} />
-            </div>
-            <span class="intensity-num">{verdictIntensity()}/10</span>
-          </div>
         </Show>
       </div>
     </Show>

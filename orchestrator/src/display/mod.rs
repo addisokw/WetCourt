@@ -367,7 +367,6 @@ struct TestReq {
 struct TestResp {
     deliberation: String,
     guilty: bool,
-    intensity: u8,
 }
 
 async fn test_persona(
@@ -375,10 +374,12 @@ async fn test_persona(
     Path(id): Path<String>,
     Json(body): Json<TestReq>,
 ) -> impl IntoResponse {
+    // Mirror the live path: inject the persona's guilty_bias into the prompt so
+    // the operator's dry-run reflects the same conviction tuning.
     let system_prompt = {
         let reg = s.personas.read().await;
         match reg.get(&id) {
-            Some(p) => p.system_prompt.clone(),
+            Some(p) => p.system_prompt_with_bias(),
             None => return (StatusCode::NOT_FOUND, format!("unknown persona '{id}'")).into_response(),
         }
     };
@@ -403,8 +404,8 @@ async fn test_persona(
 
     let parsed = verdict_parse::parse(&full);
     let resp = match parsed {
-        Some(p) => TestResp { deliberation: p.deliberation, guilty: p.guilty, intensity: p.intensity },
-        None => TestResp { deliberation: full.trim().to_string(), guilty: false, intensity: 0 },
+        Some(p) => TestResp { deliberation: p.deliberation, guilty: p.guilty },
+        None => TestResp { deliberation: full.trim().to_string(), guilty: false },
     };
     (StatusCode::OK, Json(resp)).into_response()
 }

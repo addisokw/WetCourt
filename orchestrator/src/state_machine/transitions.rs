@@ -239,7 +239,6 @@ fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
     if !v.pre_announced {
         cmds.push(Command::Display(DisplayEvent::Verdict {
             guilty: v.guilty,
-            intensity: v.intensity,
             remarks: v.remarks.clone(),
         }));
         cmds.push(Command::Speak(v.deliberation.clone()));
@@ -252,9 +251,7 @@ fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {
     let mut cmds = vec![Command::Display(DisplayEvent::ExecuteSentence { guilty: v.guilty })];
     if v.guilty {
         cmds.push(Command::Hardware(HardwareCommand::Lights(LightState::Guilty)));
-        cmds.push(Command::Hardware(HardwareCommand::Fire(
-            cfg.squirt_intensity.duration_ms(v.intensity),
-        )));
+        cmds.push(Command::Hardware(HardwareCommand::Fire(cfg.squirt.duration_ms)));
         cmds.push(Command::Display(DisplayEvent::PlayCue { name: "organ_guilty".into() }));
     } else {
         cmds.push(Command::Hardware(HardwareCommand::Lights(LightState::NotGuilty)));
@@ -282,7 +279,7 @@ mod tests {
             hardware: HardwareConfig { driver: "mock".into(), serial_port: "x".into(), baud: 0, ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into() },
             mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
             mock_inference: MockInferenceConfig::default(),
-            squirt_intensity: SquirtIntensity { level_1: 60, level_2: 100, level_3: 150, level_4: 200, level_5: 280 },
+            squirt: SquirtConfig { duration_ms: 150 },
             trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 1, cooldown_secs: 1, guilty_bias: 1.0 },
             display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
             logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },

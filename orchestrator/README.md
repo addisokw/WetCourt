@@ -97,7 +97,7 @@ Everything is served on `:8080` (`display.listen_addr`):
 |---|---|---|
 | `/` | Operator console: state banner, Start/Plea/E-Stop, judge-face + case-view preview panes, event log, persona panel | Operator |
 | `/face` | Standalone animated ASCII judge face (moods track listening/thinking/speaking/verdict) | Visitor-facing monitor |
-| `/case` | Standalone case view: charge, plea countdown, transcript, verdict + intensity | Visitor-facing monitor |
+| `/case` | Standalone case view: charge, plea countdown, transcript, verdict | Visitor-facing monitor |
 
 Keyboard on the console: **Space** starts a trial, **P** starts/stops plea
 recording (browser asks for mic permission on first use). Plea audio is
@@ -121,7 +121,7 @@ POST /operator/persona                  create a persona
 PUT  /operator/persona/{id}             edit a persona
 POST /operator/persona/{id}/select      make it the active judge
 POST /operator/persona/{id}/save        persist to personas/{id}.toml
-POST /operator/persona/{id}/test        dry-run a charge+plea, returns deliberation/verdict/intensity
+POST /operator/persona/{id}/test        dry-run a charge+plea, returns deliberation/verdict
 GET  /operator/crimes                   full crime list + categories + draw filter + queue
 POST /operator/crimes                   add a crime {category, charge} (persists)
 PUT  /operator/crimes/{id}              edit a crime (text/category/enabled, persists)
@@ -156,11 +156,21 @@ generation (the queue still takes precedence).
 
 Personas live in `personas/*.toml` next to the config file — each defines
 `display_name`, `system_prompt`, `guilty_bias`, `tts_voice`, and optional
-`tts_speed`. Two ship in-repo: **Justice Wettington** (default — petty,
-theatrical, guilty_bias 0.7, voice `bm_george`) and **Judge Bom** (curt but
-fair, 0.5, `am_onyx`). The persona panel on the operator console can create,
-edit, voice-swap, test, and hot-select personas mid-session; the active
-persona is snapshotted at trial start.
+`tts_speed`. Persona prompts are kept **bias-free**: they describe character
+and *what kinds of pleas* sway the judge, but never a conviction rate. The
+`guilty_bias` slider is injected into the prompt at trial start as a target
+guilt rate, so it is the single knob that tunes how often a judge convicts.
+The squirt gun is binary — every guilty verdict fires one fixed duration
+(`[squirt] duration_ms`); there is no per-verdict intensity.
+
+Six ship in-repo: **Justice Wettington** (default — petty, theatrical,
+`bm_george`), **Judge Bom** (curt but fair, `am_onyx`), **Judge Sunny Vale**
+(relentlessly cheerful, `af_heart`), **Judge Magnus Thorne** (thunderous and
+biblical, `am_fenrir`), **Judge Remy Calhoun** (cold actuarial bureaucrat,
+`bm_daniel`), and **Dame Beatrix Plume** (witheringly polite, `bf_emma`). The
+persona panel on the operator console can create, edit, voice-swap, test, and
+hot-select personas mid-session; the active persona is snapshotted at trial
+start.
 
 ## Failure injection
 

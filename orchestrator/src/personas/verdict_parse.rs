@@ -9,33 +9,26 @@ use regex::Regex;
 pub struct ParsedDeliberation {
     pub deliberation: String,
     pub guilty: bool,
-    pub intensity: u8,
 }
 
 static VERDICT_RE: OnceLock<Regex> = OnceLock::new();
-static INTENSITY_RE: OnceLock<Regex> = OnceLock::new();
 static MARKER_LINE_RE: OnceLock<Regex> = OnceLock::new();
 
 pub fn parse(text: &str) -> Option<ParsedDeliberation> {
     let vre = VERDICT_RE.get_or_init(|| Regex::new(r"(?i)VERDICT:\s*(GUILTY|ACQUITTED)").unwrap());
-    let ire = INTENSITY_RE.get_or_init(|| Regex::new(r"(?i)INTENSITY:\s*([1-5])").unwrap());
 
     let m = vre.captures(text)?;
     let guilty = m.get(1)?.as_str().eq_ignore_ascii_case("GUILTY");
-    let intensity = ire
-        .captures(text)
-        .and_then(|c| c.get(1))
-        .and_then(|m| m.as_str().parse().ok())
-        .unwrap_or(if guilty { 3 } else { 0 });
 
     Some(ParsedDeliberation {
         deliberation: strip_marker_lines(text),
         guilty,
-        intensity,
     })
 }
 
 fn strip_marker_lines(text: &str) -> String {
+    // Strip the VERDICT marker line; also drop any stray INTENSITY line a model
+    // might still emit so it's never shown or spoken.
     let re = MARKER_LINE_RE
         .get_or_init(|| Regex::new(r"(?im)^\s*(VERDICT|INTENSITY):.*$\n?").unwrap());
     re.replace_all(text, "").trim().to_string()
@@ -47,23 +40,22 @@ mod tests {
 
     #[test]
     fn parses_guilty() {
-        let p = parse("Pathetic.\nVERDICT: GUILTY\nINTENSITY: 4").unwrap();
+        let p = parse("Pathetic.\nVERDICT: GUILTY").unwrap();
         assert!(p.guilty);
-        assert_eq!(p.intensity, 4);
         assert!(!p.deliberation.contains("VERDICT"));
     }
 
     #[test]
-    fn defaults_intensity_on_guilty() {
-        let p = parse("Pathetic.\nVERDICT: GUILTY").unwrap();
-        assert_eq!(p.intensity, 3);
+    fn strips_stray_intensity_line() {
+        let p = parse("Pathetic.\nVERDICT: GUILTY\nINTENSITY: 4").unwrap();
+        assert!(p.guilty);
+        assert!(!p.deliberation.contains("INTENSITY"));
     }
 
     #[test]
     fn acquitted() {
         let p = parse("Clever.\nVERDICT: ACQUITTED").unwrap();
         assert!(!p.guilty);
-        assert_eq!(p.intensity, 0);
     }
 
     #[test]

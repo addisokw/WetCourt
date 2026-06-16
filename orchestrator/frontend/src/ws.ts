@@ -24,7 +24,6 @@ export const [lastVerdictGuilty, setLastVerdictGuilty] = createSignal<boolean | 
 export const [charge, setCharge] = createSignal<string>('');
 export const [pleaTranscript, setPleaTranscript] = createSignal<string>('');
 export const [verdictRemarks, setVerdictRemarks] = createSignal<string>('');
-export const [verdictIntensity, setVerdictIntensity] = createSignal<number>(0);
 export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolean>(false);
 // Generic per-phase deadline countdown. Captured from server `phase_deadline`
 // events; absolute Date.now() timestamp at which the current state will time
@@ -132,7 +131,6 @@ function handleEvent(ev: DisplayEvent) {
       setCharge('');
       setPleaTranscript('');
       setVerdictRemarks('');
-      setVerdictIntensity(0);
       setPleaRecordingActive(false);
       setPhaseDeadlineAt(0);
       setPhaseDeadlineLabel('');
@@ -167,7 +165,6 @@ function handleEvent(ev: DisplayEvent) {
     case 'verdict':
       setLastVerdictGuilty(Boolean(ev.guilty));
       setVerdictRemarks(String(ev.remarks ?? ''));
-      setVerdictIntensity(Number(ev.intensity ?? 0));
       break;
     case 'start_plea_recording':
       setPleaWindowOpen(true);
