@@ -900,3 +900,64 @@ button.plea.recording:hover { background: #8b2326; }
 .maint-tab .small { font-size: 0.8rem; }
 .maint-tab .err { color: #ffa198; }
 .maint-tab .status { color: #56d364; }
+
+.tab-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.2rem 0.3rem;
+  background: #30363d;
+}
+.tab-lock { margin-left: 0.4rem; font-size: 0.8rem; opacity: 0.8; }
+
+/* ---- Judge Mind (config) tab ---- */
+.config-tab { display: flex; flex-direction: column; gap: 0.75rem; }
+.config-tab > .muted { margin: 0; }
+.judge-section {
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 0.9rem;
+  background: #0b0f14;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.judge-section h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #79c0ff;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #c9d1d9;
+  cursor: pointer;
+  user-select: none;
+}
+.checkbox-row input { width: 18px; height: 18px; }
+
+.robot-controls { display: flex; flex-direction: column; gap: 0.6rem; }
+.robot-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr 4.5rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+.robot-label { color: #8b949e; font-size: 0.85rem; }
+.robot-row input[type='range'] { width: 100%; height: 26px; }
+.robot-num {
+  font-variant-numeric: tabular-nums;
+  color: #d29922;
+  text-align: right;
+}
+
+/* The persona/crimes panels sit inside the config tab; soften their
+   full-bleed borders so they read as cards here. */
+.config-tab .persona-panel,
+.config-tab .crimes-panel {
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  overflow: hidden;
+}

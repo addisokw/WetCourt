@@ -31,15 +31,26 @@ interface RobotChain {
   tail: GainNode;
   wet: GainNode;
   dry: GainNode;
+  // Live-tunable nodes, kept so the Judge Mind robot controls can adjust the
+  // colour without rebuilding the graph.
+  peak: BiquadFilterNode;
+  shaper: WaveShaperNode;
+  carrier: OscillatorNode;
   glitch?: AudioWorkletNode;
 }
 
 let chain: RobotChain | null = null;
 let workletLoading: Promise<void> | null = null;
-// Single 0..1 "robot intensity" knob driven by the operator slider: scales the
-// native wet/dry blend and the glitch tail together. 0 = clean voice, 1 = full
-// robot + glitch.
+// Live "robot" parameters. `intensity` is the 0..1 wet/dry blend; the rest were
+// previously build-time constants and are now adjustable from the Judge Mind
+// tab. Defaults reproduce the original "glitchy / degraded" preset. The glitch
+// rate is decoupled from intensity (its own knob), seeded to the old coupled
+// value (ROBOT_AMOUNT * MAX_GLITCH_RATE) for continuity.
 let intensity = ROBOT_AMOUNT;
+let glitchRate = ROBOT_AMOUNT * MAX_GLITCH_RATE;
+let ringHz = RING_HZ;
+let saturation = SATURATION;
+let peakHz = PEAK_HZ;
 
 /// Soft-clip transfer curve for the WaveShaper (digital harshness without
 /// hard-clipping crunch).
@@ -113,35 +124,60 @@ export function getRobotInput(ctx: AudioContext): AudioNode {
   // Until the worklet loads, the native chain feeds the speakers directly.
   tail.connect(ctx.destination);
 
-  chain = { ctx, input, tail, wet, dry };
-  applyIntensity();
+  chain = { ctx, input, tail, wet, dry, peak, shaper, carrier };
+  applyParams();
   maybeInsertGlitch();
   return input;
 }
 
-/// Push the current intensity onto the live AudioParams. Safe to call before
-/// the chain or worklet exist — it applies to whatever is present.
-function applyIntensity(): void {
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/// Push the current parameters onto the live AudioParams / nodes. Safe to call
+/// before the chain or worklet exist — it applies to whatever is present.
+function applyParams(): void {
   if (!chain) return;
   chain.wet.gain.value = intensity;
   chain.dry.gain.value = 1 - intensity;
+  chain.carrier.frequency.value = ringHz;
+  chain.peak.frequency.value = peakHz;
+  chain.shaper.curve = makeSaturationCurve(saturation);
   const params = chain.glitch?.parameters;
   if (params) {
     const wetParam = params.get('wet');
     if (wetParam) wetParam.value = intensity;
     const rateParam = params.get('glitchRate');
-    if (rateParam) rateParam.value = intensity * MAX_GLITCH_RATE;
+    if (rateParam) rateParam.value = glitchRate;
   }
 }
 
-/// Live operator control: 0 = clean voice, 1 = full robot + glitch.
+/// Live control: 0 = clean voice, 1 = full robot + glitch (wet/dry blend).
 export function setRobotIntensity(amount: number): void {
-  intensity = Math.min(1, Math.max(0, amount));
-  applyIntensity();
+  intensity = clamp(amount, 0, 1);
+  applyParams();
 }
-
 export function getRobotIntensity(): number {
   return intensity;
+}
+
+/// Glitch tail rate in glitches/second, independent of intensity.
+export function setRobotGlitchRate(rate: number): void {
+  glitchRate = clamp(rate, 0, MAX_GLITCH_RATE * 2.5);
+  applyParams();
+}
+/// Ring-modulation carrier frequency (Hz) — the core metallic buzz.
+export function setRobotRingHz(hz: number): void {
+  ringHz = clamp(hz, 10, 400);
+  applyParams();
+}
+/// Soft-clip saturation amount (0..1) — digital harshness.
+export function setRobotSaturation(amount: number): void {
+  saturation = clamp(amount, 0, 1);
+  applyParams();
+}
+/// Resonant "honk" peaking-filter frequency (Hz).
+export function setRobotPeakHz(hz: number): void {
+  peakHz = clamp(hz, 500, 5000);
+  applyParams();
 }
 
 /// Begin loading the glitch worklet module. Safe to call repeatedly and before
@@ -183,7 +219,7 @@ function maybeInsertGlitch(): void {
       chain.tail.connect(glitch);
       glitch.connect(chain.ctx.destination);
       chain.glitch = glitch;
-      applyIntensity(); // sync the worklet's wet/glitchRate to the slider
+      applyParams(); // sync the worklet's wet/glitchRate to the current params
 
     } catch (e) {
       console.warn('could not construct glitch node; using native robot only', e);

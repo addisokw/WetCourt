@@ -1,5 +1,6 @@
 import { createSignal, Match, onMount, Show, Switch } from 'solid-js';
 import App from './App';
+import JudgeMindPanel from './JudgeMindPanel';
 import {
   enterMaintenance,
   exitMaintenance,
@@ -11,18 +12,24 @@ import AiJudgePanel from './panels/AiJudgePanel';
 import GavelPanel from './panels/GavelPanel';
 import TurretPanel from './panels/TurretPanel';
 
-type Tab = 'operator' | 'ai_judge' | 'gavel' | 'turret';
+type Tab = 'operator' | 'judge_mind' | 'judge_body' | 'gavel' | 'turret';
+type Kind = 'operator' | 'config' | 'hardware';
 
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'operator', label: 'Operator' },
-  { id: 'ai_judge', label: 'AI Judge' },
-  { id: 'gavel', label: 'Gavel' },
-  { id: 'turret', label: 'Turret' },
+// 'config' tabs hit the /operator/* endpoints and are safe live (ungated).
+// 'hardware' tabs send direct device commands and require maintenance mode.
+const TABS: Array<{ id: Tab; label: string; kind: Kind }> = [
+  { id: 'operator', label: 'Operator', kind: 'operator' },
+  { id: 'judge_mind', label: 'Judge Mind', kind: 'config' },
+  { id: 'judge_body', label: 'Judge Body', kind: 'hardware' },
+  { id: 'gavel', label: 'Gavel', kind: 'hardware' },
+  { id: 'turret', label: 'Turret', kind: 'hardware' },
 ];
 
 export default function Shell() {
   const [tab, setTab] = createSignal<Tab>('operator');
   const [error, setError] = createSignal('');
+
+  const kindOf = (id: Tab): Kind => TABS.find((t) => t.id === id)!.kind;
 
   onMount(() => {
     // Calibration is needed to render the aim sliders / fire presets; presence
@@ -54,10 +61,20 @@ export default function Shell() {
     <div class="shell">
       <nav class="tab-bar">
         <div class="tab-group">
-          {TABS.map((t) => (
-            <button class={`tab ${tab() === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
-              {t.label}
-            </button>
+          {TABS.map((t, i) => (
+            <>
+              <Show when={i > 0 && t.kind === 'hardware' && TABS[i - 1].kind !== 'hardware'}>
+                <span class="tab-divider" />
+              </Show>
+              <button class={`tab ${tab() === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+                {t.label}
+                <Show when={t.kind === 'hardware'}>
+                  <span class="tab-lock" title="requires maintenance mode">
+                    {maintenanceActive() ? '🔧' : '🔒'}
+                  </span>
+                </Show>
+              </button>
+            </>
           ))}
         </div>
         <div class="maint-controls">
@@ -84,7 +101,15 @@ export default function Shell() {
           <App />
         </div>
 
-        <Show when={tab() !== 'operator'}>
+        {/* Config tab — no maintenance gate (server-side, safe live). */}
+        <Show when={tab() === 'judge_mind'}>
+          <div class="maint-tab">
+            <JudgeMindPanel />
+          </div>
+        </Show>
+
+        {/* Hardware tabs — gated behind maintenance mode. */}
+        <Show when={kindOf(tab()) === 'hardware'}>
           <div class="maint-tab">
             <Show
               when={maintenanceActive()}
@@ -99,7 +124,7 @@ export default function Shell() {
               }
             >
               <Switch>
-                <Match when={tab() === 'ai_judge'}><AiJudgePanel /></Match>
+                <Match when={tab() === 'judge_body'}><AiJudgePanel /></Match>
                 <Match when={tab() === 'gavel'}><GavelPanel /></Match>
                 <Match when={tab() === 'turret'}><TurretPanel /></Match>
               </Switch>

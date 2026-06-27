@@ -1,6 +1,5 @@
 import { createSignal } from 'solid-js';
 import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
-import { setRobotIntensity } from './robot';
 import { startTheater, stopTheater } from './theater';
 import { onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 
@@ -42,29 +41,8 @@ export const [phaseDeadlineLabel, setPhaseDeadlineLabel] = createSignal<string>(
 // the dim/pulse visuals on every view.
 export const [theaterActive, setTheaterActive] = createSignal<boolean>(false);
 
-// TTS robot/glitch intensity (0..1). Purely a property of this console's audio
-// output — only the operator /ws client plays PCM, so it's local + persisted,
-// no backend round-trip. Seed robot.ts before any audio is built.
-const ROBOT_KEY = 'wetcourt.robotIntensity';
-function loadRobotIntensity(): number {
-  try {
-    const v = parseFloat(localStorage.getItem(ROBOT_KEY) ?? '');
-    if (Number.isFinite(v)) return Math.min(1, Math.max(0, v));
-  } catch { /* ignore */ }
-  return 0.72;
-}
-const initialRobot = loadRobotIntensity();
-setRobotIntensity(initialRobot);
-export const [robotIntensity, setRobotIntensitySignal] = createSignal<number>(initialRobot);
-
-/// Live-apply the robot intensity: drives the Web Audio chain, updates the UI
-/// signal, and persists for next session.
-export function applyRobotIntensity(amount: number): void {
-  const a = Math.min(1, Math.max(0, amount));
-  setRobotIntensity(a);
-  setRobotIntensitySignal(a);
-  try { localStorage.setItem(ROBOT_KEY, String(a)); } catch { /* ignore */ }
-}
+// TTS robot/glitch effect state now lives in robotSettings.ts (local to this
+// browser's audio; seeded into the graph at startup via index.tsx).
 
 const STATE_LABEL: Record<string, string> = {
   reset: 'idle',
