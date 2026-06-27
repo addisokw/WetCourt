@@ -47,6 +47,8 @@ services:
       # main.rs reads the LiteLLM key from this var. Copy it from the Spark —
       # it does not live anywhere else.
       - BOOTH__INFERENCE__API_KEY=${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      # Your Spark's reachable address (kept in .env, out of the committed config).
+      - BOOTH__INFERENCE__BASE_URL=${SPARK_BASE_URL:?set SPARK_BASE_URL in .env}
       # Override any other knob the same way, e.g. to let a real booth dial in:
       # - BOOTH__HARDWARE__DRIVER=tcp
     volumes:

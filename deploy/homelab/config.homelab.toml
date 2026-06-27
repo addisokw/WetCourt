@@ -7,11 +7,12 @@
 
 [inference]
 mode = "real"
-# Spark's Tailscale IP. The tailscale sidecar (docker-compose.yml) joins the
-# tailnet so this is reachable; the team never needs Tailscale themselves.
-# api_key comes from BOOTH__INFERENCE__API_KEY (set in compose from
-# LITELLM_MASTER_KEY) — do not hardcode the key here.
-base_url = "http://100.86.115.53:4000"
+# Your Spark's Tailscale address. Set the real value via SPARK_BASE_URL in .env
+# (compose maps it to BOOTH__INFERENCE__BASE_URL, which overrides this line) so
+# your tailnet address stays out of the committed config. The tailscale sidecar
+# makes it reachable; the team never needs Tailscale themselves. api_key comes
+# from BOOTH__INFERENCE__API_KEY (set in compose from LITELLM_MASTER_KEY).
+base_url = "http://your-spark:4000"
 chat_model = "qwen3.6-35b-a3b"
 stt_model = "whisper-1"
 tts_model = "kokoro-tts"

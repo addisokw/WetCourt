@@ -50,7 +50,7 @@ What actually differs:
 
 | Knob | A: co-located (`config.toml`) | B: remote (`config.dev.toml`) |
 |---|---|---|
-| `inference.base_url` | `http://litellm:4000` (docker network) | Spark's LAN/Tailscale address, e.g. `http://100.86.115.53:4000` |
+| `inference.base_url` | `http://litellm:4000` (docker network) | Spark's LAN/Tailscale address, e.g. `http://<spark-tailscale-ip>:4000` |
 | API key | injected by compose from the Spark's `.env` | auto-loaded from `.env` (repo root or `dgx-ai-stack/.env`) |
 | `hardware.driver` | `tcp` — MCU dials the Spark's `:8090` | `mock` by default; set `tcp` and the MCU dials this machine's `:8090` |
 | Personas + crime list | bind-mounted from the Spark's checkout | read/written in the local checkout |
@@ -82,10 +82,12 @@ cd ..
 cargo run -- --config config.dev.toml
 ```
 
-`config.dev.toml` defaults to `inference.mode = "real"` against the Spark at
-`http://10.10.1.221:4000` with `hardware.driver = "mock"`. Set
-`mode = "mock"` (or pass `BOOTH__INFERENCE__MODE=mock`) to run fully offline
-— mock inference returns canned charges/verdicts with simulated latency.
+`config.dev.toml` defaults to `inference.mode = "real"` with
+`hardware.driver = "mock"`. Point it at your Spark via
+`BOOTH__INFERENCE__BASE_URL=http://<spark-ip>:4000` (or edit the placeholder in
+the file). Set `mode = "mock"` (or pass `BOOTH__INFERENCE__MODE=mock`) to run
+fully offline — mock inference returns canned charges/verdicts with simulated
+latency.
 
 Any config key can be overridden via env vars prefixed `BOOTH__` with `__`
 as the section separator, e.g. `BOOTH__TRIAL__PLEA_WINDOW_SECS=30`.

@@ -46,7 +46,7 @@ cp .env.example .env       # then fill in LITELLM_MASTER_KEY and model paths
 ./ai-stack                 # builds + starts everything, orchestrator included
 ```
 
-Once up, the LAN endpoint is `http://10.10.1.221:4000` (the Spark; mDNS
+Once up, the LAN endpoint is `http://<spark-ip>:4000` (the Spark; mDNS
 doesn't resolve reliably). It speaks the OpenAI API: `/v1/chat/completions`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/models`.
 

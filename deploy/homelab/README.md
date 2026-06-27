@@ -34,13 +34,14 @@ made persistent and put behind your existing Cloudflare Tunnel.
   (standard on Linux — the Tailscale sidecar uses kernel networking).
 - A **Tailscale auth key** (reusable recommended): <https://login.tailscale.com/admin/settings/keys>.
 - The Spark's **`LITELLM_MASTER_KEY`** — copy it here; it lives only on the Spark.
+- The Spark's reachable **address** (`SPARK_BASE_URL`) — its Tailscale IP / MagicDNS name.
 - Your existing host `cloudflared`.
 
 ## Bring it up
 
 ```bash
 cd deploy/homelab
-cp .env.example .env          # then fill in TS_AUTHKEY and LITELLM_MASTER_KEY
+cp .env.example .env          # fill in TS_AUTHKEY, LITELLM_MASTER_KEY, SPARK_BASE_URL
 docker compose up -d --build
 ```
 
@@ -53,7 +54,7 @@ curl -fsS http://localhost:26878/health   # → ok   (host side; HOST_PORT)
 ```
 
 The node should now appear in your Tailscale admin console, and the box can
-reach the Spark at `100.86.115.53:4000`.
+reach the Spark at your `SPARK_BASE_URL`.
 
 ## Point Cloudflare at it
 
