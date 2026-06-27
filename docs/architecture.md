@@ -879,6 +879,11 @@ The DGX Spark inference stack (LiteLLM + vllm-nvfp4 + parakeet + kokoro) is **al
 
 ### Phase 4: Real hardware
 
+> **Superseded (2026-06):** the single-MCU `serial` plan below is replaced by a
+> distributed multi-device fleet over the WiFi/TCP line protocol. See
+> [`hardware-architecture.md`](hardware-architecture.md) and
+> [`../protocol/`](../protocol/README.md). The notes below are kept for context.
+
 The state machine and mock hardware driver have been driving fake commands since Phase 1. This phase swaps the `mock` driver for the `serial` driver — same channel API, no state-machine changes.
 
 - Build microcontroller firmware implementing the serial protocol (§5.2).

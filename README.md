@@ -20,8 +20,7 @@ NVIDIA DGX Spark; no cloud round-trip.
 │                               plus the end-to-end pipeline benchmark
 ├── orchestrator/               Rust state machine, axum WS server, SolidJS UI
 │                               (operator console, judge face, case view, personas)
-├── firmware/                   Rust firmware for M5Stack NanoC6 (trial button works;
-│                               valve/gavel actuation still stubbed)
+├── protocol/                   Device⇄orchestrator wire protocol spec (language-neutral)
 └── strix-halo-port-notes.md    Feasibility notes for porting the AI stack to
                                 Strix Halo (Vulkan/x86_64) — drafted, not greenlit
 ```
@@ -33,8 +32,9 @@ Each subproject has its own README for ops details:
   the endpoints, troubleshoot.
 - [`orchestrator/README.md`](orchestrator/README.md) — run the state machine
   on a laptop against the Spark, drive the debug UI, inject failures.
-- [`firmware/README.md`](firmware/README.md) — flash the NanoC6, pair it with
-  the orchestrator over TCP.
+- [`docs/hardware-architecture.md`](docs/hardware-architecture.md) — the
+  hardware fleet plan (firmware per board, device protocol, vision) and
+  [`protocol/`](protocol/README.md) — the device wire spec.
 
 ## Quick start
 
@@ -65,7 +65,7 @@ This points the orchestrator at the Spark's LiteLLM over the network and
 runs hardware in mock mode. The two shapes — everything on the Spark vs.
 inference-only on the Spark — and exactly which knobs differ are laid out in
 [`orchestrator/README.md` § Deployment topologies](orchestrator/README.md#deployment-topologies);
-failure injection and firmware pairing are covered there too.
+failure injection is covered there too.
 
 ## Benchmarking the pipeline
 

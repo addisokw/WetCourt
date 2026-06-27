@@ -1,6 +1,0 @@
-[toolchain]
-# Newer nightlies reference libc::SIGKILL in std/os/unix/process.rs which is
-# not yet defined for the espidf target in the libc version pinned by
-# esp-idf-sys. Pin to a known-good date until that lands upstream.
-channel = "nightly-2025-09-15"
-components = ["rust-src", "rustfmt", "clippy"]

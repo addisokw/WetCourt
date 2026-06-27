@@ -197,14 +197,17 @@ fail_rate = 0.5                 # half of hardware acks become errors
 simulate_estop_after_secs = 8   # synthetic ESTOP 8 s after orchestrator startup
 ```
 
-## Real hardware over WiFi (M5Stack NanoC6)
+## Real hardware over WiFi
 
-Set `[hardware] driver = "tcp"` and `bind_addr = "0.0.0.0:8090"` in the
-config you're using. Then flash and configure the firmware in `../firmware/`
-— it dials this address and speaks the §5.2 line protocol (`FIRE`, `GAVEL`,
-`LIGHTS`, `PANEL`, `PING`). The MCU's BOOT button maps to
-`Event::OperatorStart`, so pressing it kicks off a trial without the
-browser. `driver = "serial"` (USB) is declared in config but unimplemented.
+Set `[hardware] driver = "tcp"` and `bind_addr = "0.0.0.0:8090"`; a device
+dials this address and speaks the line protocol defined in
+[`../protocol/`](../protocol/README.md) (`FIRE`, `GAVEL`, `PANEL`, `AIM`, …),
+emitting `BUTTON` to start a trial. The device fleet, the per-board firmware,
+and how this driver grows from a single connection to a role-routed registry
+are laid out in
+[`../docs/hardware-architecture.md`](../docs/hardware-architecture.md). (The
+original all-in-one Rust firmware that lived in `../firmware/` is retired.)
+`driver = "serial"` (USB) is declared in config but unimplemented.
 
 ## Production on the Spark — shape A
 
