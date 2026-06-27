@@ -353,6 +353,18 @@ async fn view_ws_session(mut socket: WebSocket, state: AppState) {
     info!("view ws client disconnected");
 }
 
+/// The active persona's robot params as a display event (for connect-push and
+/// broadcast-on-change), so audio clients colour playback to match the persona.
+fn robot_params_event(p: &Persona) -> DisplayEvent {
+    DisplayEvent::RobotParams {
+        intensity: p.robot.intensity,
+        glitch_rate: p.robot.glitch_rate,
+        ring_hz: p.robot.ring_hz,
+        saturation: p.robot.saturation,
+        peak_hz: p.robot.peak_hz,
+    }
+}
+
 async fn ws_session(mut socket: WebSocket, state: AppState) {
     info!("ws client connected");
     let _ = socket
@@ -360,6 +372,13 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
             serde_json::to_string(&DisplayEvent::Idle).unwrap().into(),
         ))
         .await;
+    // Seed this audio client with the active persona's robot params.
+    {
+        let ev = robot_params_event(state.personas.read().await.active());
+        let _ = socket
+            .send(Message::Text(serde_json::to_string(&ev).unwrap().into()))
+            .await;
+    }
     let mut bcast_rx = state.display_bcast.subscribe();
 
     loop {
@@ -513,7 +532,12 @@ async fn select_persona(
 ) -> impl IntoResponse {
     let mut reg = s.personas.write().await;
     match reg.set_active(&id) {
-        Ok(()) => (StatusCode::NO_CONTENT, String::new()).into_response(),
+        Ok(()) => {
+            let ev = robot_params_event(reg.active());
+            drop(reg);
+            let _ = s.display_bcast.send(DisplayMessage::Json(ev));
+            (StatusCode::NO_CONTENT, String::new()).into_response()
+        }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -527,8 +551,17 @@ async fn update_persona(
     if !reg.get(&id).is_some() {
         return (StatusCode::NOT_FOUND, format!("unknown persona '{id}'")).into_response();
     }
+    let is_active = reg.active_id() == id;
     match reg.update(&id, body.clone()) {
-        Ok(()) => (StatusCode::OK, Json(reg.get(&id).unwrap().clone())).into_response(),
+        Ok(()) => {
+            let updated = reg.get(&id).unwrap().clone();
+            // If this is the live persona, push its (possibly retuned) robot
+            // params to audio clients so the change is heard immediately.
+            if is_active {
+                let _ = s.display_bcast.send(DisplayMessage::Json(robot_params_event(&updated)));
+            }
+            (StatusCode::OK, Json(updated)).into_response()
+        }
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
 }

@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { ROBOT_DEFAULTS, ROBOT_FIELDS, RobotParams } from './robotParams';
 
 export interface Persona {
   id: string;
@@ -7,6 +8,7 @@ export interface Persona {
   guilty_bias: number;
   tts_voice: string;
   tts_speed: number | null;
+  robot: RobotParams;
 }
 
 export interface PersonaSummary {
@@ -50,6 +52,12 @@ export function validatePersona(p: Persona): Record<string, string> {
       errs.tts_speed = 'tts_speed must be 0.5–2.0 or default';
     }
   }
+  for (const f of ROBOT_FIELDS) {
+    const v = p.robot?.[f.key];
+    if (!(typeof v === 'number' && v >= f.min && v <= f.max)) {
+      errs[`robot.${f.key}`] = `${f.label} must be ${f.min}–${f.max}`;
+    }
+  }
   return errs;
 }
 
@@ -82,8 +90,9 @@ export async function fetchActivePersona(): Promise<Persona> {
 
 // Backend omits `tts_speed` when None; JSON parses it as undefined, but the
 // UI checks `=== null`. Coerce here so the rest of the code can rely on null.
+// Also backfill robot params defensively (the backend always sends them).
 function normalize(p: Persona): Persona {
-  return { ...p, tts_speed: p.tts_speed ?? null };
+  return { ...p, tts_speed: p.tts_speed ?? null, robot: { ...ROBOT_DEFAULTS, ...(p.robot ?? {}) } };
 }
 
 export async function selectPersona(id: string): Promise<void> {

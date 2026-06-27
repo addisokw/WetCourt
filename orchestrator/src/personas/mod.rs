@@ -18,6 +18,69 @@ pub struct Persona {
     pub tts_voice: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tts_speed: Option<f32>,
+    /// Robot-aesthetic TTS post-processing for this persona's voice. Applied
+    /// client-side to the played audio; the host is the source of truth and
+    /// pushes the active persona's params to the audio client (see the
+    /// `robot_params` display event).
+    #[serde(default)]
+    pub robot: RobotParams,
+}
+
+/// The robot voice-effect knobs (mirrors `frontend/src/robot.ts`). Per-persona
+/// because each judge uses a different Kokoro voice that may want different
+/// tuning.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RobotParams {
+    /// Wet/dry blend: 0 = clean voice, 1 = full robot + glitch.
+    #[serde(default = "d_robot_intensity")]
+    pub intensity: f32,
+    /// Glitch tail rate in glitches/second.
+    #[serde(default = "d_robot_glitch_rate")]
+    pub glitch_rate: f32,
+    /// Ring-modulation carrier frequency (Hz).
+    #[serde(default = "d_robot_ring_hz")]
+    pub ring_hz: f32,
+    /// Soft-clip saturation amount (0..1).
+    #[serde(default = "d_robot_saturation")]
+    pub saturation: f32,
+    /// Resonant "honk" peaking-filter frequency (Hz).
+    #[serde(default = "d_robot_peak_hz")]
+    pub peak_hz: f32,
+}
+
+fn d_robot_intensity() -> f32 { 0.72 }
+fn d_robot_glitch_rate() -> f32 { 1.3 }
+fn d_robot_ring_hz() -> f32 { 52.0 }
+fn d_robot_saturation() -> f32 { 0.5 }
+fn d_robot_peak_hz() -> f32 { 2200.0 }
+
+impl Default for RobotParams {
+    fn default() -> Self {
+        Self {
+            intensity: d_robot_intensity(),
+            glitch_rate: d_robot_glitch_rate(),
+            ring_hz: d_robot_ring_hz(),
+            saturation: d_robot_saturation(),
+            peak_hz: d_robot_peak_hz(),
+        }
+    }
+}
+
+impl RobotParams {
+    fn validate(&self) -> Result<()> {
+        let r = |name: &str, v: f32, lo: f32, hi: f32| -> Result<()> {
+            if !(lo..=hi).contains(&v) {
+                bail!("robot.{name} must be in [{lo}, {hi}], got {v}");
+            }
+            Ok(())
+        };
+        r("intensity", self.intensity, 0.0, 1.0)?;
+        r("glitch_rate", self.glitch_rate, 0.0, 4.5)?;
+        r("ring_hz", self.ring_hz, 10.0, 400.0)?;
+        r("saturation", self.saturation, 0.0, 1.0)?;
+        r("peak_hz", self.peak_hz, 500.0, 5000.0)?;
+        Ok(())
+    }
 }
 
 static ID_RE: OnceLock<Regex> = OnceLock::new();
@@ -67,6 +130,7 @@ this number or admit that it guides you.",
                 bail!("tts_speed must be in [0.5, 2.0], got {s}");
             }
         }
+        self.robot.validate()?;
         Ok(())
     }
 }
@@ -195,6 +259,7 @@ mod tests {
             guilty_bias: 0.5,
             tts_voice: "bm_george".into(),
             tts_speed: None,
+            robot: RobotParams::default(),
         }
     }
 
@@ -247,6 +312,33 @@ mod tests {
         p.tts_speed = Some(2.1);
         assert!(p.validate().is_err());
         p.tts_speed = Some(1.0);
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_robot_ranges() {
+        let mut p = ok_persona("x");
+        p.robot.intensity = 1.5;
+        assert!(p.validate().is_err());
+        p.robot.intensity = 0.5;
+        p.robot.ring_hz = 5.0;
+        assert!(p.validate().is_err());
+        p.robot = RobotParams::default();
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn persona_without_robot_table_gets_defaults() {
+        // Existing persona TOMLs predate the [robot] table — they must still load.
+        let toml = r#"
+            id = "x"
+            display_name = "Judge"
+            system_prompt = "be a judge"
+            guilty_bias = 0.5
+            tts_voice = "bm_george"
+        "#;
+        let p: Persona = toml::from_str(toml).unwrap();
+        assert_eq!(p.robot, RobotParams::default());
         assert!(p.validate().is_ok());
     }
 

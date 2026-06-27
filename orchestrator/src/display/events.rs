@@ -45,6 +45,16 @@ pub enum DisplayEvent {
     /// Maintenance mode entered/left — confirms the FSM transition to the
     /// console (whose direct-control tabs gate on it).
     Maintenance { active: bool },
+    /// The active persona's robot voice-effect params. Pushed to each audio
+    /// client on connect and broadcast whenever the active persona changes or
+    /// its robot settings are edited, so playback colour follows the persona.
+    RobotParams {
+        intensity: f32,
+        glitch_rate: f32,
+        ring_hz: f32,
+        saturation: f32,
+        peak_hz: f32,
+    },
     #[allow(dead_code)]
     Error { message: String },
 }

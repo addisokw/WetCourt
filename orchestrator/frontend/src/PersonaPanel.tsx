@@ -19,6 +19,7 @@ import {
   testPersona,
   validatePersona,
 } from './persona';
+import { applyRobotParamsToGraph, ROBOT_DEFAULTS, ROBOT_FIELDS, RobotParams } from './robotParams';
 
 const EMPTY: Persona = {
   id: '',
@@ -27,6 +28,7 @@ const EMPTY: Persona = {
   guilty_bias: 0.5,
   tts_voice: 'af_heart',
   tts_speed: null,
+  robot: { ...ROBOT_DEFAULTS },
 };
 
 export default function PersonaPanel() {
@@ -70,12 +72,21 @@ export default function PersonaPanel() {
     setForm({ ...form(), [k]: v });
   }
 
+  // Robot params are per-persona; editing them gives instant local audio
+  // feedback (the form persona is always the active one, since the dropdown
+  // selects on the backend) and persists with Apply/Save like any other field.
+  function patchRobot<K extends keyof RobotParams>(k: K, v: number) {
+    setForm({ ...form(), robot: { ...form().robot, [k]: v } });
+    ROBOT_FIELDS.find((f) => f.key === k)?.apply(v);
+  }
+
   async function loadActive() {
     setError(''); setStatus('loading…');
     try {
       await fetchPersonas();
       const p = await fetchActivePersona();
       setForm(p); setOriginalId(p.id); setMode('existing');
+      applyRobotParamsToGraph(p.robot); // match local audio to the active persona
       setStatus(`loaded ${p.id}`);
     } catch (e) {
       setError(String(e)); setStatus('');
@@ -90,6 +101,7 @@ export default function PersonaPanel() {
       await selectPersona(id);
       const p = await fetchActivePersona();
       setForm(p); setOriginalId(p.id); setMode('existing');
+      applyRobotParamsToGraph(p.robot); // match local audio to the newly active persona
       setStatus(`selected ${p.id}`);
     } catch (e) {
       setError(String(e)); setStatus('');
@@ -300,6 +312,28 @@ export default function PersonaPanel() {
               /> default
             </label>
             <Show when={errors().tts_speed}><span class="err">{errors().tts_speed}</span></Show>
+          </div>
+
+          <div class="field">
+            <label>robot voice <span class="muted">(this persona's TTS effect; live on this console's audio)</span></label>
+            <div class="robot-controls">
+              <For each={ROBOT_FIELDS}>
+                {(f) => (
+                  <label class="robot-row">
+                    <span class="robot-label">{f.label}</span>
+                    <input
+                      type="range"
+                      min={f.min}
+                      max={f.max}
+                      step={f.step}
+                      value={form().robot[f.key]}
+                      onInput={(e) => patchRobot(f.key, parseFloat(e.currentTarget.value))}
+                    />
+                    <span class="robot-num">{f.fmt(form().robot[f.key])}</span>
+                  </label>
+                )}
+              </For>
+            </div>
           </div>
 
           <div class="test-panel">

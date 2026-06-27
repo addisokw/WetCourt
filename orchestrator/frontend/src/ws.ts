@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
 import { onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
+import { applyRobotParamsToGraph } from './robotParams';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -217,6 +218,16 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'device_disconnected':
       onDeviceDisconnected(String(ev.role ?? ''));
+      break;
+    case 'robot_params':
+      // Active persona's voice colour — apply to this client's audio graph.
+      applyRobotParamsToGraph({
+        intensity: Number(ev.intensity),
+        glitch_rate: Number(ev.glitch_rate),
+        ring_hz: Number(ev.ring_hz),
+        saturation: Number(ev.saturation),
+        peak_hz: Number(ev.peak_hz),
+      });
       break;
   }
 }
