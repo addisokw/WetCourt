@@ -1,0 +1,5 @@
+role = "gavel"
+
+# The gavel has no pan/tilt and no FIRE — it only accepts GAVEL. This file
+# exists so the role shows up in the console; add tunables here if the gavel
+# servo ever needs calibration.

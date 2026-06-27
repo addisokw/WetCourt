@@ -29,6 +29,10 @@ pub struct Verdict {
 #[derive(Debug, Clone)]
 pub enum State {
     Idle,
+    /// Operator maintenance/test mode. Entered only from `Idle`; blocks trials
+    /// while active so the console can drive hardware directly. Exited back to
+    /// `Idle` via `ExitMaintenance` (or an e-stop).
+    Maintenance,
     GeneratingCharge { started_at: Instant },
     DisplayingCharge { charge: String, until: Instant },
     AwaitingPlea { charge: String, deadline: Instant },
@@ -59,6 +63,7 @@ impl State {
     pub fn name(&self) -> &'static str {
         match self {
             State::Idle => "idle",
+            State::Maintenance => "maintenance",
             State::GeneratingCharge { .. } => "generating_charge",
             State::DisplayingCharge { .. } => "displaying_charge",
             State::AwaitingPlea { .. } => "awaiting_plea",

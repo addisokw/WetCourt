@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
 import { setRobotIntensity } from './robot';
 import { startTheater, stopTheater } from './theater';
+import { onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
@@ -228,6 +229,16 @@ function handleEvent(ev: DisplayEvent) {
       setPleaRecordingActive(false);
       // Window closed (timeout or e-stop) — make sure we flush whatever was captured.
       if (recording()) void endPlea();
+      break;
+    // ---- Maintenance / hardware test plane ----
+    case 'maintenance':
+      setMaintenanceActive(Boolean(ev.active));
+      break;
+    case 'device_connected':
+      onDeviceConnected(String(ev.role ?? ''), String(ev.addr ?? ''));
+      break;
+    case 'device_disconnected':
+      onDeviceDisconnected(String(ev.role ?? ''));
       break;
   }
 }

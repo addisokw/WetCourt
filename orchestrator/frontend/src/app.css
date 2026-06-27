@@ -715,3 +715,188 @@ button.plea.recording:hover { background: #8b2326; }
   padding: 0.2rem 0;
 }
 .crime-edit textarea { resize: vertical; }
+
+/* ============ Maintenance / hardware test console ============ */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0.75rem;
+  background: #0b0f14;
+  border-bottom: 1px solid #30363d;
+  flex-wrap: wrap;
+}
+.tab-group { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  color: #8b949e;
+  min-height: 40px;
+}
+.tab:hover { background: #161b22; }
+.tab.active {
+  background: #161b22;
+  border-color: #30363d;
+  color: #58a6ff;
+}
+
+.maint-controls { display: flex; align-items: center; gap: 0.6rem; }
+.maint-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.maint-indicator .dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #56d364;
+}
+.maint-indicator.on { color: #f0883e; }
+.maint-indicator.on .dot { background: #f0883e; animation: pulse 1.2s ease-in-out infinite; }
+.maint-indicator.off { color: #56d364; }
+
+.shell-error {
+  padding: 0.5rem 1rem;
+  background: #2d1416;
+  color: #ffa198;
+  border-bottom: 1px solid #f85149;
+  font-size: 0.85rem;
+}
+
+.shell-content { flex: 1; min-height: 0; overflow: auto; }
+/* Operator console fills the content area instead of its own 100vh. */
+.operator-host { height: 100%; }
+.operator-host .app { height: 100%; }
+
+.maint-tab { padding: 1rem; max-width: 720px; margin: 0 auto; }
+
+.maint-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #c9d1d9;
+}
+.maint-gate .muted { color: #6e7681; }
+.maint-gate button { min-height: 44px; padding: 0.6rem 1.4rem; }
+
+.panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.panel-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: none;
+  padding: 0;
+  flex-wrap: wrap;
+}
+.panel-card-head h2 { margin: 0; font-size: 1.2rem; color: #58a6ff; }
+
+.panel-section {
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 0.9rem;
+  background: #0b0f14;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.panel-section h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #79c0ff;
+}
+
+.device-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.device-badge .dot { width: 9px; height: 9px; border-radius: 50%; }
+.device-badge.up { color: #56d364; }
+.device-badge.up .dot { background: #56d364; }
+.device-badge.down { color: #6e7681; }
+.device-badge.down .dot { background: #484f58; }
+
+/* Touch-friendly aim sliders */
+.aim-control { display: flex; flex-direction: column; gap: 0.7rem; }
+.aim-row { display: flex; flex-direction: column; gap: 0.3rem; }
+.aim-row > span { color: #8b949e; font-variant-numeric: tabular-nums; }
+.aim-row input[type='range'] { width: 100%; height: 28px; }
+
+.btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.fire-row { align-items: center; }
+.fire-btn, .gavel-btn {
+  min-height: 44px;
+  padding: 0.6rem 1.1rem;
+  background: #3a1d1f;
+  border-color: #f85149;
+  color: #ffb4ad;
+}
+.fire-btn:hover, .gavel-btn:hover { background: #5a2629; }
+
+.ack-chip {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.ack-chip.ack-ok { background: #1f4828; color: #aff5b4; }
+.ack-chip.ack-err { background: #6e1b1f; color: #ffa198; }
+.ack-chip.ack-timeout, .ack-chip.ack-no_device { background: #3d2c0a; color: #e3b341; }
+
+/* Calibration editor */
+.cal-editor { display: flex; flex-direction: column; gap: 0.6rem; }
+.cal-editor h3 {
+  margin: 0; font-size: 0.85rem; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #79c0ff;
+}
+.cal-axis { border-top: 1px dotted #21262d; padding-top: 0.5rem; }
+.cal-axis-name {
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: #d2a8ff; font-size: 0.75rem; margin-bottom: 0.4rem;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+}
+.cal-field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: #8b949e; }
+.cal-field input[type='number'], .cal-field input[type='text'] {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  border-radius: 3px;
+  min-height: 38px;
+}
+.cal-field.cal-check { flex-direction: row; align-items: center; gap: 0.4rem; }
+.cal-field.cal-check input { width: 18px; height: 18px; }
+.maint-tab .status-line { border-top: none; padding-top: 0; }
+.maint-tab .muted { color: #6e7681; }
+.maint-tab .small { font-size: 0.8rem; }
+.maint-tab .err { color: #ffa198; }
+.maint-tab .status { color: #56d364; }

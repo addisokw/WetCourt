@@ -5,6 +5,11 @@ pub enum Event {
     OperatorStart,
     OperatorEmergencyStop,
 
+    /// Enter the maintenance/test plane (only honoured from `Idle`).
+    EnterMaintenance,
+    /// Leave maintenance, returning to `Idle`.
+    ExitMaintenance,
+
     ChargeReady(String),
     #[allow(dead_code)]
     ChargeFailed(String),

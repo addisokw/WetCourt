@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 use crate::config::{HardwareConfig, MockHwConfig};
 use crate::state_machine::Event;
 
+pub mod maintenance;
 pub mod mock;
 pub mod protocol;
 pub mod tcp;

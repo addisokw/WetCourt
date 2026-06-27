@@ -6,6 +6,7 @@ use clap::Parser;
 use tokio::sync::{broadcast, mpsc};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+mod calibration;
 mod config;
 mod crimes;
 mod display;
@@ -75,6 +76,22 @@ async fn main() -> Result<()> {
     );
     let crimes = Arc::new(tokio::sync::RwLock::new(store));
 
+    // Per-device calibration: same convention as personas/crimes — a
+    // `calibration/` dir next to the config file, one `<role>.toml` per device.
+    let calibration_dir = cli
+        .config
+        .parent()
+        .map(|p| p.join("calibration"))
+        .unwrap_or_else(|| PathBuf::from("calibration"));
+    let calibration_registry = calibration::CalibrationRegistry::load_from_dir(&calibration_dir)
+        .map_err(|e| anyhow::anyhow!("loading calibration from {}: {e:#}", calibration_dir.display()))?;
+    tracing::info!(
+        dir = %calibration_dir.display(),
+        count = calibration_registry.list().len(),
+        "calibration loaded"
+    );
+    let calibration = Arc::new(tokio::sync::RwLock::new(calibration_registry));
+
     // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
     // still mocked. Set [inference] mode = "mock" for offline dev.
     {
@@ -107,6 +124,36 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { driver.run(hw_cmd_rx, event_tx).await });
     }
 
+    // Maintenance direct-control sink + shared device-presence snapshot. The
+    // multi-device registry (docs/hardware-architecture.md) is built separately
+    // and will consume `maint_cmd_rx` and keep `devices` in sync. Until it
+    // lands, a stub task drains the channel against the mock driver: it logs
+    // each direct command and synthesises an ack honouring the mock
+    // latency/fail-rate, so the console's OK/ERR/timeout paths stay exercisable.
+    let (maint_cmd_tx, maint_cmd_rx) = mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
+    let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+    {
+        let mock = cfg.mock_hw.clone();
+        tokio::spawn(async move {
+            let mut rx = maint_cmd_rx;
+            while let Some(mc) = rx.recv().await {
+                let line = mc.cmd.to_line();
+                tracing::info!(target: "maint_hw", role = mc.target.as_str(), "tx: {line}");
+                tokio::time::sleep(std::time::Duration::from_millis(mock.ack_latency_ms)).await;
+                if let Some(reply) = mc.reply {
+                    use rand::Rng;
+                    let fail = rand::thread_rng().gen::<f64>() < mock.fail_rate;
+                    let result = if fail {
+                        hardware::maintenance::HwAckResult::Err { reason: format!("ERR {line}") }
+                    } else {
+                        hardware::maintenance::HwAckResult::Ok { line: format!("OK {line}") }
+                    };
+                    let _ = reply.send(result);
+                }
+            }
+        });
+    }
+
     // Display server: broadcast to ws clients, plus axum task.
     let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
     {
@@ -118,6 +165,12 @@ async fn main() -> Result<()> {
     // (writes) and the state machine (reads). Seeded from config.
     let cross_enabled = Arc::new(AtomicBool::new(cfg.cross_examination.enabled));
 
+    // State mirrors for the maintenance REST gates, written by the state
+    // machine: `maintenance` opens the direct-command path; `is_idle` gates
+    // maintenance entry. Initial state is Idle.
+    let maintenance = Arc::new(AtomicBool::new(false));
+    let is_idle = Arc::new(AtomicBool::new(true));
+
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -127,6 +180,11 @@ async fn main() -> Result<()> {
         crimes,
         inference_cfg: cfg.inference.clone(),
         cross_enabled: cross_enabled.clone(),
+        maint_cmd_tx,
+        maintenance: maintenance.clone(),
+        is_idle: is_idle.clone(),
+        calibration,
+        devices,
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;
@@ -138,7 +196,7 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), cross_enabled, event_rx, inference_tx, hardware_tx, display_tx);
+    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx);
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {

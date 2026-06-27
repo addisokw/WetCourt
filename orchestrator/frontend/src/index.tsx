@@ -1,6 +1,6 @@
 /* @refresh reload */
 import { render } from 'solid-js/web';
-import App from './App';
+import Shell from './Shell';
 import FaceView from './FaceView';
 import CaseView from './CaseView';
 import './app.css';
@@ -10,7 +10,7 @@ const path = location.pathname.replace(/\/+$/, '');
 function Root() {
   if (path === '/face') return <FaceView />;
   if (path === '/case') return <CaseView />;
-  return <App />;
+  return <Shell />;
 }
 
 render(() => <Root />, document.getElementById('root')!);

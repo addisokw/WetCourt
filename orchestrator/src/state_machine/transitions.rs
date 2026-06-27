@@ -41,7 +41,24 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                 Command::Hardware(HardwareCommand::Panel(PanelPattern::Thinking)),
             ],
         ),
+        // Enter the maintenance/test plane — only from Idle. The atomic mirror
+        // in `Runtime::handle` opens the direct-command REST gate on entry.
+        (Idle, EnterMaintenance) => (
+            Maintenance,
+            vec![Command::Display(DisplayEvent::Maintenance { active: true })],
+        ),
         (Idle, _) => (Idle, vec![]),
+
+        // Maintenance blocks every trial event (no OperatorStart arm); only
+        // ExitMaintenance (or the e-stop guard above) leaves it.
+        (Maintenance, ExitMaintenance) => (
+            Idle,
+            vec![
+                Command::Display(DisplayEvent::Maintenance { active: false }),
+                Command::Display(DisplayEvent::Idle),
+            ],
+        ),
+        (s @ Maintenance, _) => (s, vec![]),
 
         (GeneratingCharge { .. }, ChargeReady(text)) => begin_displaying_charge(text, cfg),
         (GeneratingCharge { started_at }, Tick) => {
@@ -551,6 +568,47 @@ mod tests {
         let cross = cross.expect("cross present");
         assert_eq!(cross.question, "really?");
         assert_eq!(cross.answer, "yes");
+    }
+
+    #[test]
+    fn idle_enters_maintenance() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(State::Idle, Event::EnterMaintenance, &cfg, false);
+        assert!(matches!(s, State::Maintenance));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::Maintenance { active: true })
+        )));
+    }
+
+    #[test]
+    fn maintenance_blocks_operator_start() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(State::Maintenance, Event::OperatorStart, &cfg, false);
+        assert!(matches!(s, State::Maintenance));
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn maintenance_exits_to_idle() {
+        let cfg = test_cfg();
+        let (s, _) = step(State::Maintenance, Event::ExitMaintenance, &cfg, false);
+        assert!(matches!(s, State::Idle));
+    }
+
+    #[test]
+    fn non_idle_ignores_enter_maintenance() {
+        let cfg = test_cfg();
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
+        let (s2, _) = step(s, Event::EnterMaintenance, &cfg, false);
+        assert!(matches!(s2, State::Deliberating { .. }));
+    }
+
+    #[test]
+    fn estop_exits_maintenance() {
+        let cfg = test_cfg();
+        let (s, _) = step(State::Maintenance, Event::OperatorEmergencyStop, &cfg, false);
+        assert!(matches!(s, State::Idle));
     }
 
     #[test]

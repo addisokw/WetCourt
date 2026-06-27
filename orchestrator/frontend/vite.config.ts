@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       '/ws': { target: 'ws://localhost:8080', ws: true },
       '/operator': { target: 'http://localhost:8080' },
+      '/maintenance': { target: 'http://localhost:8080' },
     },
   },
 });

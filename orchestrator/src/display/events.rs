@@ -37,6 +37,14 @@ pub enum DisplayEvent {
     Verdict { guilty: bool, remarks: String },
     ExecuteSentence { guilty: bool },
     PlayCue { name: String },
+    /// A device announced itself (`HELLO <role>`) and was accepted; surfaced to
+    /// the maintenance console so its tab enables.
+    DeviceConnected { role: String, addr: String },
+    /// A device's connection dropped.
+    DeviceDisconnected { role: String },
+    /// Maintenance mode entered/left — confirms the FSM transition to the
+    /// console (whose direct-control tabs gate on it).
+    Maintenance { active: bool },
     #[allow(dead_code)]
     Error { message: String },
 }

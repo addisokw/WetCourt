@@ -23,6 +23,11 @@ pub struct Runtime {
     /// Operator-toggleable cross-examination switch, shared with the display
     /// server's `/operator/cross_exam` endpoint. Read once per event.
     cross_enabled: Arc<AtomicBool>,
+    /// Lock-free mirrors of the current state for the maintenance REST gates:
+    /// `maintenance` is true while in `State::Maintenance` (opens the direct-
+    /// command path); `is_idle` is true in `State::Idle` (gates entry).
+    maintenance: Arc<AtomicBool>,
+    is_idle: Arc<AtomicBool>,
     event_rx: mpsc::Receiver<Event>,
     inference_tx: mpsc::Sender<Command>,
     hardware_tx: mpsc::Sender<Command>,
@@ -30,15 +35,18 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: Arc<Config>,
         cross_enabled: Arc<AtomicBool>,
+        maintenance: Arc<AtomicBool>,
+        is_idle: Arc<AtomicBool>,
         event_rx: mpsc::Receiver<Event>,
         inference_tx: mpsc::Sender<Command>,
         hardware_tx: mpsc::Sender<Command>,
         display_tx: mpsc::Sender<Command>,
     ) -> Self {
-        Self { state: State::Idle, cfg, cross_enabled, event_rx, inference_tx, hardware_tx, display_tx }
+        Self { state: State::Idle, cfg, cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx }
     }
 
     pub async fn run(mut self) {
@@ -65,6 +73,11 @@ impl Runtime {
             tracing::debug!(state = next.name(), "event handled, no transition");
         }
         self.state = next;
+        // Refresh the REST-gate mirrors to match the new state.
+        self.maintenance
+            .store(matches!(self.state, State::Maintenance), Ordering::Relaxed);
+        self.is_idle
+            .store(matches!(self.state, State::Idle), Ordering::Relaxed);
         for cmd in cmds {
             self.dispatch(cmd).await;
         }

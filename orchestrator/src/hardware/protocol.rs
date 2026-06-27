@@ -39,6 +39,10 @@ impl fmt::Display for PanelPattern {
 pub enum HardwareCommand {
     Fire(u32),
     Gavel,
+    /// Point a pan/tilt mechanism. Values are *raw* device units — the host
+    /// applies per-device calibration (degrees → raw) before building this.
+    /// Owned by the `turret` and `ai-judge` roles (see protocol spec).
+    Aim { pan: i32, tilt: i32 },
     Lights(LightState),
     Panel(PanelPattern),
     Ping,
@@ -49,6 +53,7 @@ impl HardwareCommand {
         match self {
             HardwareCommand::Fire(ms) => format!("FIRE {ms}"),
             HardwareCommand::Gavel => "GAVEL".into(),
+            HardwareCommand::Aim { pan, tilt } => format!("AIM {pan} {tilt}"),
             HardwareCommand::Lights(s) => format!("LIGHTS {s}"),
             HardwareCommand::Panel(p) => format!("PANEL {p}"),
             HardwareCommand::Ping => "PING".into(),

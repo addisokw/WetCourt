@@ -14,11 +14,14 @@ use axum::{
 use bytes::Bytes;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
+use crate::calibration::{Calibration, CalibrationRegistry};
 use crate::config::InferenceConfig;
 use crate::crimes::{Crime, CrimeStore};
+use crate::hardware::maintenance::{DeviceInfo, HwAckResult, MaintenanceCommand, Role};
+use crate::hardware::protocol::{HardwareCommand, PanelPattern};
 use crate::inference::client::LlmClient;
 use crate::personas::{verdict_parse, Persona, PersonaRegistry};
 use crate::state_machine::{Command, Event};
@@ -50,6 +53,19 @@ pub struct AppState {
     /// Operator-toggleable cross-examination switch, shared with the state
     /// machine `Runtime`, which reads it when a plea comes in.
     pub cross_enabled: Arc<AtomicBool>,
+    /// Direct-control command sink (bypasses the trial FSM). Consumed by the
+    /// device registry; gated by `maintenance`.
+    pub maint_cmd_tx: mpsc::Sender<MaintenanceCommand>,
+    /// True while the FSM is in `State::Maintenance` (mirror; opens the
+    /// direct-command path). Written by `Runtime`.
+    pub maintenance: Arc<AtomicBool>,
+    /// True while the FSM is in `State::Idle` (mirror; gates maintenance entry).
+    pub is_idle: Arc<AtomicBool>,
+    /// Per-device host-side calibration registry (degrees → raw transform).
+    pub calibration: Arc<RwLock<CalibrationRegistry>>,
+    /// Snapshot of currently-connected devices for `GET /maintenance/devices`.
+    /// The device registry keeps this in sync; empty until it lands.
+    pub devices: Arc<RwLock<Vec<DeviceInfo>>>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -71,6 +87,14 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
         .route("/operator/cross_exam", get(get_cross_exam).post(set_cross_exam))
+        // ---- Maintenance / hardware test plane ----
+        .route("/maintenance/enter", post(maintenance_enter))
+        .route("/maintenance/exit", post(maintenance_exit))
+        .route("/maintenance/command", post(maintenance_command))
+        .route("/maintenance/devices", get(maintenance_devices))
+        .route("/maintenance/calibration", get(list_calibrations))
+        .route("/maintenance/calibration/{role}", get(get_calibration).put(update_calibration))
+        .route("/maintenance/calibration/{role}/save", post(save_calibration))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -111,6 +135,164 @@ async fn set_cross_exam(
     s.cross_enabled.store(body.enabled, Ordering::Relaxed);
     info!(enabled = body.enabled, "operator: cross-examination toggled");
     (StatusCode::OK, Json(CrossExamState { enabled: body.enabled }))
+}
+
+// ---- Maintenance / hardware test plane ----
+
+async fn maintenance_enter(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    if !s.is_idle.load(Ordering::Relaxed) {
+        return (StatusCode::CONFLICT, "maintenance can only be entered from idle");
+    }
+    info!("maintenance: enter");
+    if s.event_tx.send(Event::EnterMaintenance).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
+    }
+    (StatusCode::ACCEPTED, "")
+}
+
+async fn maintenance_exit(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    info!("maintenance: exit");
+    if s.event_tx.send(Event::ExitMaintenance).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
+    }
+    (StatusCode::ACCEPTED, "")
+}
+
+/// One direct hardware action from the console. `cmd` selects the verb; AIM
+/// carries *logical degrees* (transformed to raw via calibration here). Set
+/// `stream: true` for fire-and-forget (the high-rate AIM stream) to skip the
+/// ack wait.
+#[derive(Deserialize)]
+struct CommandReq {
+    target: Role,
+    #[serde(flatten)]
+    spec: CmdSpec,
+    #[serde(default)]
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+enum CmdSpec {
+    Fire { ms: u32 },
+    Gavel,
+    Aim { pan: f32, tilt: f32 },
+    Panel { pattern: String },
+    Ping,
+}
+
+async fn maintenance_command(
+    AxumState(s): AxumState<AppState>,
+    Json(req): Json<CommandReq>,
+) -> impl IntoResponse {
+    if !s.maintenance.load(Ordering::Relaxed) {
+        return (StatusCode::CONFLICT, "not in maintenance mode").into_response();
+    }
+
+    // Build the wire command, applying calibration for AIM (degrees → raw).
+    let cmd = match req.spec {
+        CmdSpec::Fire { ms } => HardwareCommand::Fire(ms),
+        CmdSpec::Gavel => HardwareCommand::Gavel,
+        CmdSpec::Ping => HardwareCommand::Ping,
+        CmdSpec::Panel { pattern } => match pattern.as_str() {
+            "idle" => HardwareCommand::Panel(PanelPattern::Idle),
+            "thinking" => HardwareCommand::Panel(PanelPattern::Thinking),
+            "verdict" => HardwareCommand::Panel(PanelPattern::Verdict),
+            other => {
+                return (StatusCode::BAD_REQUEST, format!("unknown panel pattern '{other}'"))
+                    .into_response()
+            }
+        },
+        CmdSpec::Aim { pan, tilt } => {
+            let reg = s.calibration.read().await;
+            let cal = match reg.get(req.target.as_str()) {
+                Some(c) => c,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("no calibration for role '{}'", req.target.as_str()),
+                    )
+                        .into_response()
+                }
+            };
+            match cal.aim_to_raw(pan, tilt) {
+                Ok((p, t)) => HardwareCommand::Aim { pan: p, tilt: t },
+                Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+            }
+        }
+    };
+
+    // Fire-and-forget (AIM stream): send without waiting for an ack.
+    if req.stream {
+        let mc = MaintenanceCommand { target: req.target, cmd, reply: None };
+        if s.maint_cmd_tx.send(mc).await.is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "hardware channel closed").into_response();
+        }
+        return (StatusCode::ACCEPTED, String::new()).into_response();
+    }
+
+    // Awaited command: return the device's OK/ERR/timeout in the body.
+    let (tx, rx) = oneshot::channel();
+    let mc = MaintenanceCommand { target: req.target, cmd, reply: Some(tx) };
+    if s.maint_cmd_tx.send(mc).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "hardware channel closed").into_response();
+    }
+    match tokio::time::timeout(Duration::from_secs(5), rx).await {
+        Ok(Ok(result)) => (StatusCode::OK, Json(result)).into_response(),
+        Ok(Err(_)) => (StatusCode::OK, Json(HwAckResult::Timeout)).into_response(),
+        Err(_) => (StatusCode::OK, Json(HwAckResult::Timeout)).into_response(),
+    }
+}
+
+async fn maintenance_devices(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let devices = s.devices.read().await.clone();
+    (StatusCode::OK, Json(devices))
+}
+
+async fn list_calibrations(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let reg = s.calibration.read().await;
+    let cals: Vec<Calibration> = reg.list().into_iter().cloned().collect();
+    (StatusCode::OK, Json(cals)).into_response()
+}
+
+async fn get_calibration(
+    AxumState(s): AxumState<AppState>,
+    Path(role): Path<String>,
+) -> impl IntoResponse {
+    let reg = s.calibration.read().await;
+    match reg.get(&role) {
+        Some(c) => (StatusCode::OK, Json(c.clone())).into_response(),
+        None => (StatusCode::NOT_FOUND, format!("unknown role '{role}'")).into_response(),
+    }
+}
+
+async fn update_calibration(
+    AxumState(s): AxumState<AppState>,
+    Path(role): Path<String>,
+    Json(body): Json<Calibration>,
+) -> impl IntoResponse {
+    let mut reg = s.calibration.write().await;
+    if reg.get(&role).is_none() {
+        return (StatusCode::NOT_FOUND, format!("unknown role '{role}'")).into_response();
+    }
+    match reg.update(&role, body) {
+        Ok(()) => (StatusCode::OK, Json(reg.get(&role).unwrap().clone())).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+async fn save_calibration(
+    AxumState(s): AxumState<AppState>,
+    Path(role): Path<String>,
+) -> impl IntoResponse {
+    let reg = s.calibration.read().await;
+    if reg.get(&role).is_none() {
+        return (StatusCode::NOT_FOUND, format!("unknown role '{role}'")).into_response();
+    }
+    match reg.save(&role) {
+        Ok(()) => (StatusCode::NO_CONTENT, String::new()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 async fn ws_handler(
