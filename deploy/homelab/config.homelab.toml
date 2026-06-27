@@ -1,0 +1,76 @@
+# Homelab config — orchestrator self-hosted as an always-on service, inference
+# on the remote Spark over Tailscale. This is deployment "shape B" (see
+# orchestrator/README.md) made persistent and put behind Cloudflare Tunnel.
+#
+# Prefer overriding single knobs with BOOTH__… env vars in docker-compose.yml
+# over editing this file.
+
+[inference]
+mode = "real"
+# Spark's Tailscale IP. The tailscale sidecar (docker-compose.yml) joins the
+# tailnet so this is reachable; the team never needs Tailscale themselves.
+# api_key comes from BOOTH__INFERENCE__API_KEY (set in compose from
+# LITELLM_MASTER_KEY) — do not hardcode the key here.
+base_url = "http://100.86.115.53:4000"
+chat_model = "qwen3.6-35b-a3b"
+stt_model = "whisper-1"
+tts_model = "kokoro-tts"
+tts_voice = "bm_george"
+charge_timeout_secs = 10
+verdict_first_token_timeout_secs = 15
+verdict_total_timeout_secs = 30
+stt_timeout_secs = 5
+tts_timeout_secs = 10
+enable_thinking = false
+
+[hardware]
+# No physical booth attached to the homelab box, so synthesize acks. If a real
+# booth dials in over the network, set driver = "tcp" (the MCU connects to this
+# host's :8090) — or override with BOOTH__HARDWARE__DRIVER=tcp.
+driver = "mock"
+serial_port = "COM4"        # ignored unless driver = "serial"
+baud = 115200
+ack_timeout_ms = 3000
+bind_addr = "0.0.0.0:8090"
+
+[mock_hw]
+ack_latency_ms = 50
+fail_rate = 0.0
+simulate_estop_after_secs = 0
+
+[mock_inference]
+charge_latency_ms = 800
+transcribe_latency_ms = 400
+deliberate_latency_ms = 1200
+tts_latency_ms = 200
+
+[squirt]
+# The squirt gun is binary: every guilty verdict fires for this fixed
+# duration (ms).
+duration_ms = 150
+
+[crimes]
+# Path relative to this config file → /app/crimes/wet_court_crimes.json inside
+# the container (bind-mounted from the repo so edits persist).
+file = "crimes/wet_court_crimes.json"
+source = "list"
+no_repeat_window = 15
+
+[trial]
+plea_window_secs = 20
+charge_display_secs = 5
+cooldown_secs = 4
+guilty_bias = 0.7
+
+[cross_examination]
+enabled = true
+answer_window_secs = 10
+question_timeout_secs = 12
+
+[display]
+listen_addr = "0.0.0.0:8080"
+
+[logging]
+level = "info,booth=info"
+log_file = "./booth.log"
+transcripts_jsonl = "./transcripts.jsonl"

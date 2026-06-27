@@ -1,0 +1,61 @@
+# Self-hosted Wet Court orchestrator for a homelab.
+#
+#   tailscale     — sidecar that joins YOUR tailnet (one node, not the whole
+#                   team) so the orchestrator can reach the Spark's LiteLLM at
+#                   its tailnet IP.
+#   orchestrator  — the Rust binary (web UI embedded), serving on :8080. It
+#                   shares the tailscale container's network namespace, so the
+#                   Spark is reachable directly and the UI is published via the
+#                   tailscale service's port mapping below.
+#
+# Your existing host-level cloudflared points a public hostname at
+# http://localhost:26878 (HOST_PORT; see README.md). Nothing here touches your
+# nginx :80.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: ${TS_HOSTNAME:-wetcourt-orchestrator}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:?set TS_AUTHKEY in .env}
+      - TS_STATE_DIR=/var/lib/tailscale
+      # Kernel networking (needs /dev/net/tun + NET_ADMIN) so the orchestrator
+      # can dial the Spark's tailnet IP transparently — no SOCKS proxy.
+      - TS_USERSPACE=false
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    # The orchestrator listens on :8080 inside this netns; expose it to the host
+    # on loopback only — host cloudflared is the sole consumer. HOST_PORT picks
+    # an uncommon host port (default 26878 = "COURT" on a keypad) to avoid
+    # clashing with your other services; the container port stays 8080.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-26878}:8080"
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: ../../orchestrator
+      dockerfile: Dockerfile
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    environment:
+      # main.rs reads the LiteLLM key from this var. Copy it from the Spark —
+      # it does not live anywhere else.
+      - BOOTH__INFERENCE__API_KEY=${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      # Override any other knob the same way, e.g. to let a real booth dial in:
+      # - BOOTH__HARDWARE__DRIVER=tcp
+    volumes:
+      - ./config.homelab.toml:/app/config.toml:ro
+      # Personas + crimes are read AND written by the operator panels — bind the
+      # repo's copies so team edits persist on disk (and can be committed).
+      - ../../orchestrator/personas:/app/personas
+      - ../../orchestrator/crimes:/app/crimes
+    restart: unless-stopped
+
+volumes:
+  tailscale-state:

@@ -63,6 +63,10 @@ against a Spark whose own orchestrator container is up, stop the Spark's
 copy so there aren't two consoles:
 `cd ../dgx-ai-stack && ./ai-stack stop orchestrator`.
 
+For an always-on, team-facing variant of shape B — self-hosted on a homelab
+behind Cloudflare Tunnel, with a Tailscale sidecar reaching the Spark — see
+[`deploy/homelab/`](../deploy/homelab/README.md).
+
 ## Dev quick start — shape B (no MCU, no Docker)
 
 ```powershell
