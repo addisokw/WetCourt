@@ -17,9 +17,9 @@ firmware and microcontroller, plus a non-MCU vision process:
 
 - **AI judge** — LED-matrix face (Adafruit Matrix Portal M4 / SAMD51) and a
   pan/tilt gaze mechanism.
-- **Squirt-gun turret** — its own repo (`squirt-gun-turret`): a NanoC6 driving
-  a pan/tilt mech + a relay to fire, with a camera on top for person-tracking
-  and a manual-aim feed.
+- **Squirt-gun turret** — a NanoC6 driving a pan/tilt mech + a relay to fire
+  (`firmware/turret/`), with a camera on top for person-tracking and a
+  manual-aim feed (the **vision** process, `vision/`).
 - **Gavel** — a NanoC6 driving a servo-actuated gavel (verdicts, and "order in
   the court").
 - **Swear-in object** *(future, not started)* — a capacitive swear-in object on
@@ -37,12 +37,11 @@ Two things are intentionally **out of scope** for now:
 
 ## Decisions
 
-1. **Firmware boundary:** first-party firmware lives in-repo under
-   `firmware/<board>/`; `squirt-gun-turret` stays its own repo, pulled in as a
-   **git submodule**.
-2. **Vision/camera:** lives **inside the `squirt-gun-turret` repo** (coupled to
-   that hardware). The orchestrator talks to it over the network; it is not a
-   first-party process here.
+1. **Firmware boundary:** all first-party firmware lives in-repo under
+   `firmware/<board>/`, the turret included (`firmware/turret/`).
+2. **Vision/camera:** a non-MCU host process in **`vision/`**, coupled to the
+   turret hardware. The orchestrator talks to it over the network (its own
+   HTTP/WS channel, not the device line protocol).
 3. **Wire protocol:** a **language-neutral spec** in [`protocol/`](../protocol/),
    implemented by the orchestrator and every firmware (esp-rs, CircuitPython,
    Arduino, …). See that doc for the contract.
@@ -55,10 +54,11 @@ WetCourt/
 ├── firmware/              # one self-contained project per independently-flashed board
 │   ├── ai-judge/          #   Matrix Portal M4 (SAMD51): LED face + pan/tilt gaze
 │   ├── gavel/             #   M5 NanoC6 (esp32c6): servo gavel
+│   ├── turret/            #   M5 NanoC6 (esp32c6): pan/tilt + relay (FIRE, turret AIM)
 │   ├── swear-in/          #   (future) capacitive swear-in object: emits the start trigger
 │   └── README.md          #   board map: subsystem → board → MCU → verbs owned
+├── vision/                # non-MCU host process: turret camera person-tracking + aim feed
 ├── protocol/              # language-neutral device⇄orchestrator wire spec (versioned)
-├── squirt-gun-turret/     # git SUBMODULE — own repo: turret firmware + camera/vision
 ├── dgx-ai-stack/          # inference stack
 ├── deploy/  docs/  README.md
 ```
@@ -75,7 +75,7 @@ hardware = a new sibling dir + one registry entry + a role in the spec.
 |---|---|---|---|
 | AI judge (face + gaze) | Adafruit Matrix Portal M4 (SAMD51) | `PANEL`, gaze `AIM` | `firmware/ai-judge/` |
 | Gavel | M5Stack NanoC6 (esp32c6) | `GAVEL` | `firmware/gavel/` |
-| Squirt-gun turret | NanoC6 + camera | `FIRE`, turret `AIM`; tracking | `squirt-gun-turret/` (submodule) |
+| Squirt-gun turret | NanoC6 + camera | `FIRE`, turret `AIM`; tracking | `firmware/turret/` + `vision/` |
 | Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `firmware/swear-in/` |
 
 `LIGHTS` is deferred (no owner); e-stop is operator-panel + hardware power, not
@@ -98,10 +98,11 @@ The hardware layer goes from **one connection → a device registry**:
   `Event::OperatorEmergencyStop`; that branch is dropped (no device emits it).
   The operator-panel `/operator/estop` path is unchanged.
 
-The **vision process** (in the turret repo) talks to the orchestrator over its
-existing HTTP/WS server — tracking state in, and the aim feed surfaced as an
-operator-console panel (MJPEG/WebRTC). The turret's *firmware* still speaks the
-line protocol like any other device; the *vision* is a separate channel.
+The **vision process** (`vision/`) talks to the orchestrator over its existing
+HTTP/WS server — tracking state in, and the aim feed surfaced as an
+operator-console panel (MJPEG/WebRTC). The turret's *firmware*
+(`firmware/turret/`) still speaks the line protocol like any other device; the
+*vision* is a separate channel.
 
 ## Staged migration (pay as the hardware arrives)
 
@@ -112,13 +113,12 @@ line protocol like any other device; the *vision* is a separate channel.
 3. **When the first device connects:** add the `HELLO <role>` handshake + the
    device registry + per-role command routing in `orchestrator/src/hardware/`,
    and drop the dead `ESTOP` reader branch from `tcp.rs`.
-4. **When the turret lands:** `git submodule add <url> squirt-gun-turret`; wire
-   the vision channel into the operator console.
+4. **When the turret lands:** add `firmware/turret/` (firmware) and `vision/`
+   (camera process); wire the vision channel into the operator console.
 
 Nothing above is big-bang; each step is independent and tied to a real need.
 
 ## Open items (need your call)
 
-- **`squirt-gun-turret` repo URL** for the submodule (step 4).
 - **Swear-in object micro** — board choice, and whether it also does oath /
   presence sensing (it currently only owns the start trigger). Not started.

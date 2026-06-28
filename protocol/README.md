@@ -2,8 +2,8 @@
 
 The wire contract between the **orchestrator** (host) and each **device**
 (microcontroller firmware). Language-neutral on purpose: the orchestrator is
-Rust, but devices span esp-rs, CircuitPython, and Arduino, and the
-`squirt-gun-turret` is a separate repo — they all implement *this* doc.
+Rust, but devices span esp-rs, CircuitPython, and Arduino — they all implement
+*this* doc.
 
 Spec version: **2** — the multi-device protocol (`HELLO` identity handshake +
 per-role routing). v1 was the original single all-in-one MCU with no handshake;
@@ -100,4 +100,4 @@ panel (`/operator/estop`) and backed by physical power shutdowns.
 
 - Host: `orchestrator/src/hardware/` (`protocol.rs` serialises commands;
   `tcp.rs` is the line driver / device registry).
-- Devices: each `firmware/<role>/` project, and the `squirt-gun-turret` repo.
+- Devices: each `firmware/<role>/` project (the turret included, `firmware/turret/`).
