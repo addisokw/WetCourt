@@ -1,0 +1,204 @@
+/* Styling shared with the operator console (orchestrator/frontend/src/app.css):
+   the base theme plus the panel/crimes rules are copied verbatim so the editor
+   looks identical to the Crimes panel in the console. Kept self-contained so
+   this stays a standalone deployable. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-size: 13px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header {
+  padding: 1.25rem 2rem;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.banner {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #58a6ff;
+}
+.muted { color: #6e7681; }
+.small { font-size: 0.8rem; }
+
+/* ---- Panels (from the console's persona/crimes panels) ---- */
+.persona-panel {
+  border-bottom: 1px solid #30363d;
+  background: #0b0f14;
+  /* Centered, readable column for the standalone full-page layout. */
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.panel-body {
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.panel-body .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.panel-body .field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.panel-body label {
+  color: #8b949e;
+  font-size: 0.85rem;
+}
+.panel-body label.checkbox {
+  color: #c9d1d9;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.panel-body input[type="text"],
+.panel-body input[type="search"],
+.panel-body select,
+.panel-body textarea {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  border-radius: 3px;
+}
+.panel-body input:disabled,
+.panel-body select:disabled,
+.panel-body textarea:disabled { opacity: 0.5; }
+.panel-body .muted { color: #6e7681; }
+.panel-body .small { font-size: 0.8rem; }
+.panel-body .err { color: #ffa198; font-size: 0.8rem; }
+
+.row-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px dotted #21262d;
+}
+.row-line label { min-width: 6ch; }
+.btn-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.panel-body button {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.panel-body button:hover:not(:disabled) { background: #1c2128; border-color: #58a6ff; }
+.panel-body button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status-line {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  border-top: 1px dotted #21262d;
+  padding-top: 0.4rem;
+  min-height: 1.4rem;
+}
+.status-line .status { color: #56d364; }
+
+/* ---- Crimes panel ---- */
+.crimes-panel .row-line input[type="text"] { flex: 1; }
+.crimes-panel .category-input { max-width: 12ch; flex: 0 1 auto !important; }
+.crimes-panel .crime-search { flex: 1 1 16ch; min-width: 12ch; }
+.crime-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  /* Taller than the console's embedded panel — this is the whole page. */
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+}
+.crime-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px dotted #21262d;
+}
+.crime-list li:last-child { border-bottom: none; }
+/* Group headers (group-by category / subject). Stick to the top of the
+   scrolling list so you keep the current creator/category in view. */
+.crime-list li.crime-group {
+  position: sticky;
+  top: 0;
+  background: #11161d;
+  border-bottom: 1px solid #30363d;
+  color: #79c0ff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  font-weight: bold;
+  z-index: 1;
+}
+.crime-list li.crime-group .group-name { flex: 1; }
+.crime-list li.disabled .crime-text,
+.crime-list li.disabled .crime-cat { color: #484f58; text-decoration: line-through; }
+.crime-cat {
+  color: #d2a8ff;
+  font-size: 0.75rem;
+  min-width: 8ch;
+  text-transform: uppercase;
+}
+.crime-subject {
+  color: #e3b341;
+  font-size: 0.72rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid #3d2c0a;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.crime-text { flex: 1; color: #c9d1d9; font-size: 0.85rem; }
+.crime-list button.mini {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+}
+.crime-list button.mini.danger:hover { background: #6e1b1b; border-color: #f85149; }
+.crime-edit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.2rem 0;
+}
+.crime-edit textarea { resize: vertical; }

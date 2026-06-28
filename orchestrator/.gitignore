@@ -3,5 +3,7 @@
 Cargo.lock.bak
 frontend/node_modules
 frontend/dist
+crates/crimes-editor/frontend/node_modules
+crates/crimes-editor/frontend/dist
 booth.log
 transcripts.jsonl

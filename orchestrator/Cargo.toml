@@ -1,9 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/crimes-core", "crates/crimes-editor"]
+
 [package]
 name = "booth"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+crimes-core = { path = "crates/crimes-core" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower-http = { version = "0.6", features = ["fs", "trace"] }

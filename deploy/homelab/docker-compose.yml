@@ -36,6 +36,24 @@ services:
       - "127.0.0.1:${HOST_PORT:-26878}:8080"
     restart: unless-stopped
 
+  # Standalone crimes editor — lets collaborators curate the crimes list over the
+  # web without running the orchestrator. No tailnet/Spark access needed; it only
+  # reads and writes the crimes file. Point a second cloudflared hostname at its
+  # loopback port (EDITOR_HOST_PORT, default 26879) and gate it with Cloudflare
+  # Access so only your collaborators get in — no app-level auth to maintain.
+  crimes-editor:
+    build:
+      context: ../../orchestrator
+      dockerfile: crates/crimes-editor/Dockerfile
+    ports:
+      - "127.0.0.1:${EDITOR_HOST_PORT:-26879}:8080"
+    volumes:
+      # The SAME crimes dir the booth reads — edits land directly in the repo
+      # working tree. Commit & push them out-of-band (a host-side `git commit`
+      # whenever you want to publish; the booth picks them up on its next start).
+      - ../../orchestrator/crimes:/app/crimes
+    restart: unless-stopped
+
   orchestrator:
     build:
       context: ../../orchestrator

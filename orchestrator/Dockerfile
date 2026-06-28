@@ -12,8 +12,9 @@ WORKDIR /src
 COPY Cargo.toml ./
 COPY Cargo.lock* ./
 COPY src ./src
+COPY crates ./crates
 COPY --from=frontend /fe/dist ./frontend/dist
-RUN cargo build --release
+RUN cargo build --release --bin booth
 
 # --- Runtime ---
 FROM debian:bookworm-slim

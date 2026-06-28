@@ -219,6 +219,7 @@ dependencies = [
  "axum",
  "bytes",
  "clap",
+ "crimes-core",
  "dotenvy",
  "eventsource-stream",
  "figment",
@@ -360,6 +361,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "crimes-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "crimes-editor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "crimes-core",
+ "mime_guess",
+ "rust-embed",
+ "serde",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
