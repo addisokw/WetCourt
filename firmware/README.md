@@ -11,10 +11,15 @@ spec.
 
 | Subsystem | Board / MCU | Owns (verbs / events) | Dir | Status |
 |---|---|---|---|---|
-| Squirt-gun turret | M5Stack NanoC6 (esp32c6) + 8-Servos + relay | `FIRE`, `AIM`, `PING` | [`turret/`](turret/) | **in progress** |
+| Turret aim | M5Stack NanoC6 (esp32c6) + 8-Servos | `AIM`, `PING` | [`turret/`](turret/) | **in progress** |
+| Squirt fire | M5Stack NanoC6 (esp32c6) + relay | `FIRE`, `PING` | [`squirt/`](squirt/) | **in progress** |
 | AI judge (face + gaze) | Adafruit Matrix Portal M4 (SAMD51) | `PANEL`, gaze `AIM` | `ai-judge/` | planned |
 | Gavel | M5Stack NanoC6 (esp32c6) | `GAVEL` | `gavel/` | planned |
 | Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `swear-in/` | future |
+
+The turret's **aim** and **fire** are two separate NanoC6 boards: the servo board
+takes the NanoC6's only Grove I2C pins, leaving no GPIO for the relay, so the
+relay gets its own board (role `squirt`).
 
 Each device dials the orchestrator over TCP and identifies with `HELLO <role>`;
 the host routes commands per role. `LIGHTS` is deferred (no owner); e-stop is the

@@ -1,15 +1,19 @@
 # firmware/turret
 
-Squirt-gun turret firmware for the Wet Court fleet.
+Squirt-gun turret **aim** firmware (pan/tilt) for the Wet Court fleet.
 
 | | |
 |---|---|
 | **Board** | M5Stack NanoC6 (ESP32-C6) |
 | **Servos** | M5Stack 8-Servos board (I2C `0x25`) — **ch0 = pan, ch1 = tilt** |
-| **Relay** | M5Stack single relay (fires the squirt gun) |
-| **Owns verbs** | `FIRE <ms>`, `AIM <pan_us> <tilt_us>`, `PING` |
+| **Owns verbs** | `AIM <pan_us> <tilt_us>`, `PING` |
 | **Role** | `turret` (sent in the `HELLO` handshake) |
 | **Protocol** | [`../../protocol/README.md`](../../protocol/README.md) (v2) |
+
+**Firing is a separate board** — `firmware/squirt/` (role `squirt`) drives the
+relay. The servo board takes the NanoC6's only Grove pins for I2C, leaving no
+GPIO for a relay, so the gun's trigger gets its own NanoC6. The orchestrator
+routes `AIM` here and `FIRE` to `squirt`.
 
 The firmware is intentionally "dumb": `AIM` values are servo pulse-width
 **microseconds** that the orchestrator has already calibrated (degrees → µs via
@@ -20,18 +24,12 @@ firmware just clamps and writes them.
 
 - **8-Servos board** on the NanoC6 **Grove port** (I2C): `SDA = GPIO2`,
   `SCL = GPIO1` (`Wire.begin(2, 1)`). Pan servo → channel 0, tilt → channel 1.
-- **Relay** — ⚠️ **confirm before flashing.** The sketch defaults to a **GPIO
-  relay** (`#define RELAY_GPIO`, `RELAY_PIN = 6`, HIGH = fire). If yours is an
-  I2C relay unit instead, comment out `RELAY_GPIO` and set `RELAY_ADDR`/`RELAY_REG`
-  (it can share the Grove I2C bus with the servo board). Set `RELAY_PIN` to the
-  actual GPIO you wired.
 
 ## Configure before flashing
 
-1. **Secrets** (gitignored): `cp secrets.example.h secrets.h`, then fill in
-   `WIFI_SSID` / `WIFI_PASS` / `ORCH_HOST` (orchestrator LAN IP) / `ORCH_PORT`
-   (`8090`). `secrets.h` is gitignored so credentials never reach the repo.
-2. **Relay**: set the **RELAY CONFIG** path in `turret.ino` (see Wiring).
+**Secrets** (gitignored): `cp secrets.example.h secrets.h`, then fill in
+`WIFI_SSID` / `WIFI_PASS` / `ORCH_HOST` (orchestrator LAN IP) / `ORCH_PORT`
+(`8090`). `secrets.h` is gitignored so credentials never reach the repo.
 
 ## Build & flash
 
@@ -49,16 +47,12 @@ arduino-cli upload  --fqbn esp32:esp32:m5stack_nanoc6 -p <PORT> firmware/turret
 1. Flash; the turret dials the orchestrator and sends `HELLO turret`.
 2. In the operator console, enter **maintenance** and confirm the `turret`
    presence badge lights (`GET /maintenance/devices` lists it).
-3. Use the **Turret panel** to aim (sliders/gamepad) and fire presets. Tune
-   `turret.toml` pan/tilt center/limits and establish the **boresight** (the
-   pulse widths that point the gun at a marker at the seating distance), then
-   save the calibration.
+3. Use the **Turret panel** to aim (sliders/gamepad). Tune `turret.toml` pan/tilt
+   center/limits and establish the **boresight** (the pulse widths that point the
+   gun at a marker at the seating distance), then save the calibration. (Firing
+   is exercised from the same panel but targets the `squirt` board.)
 
 ## Known limitations / TODO
 
-- **Relay interface is unconfirmed** (GPIO vs I2C) — see Wiring. This is the
-  one hardware detail to verify against your actual board.
 - **No AIM slew** yet: the firmware sets the target pulse directly. If the mech
   slams on large moves, add a stepped slew in `doAim()`.
-- `FIRE` blocks for its duration (≤ `FIRE_MAX_MS`, default 1 s) before acking;
-  fine for the booth's short squirts, well within the host's ack timeout.

@@ -17,9 +17,11 @@ firmware and microcontroller, plus a non-MCU vision process:
 
 - **AI judge** — LED-matrix face (Adafruit Matrix Portal M4 / SAMD51) and a
   pan/tilt gaze mechanism.
-- **Squirt-gun turret** — a NanoC6 driving a pan/tilt mech + a relay to fire
-  (`firmware/turret/`), with a camera on top for person-tracking and a
-  manual-aim feed (the **vision** process, `vision/`).
+- **Squirt-gun turret** — **two** NanoC6 boards: `firmware/turret/` drives the
+  pan/tilt mech (`AIM`), and `firmware/squirt/` drives the firing relay (`FIRE`).
+  They're split because the servo board claims the NanoC6's only Grove I2C pins,
+  leaving no GPIO for the relay. A camera on the gun feeds the **vision** process
+  (`vision/`) for person-tracking and a manual-aim feed.
 - **Gavel** — a NanoC6 driving a servo-actuated gavel (verdicts, and "order in
   the court").
 - **Swear-in object** *(future, not started)* — a capacitive swear-in object on
@@ -54,7 +56,8 @@ WetCourt/
 ├── firmware/              # one self-contained project per independently-flashed board
 │   ├── ai-judge/          #   Matrix Portal M4 (SAMD51): LED face + pan/tilt gaze
 │   ├── gavel/             #   M5 NanoC6 (esp32c6): servo gavel
-│   ├── turret/            #   M5 NanoC6 (esp32c6): pan/tilt + relay (FIRE, turret AIM)
+│   ├── turret/            #   M5 NanoC6 (esp32c6): pan/tilt servos — AIM
+│   ├── squirt/            #   M5 NanoC6 (esp32c6): firing relay — FIRE
 │   ├── swear-in/          #   (future) capacitive swear-in object: emits the start trigger
 │   └── README.md          #   board map: subsystem → board → MCU → verbs owned
 ├── vision/                # non-MCU host process: turret camera person-tracking + aim feed
@@ -75,7 +78,8 @@ hardware = a new sibling dir + one registry entry + a role in the spec.
 |---|---|---|---|
 | AI judge (face + gaze) | Adafruit Matrix Portal M4 (SAMD51) | `PANEL`, gaze `AIM` | `firmware/ai-judge/` |
 | Gavel | M5Stack NanoC6 (esp32c6) | `GAVEL` | `firmware/gavel/` |
-| Squirt-gun turret | NanoC6 + camera | `FIRE`, turret `AIM`; tracking | `firmware/turret/` + `vision/` |
+| Turret (aim) | M5Stack NanoC6 (esp32c6) + camera | turret `AIM`; tracking | `firmware/turret/` + `vision/` |
+| Squirt (fire) | M5Stack NanoC6 (esp32c6) | `FIRE` | `firmware/squirt/` |
 | Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `firmware/swear-in/` |
 
 `LIGHTS` is deferred (no owner); e-stop is operator-panel + hardware power, not

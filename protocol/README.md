@@ -49,8 +49,13 @@ the table below (`ai-judge`); the host also accepts the underscore form
 |---|---|---|
 | `ai-judge` | LED-matrix face + pan/tilt gaze | `PANEL`, `AIM`, `PING` |
 | `gavel` | servo gavel | `GAVEL`, `PING` |
-| `turret` | squirt gun + pan/tilt | `FIRE`, `AIM`, `PING` |
+| `turret` | squirt-gun pan/tilt aim | `AIM`, `PING` |
+| `squirt` | squirt-gun firing relay | `FIRE`, `PING` |
 | `swear-in` *(future)* | capacitive start trigger | `PING` (emits `BUTTON`) |
+
+`turret` and `squirt` are split across two NanoC6 boards: the servo board claims
+the NanoC6's only I2C-capable Grove pins for pan/tilt, leaving no GPIO for the
+firing relay, so the relay gets its own board.
 
 New roles are added here first, then implemented.
 
@@ -60,7 +65,7 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 
 | Line | Role(s) | Meaning |
 |---|---|---|
-| `FIRE <ms>` | turret | Fire the squirt gun for `<ms>` milliseconds. |
+| `FIRE <ms>` | squirt | Fire the squirt gun for `<ms>` milliseconds. |
 | `AIM <pan> <tilt>` | turret, ai-judge | Point the pan/tilt mech (degrees or device-defined units). |
 | `GAVEL` | gavel | One gavel strike. |
 | `PANEL <pattern>` | ai-judge | Set face/panel animation (see vocab). |

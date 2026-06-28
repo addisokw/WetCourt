@@ -1,11 +1,5 @@
 role = "turret"
-fire_presets_ms = [
-    60,
-    100,
-    150,
-    200,
-    280,
-]
+# Pan/tilt aim only — firing lives on the `squirt` role (calibration/squirt.toml).
 
 [pan]
 min = 1000

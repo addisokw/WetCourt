@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 
 // Mirrors the backend `Role` wire names (src/hardware/maintenance.rs).
-export type Role = 'ai_judge' | 'gavel' | 'turret';
+export type Role = 'ai_judge' | 'gavel' | 'turret' | 'squirt';
 
 export interface ServoCal {
   min: number;

@@ -28,7 +28,12 @@ use super::protocol::HardwareCommand;
 pub enum Role {
     AiJudge,
     Gavel,
+    /// Pan/tilt aim mechanism — owns `AIM`. (The firing relay is a separate
+    /// `Squirt` board because the NanoC6 has no spare GPIO alongside the
+    /// servo-board I2C bus.)
     Turret,
+    /// Squirt-gun firing relay — owns `FIRE`.
+    Squirt,
 }
 
 impl Role {
@@ -38,6 +43,7 @@ impl Role {
             Role::AiJudge => "ai_judge",
             Role::Gavel => "gavel",
             Role::Turret => "turret",
+            Role::Squirt => "squirt",
         }
     }
 
@@ -47,6 +53,7 @@ impl Role {
     pub fn from_wire(s: &str) -> Option<Role> {
         match s {
             "turret" => Some(Role::Turret),
+            "squirt" => Some(Role::Squirt),
             "gavel" => Some(Role::Gavel),
             "ai-judge" | "ai_judge" => Some(Role::AiJudge),
             _ => None,

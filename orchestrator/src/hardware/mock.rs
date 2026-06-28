@@ -22,7 +22,7 @@ use super::maintenance::{DeviceInfo, HwAckResult, MaintenanceCommand, Role};
 use super::{HardwareCommand, HardwareDriver};
 
 /// Every role the mock pretends is connected.
-const MOCK_ROLES: [Role; 3] = [Role::AiJudge, Role::Gavel, Role::Turret];
+const MOCK_ROLES: [Role; 4] = [Role::AiJudge, Role::Gavel, Role::Turret, Role::Squirt];
 
 pub struct MockDriver {
     cfg: MockHwConfig,

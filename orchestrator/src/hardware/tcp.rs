@@ -255,7 +255,10 @@ enum RouteTarget {
 
 fn role_for(cmd: &HardwareCommand) -> RouteTarget {
     match cmd {
-        HardwareCommand::Fire(_) | HardwareCommand::Aim { .. } => RouteTarget::Role(Role::Turret),
+        // Aim and fire are separate boards: the turret pans/tilts, the squirt
+        // board pulls the trigger.
+        HardwareCommand::Fire(_) => RouteTarget::Role(Role::Squirt),
+        HardwareCommand::Aim { .. } => RouteTarget::Role(Role::Turret),
         HardwareCommand::Gavel => RouteTarget::Role(Role::Gavel),
         HardwareCommand::Panel(_) => RouteTarget::Role(Role::AiJudge),
         HardwareCommand::Lights(_) => RouteTarget::Skip,

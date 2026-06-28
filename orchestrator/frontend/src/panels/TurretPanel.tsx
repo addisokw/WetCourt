@@ -5,11 +5,13 @@ import { AckChip, CalibrationEditor, DeviceBadge, useAck } from './common';
 import AimControl from './AimControl';
 
 export default function TurretPanel() {
-  const presets = createMemo(() => calibrations().turret?.fire_presets_ms ?? []);
+  // Aim is the `turret` board; firing is a separate `squirt` board (the NanoC6
+  // has no spare GPIO for the relay alongside the servo-board I2C bus).
+  const presets = createMemo(() => calibrations().squirt?.fire_presets_ms ?? []);
   const [fireAck, runFire] = useAck();
 
   function fire(ms: number) {
-    void runFire(sendCommand('turret', { cmd: 'fire', ms }));
+    void runFire(sendCommand('squirt', { cmd: 'fire', ms }));
   }
 
   onMount(() => {
@@ -30,6 +32,7 @@ export default function TurretPanel() {
       <header class="panel-card-head">
         <h2>Squirt-gun turret</h2>
         <DeviceBadge role="turret" />
+        <DeviceBadge role="squirt" />
       </header>
 
       <section class="panel-section">
