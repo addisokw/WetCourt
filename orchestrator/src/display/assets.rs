@@ -25,9 +25,18 @@ pub async fn serve(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
     if let Some(file) = Assets::get(path) {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        // mime_guess doesn't know `.webmanifest`; serve it as the spec type so
+        // the browser accepts the PWA manifest.
+        let mime = if path.ends_with(".webmanifest") {
+            "application/manifest+json".to_string()
+        } else {
+            mime_guess::from_path(path)
+                .first_or_octet_stream()
+                .as_ref()
+                .to_string()
+        };
         return Response::builder()
-            .header(header::CONTENT_TYPE, mime.as_ref())
+            .header(header::CONTENT_TYPE, mime)
             .body(Body::from(file.data.into_owned()))
             .unwrap();
     }
