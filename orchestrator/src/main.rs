@@ -105,10 +105,25 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Hardware driver (mock or serial; Phase 1 = mock only).
+    // Display broadcast (ws fan-out) — defined before the hardware driver so the
+    // driver can publish device-presence events (DeviceConnected/Disconnected).
+    let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
+
+    // Maintenance direct-control sink + shared device-presence snapshot. The
+    // hardware driver consumes `maint_cmd_rx` and keeps `devices` in sync as
+    // devices connect/disconnect (the mock driver seeds all roles present).
+    let (maint_cmd_tx, maint_cmd_rx) =
+        mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
+    let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+
+    // Hardware driver (mock or tcp registry). Owns both command sources — the
+    // trial state machine (via the Command::Hardware adapter) and the
+    // maintenance console — plus the device snapshot and presence broadcast.
     {
         let driver = hardware::build(&cfg.hardware, &cfg.mock_hw);
         let event_tx = event_tx.clone();
+        let devices = devices.clone();
+        let presence = display_bcast.clone();
         let (hw_cmd_tx, hw_cmd_rx) = mpsc::channel::<hardware::HardwareCommand>(32);
         // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver.
         tokio::spawn(async move {
@@ -121,41 +136,14 @@ async fn main() -> Result<()> {
                 }
             }
         });
-        tokio::spawn(async move { driver.run(hw_cmd_rx, event_tx).await });
-    }
-
-    // Maintenance direct-control sink + shared device-presence snapshot. The
-    // multi-device registry (docs/hardware-architecture.md) is built separately
-    // and will consume `maint_cmd_rx` and keep `devices` in sync. Until it
-    // lands, a stub task drains the channel against the mock driver: it logs
-    // each direct command and synthesises an ack honouring the mock
-    // latency/fail-rate, so the console's OK/ERR/timeout paths stay exercisable.
-    let (maint_cmd_tx, maint_cmd_rx) = mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
-    let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
-    {
-        let mock = cfg.mock_hw.clone();
         tokio::spawn(async move {
-            let mut rx = maint_cmd_rx;
-            while let Some(mc) = rx.recv().await {
-                let line = mc.cmd.to_line();
-                tracing::info!(target: "maint_hw", role = mc.target.as_str(), "tx: {line}");
-                tokio::time::sleep(std::time::Duration::from_millis(mock.ack_latency_ms)).await;
-                if let Some(reply) = mc.reply {
-                    use rand::Rng;
-                    let fail = rand::thread_rng().gen::<f64>() < mock.fail_rate;
-                    let result = if fail {
-                        hardware::maintenance::HwAckResult::Err { reason: format!("ERR {line}") }
-                    } else {
-                        hardware::maintenance::HwAckResult::Ok { line: format!("OK {line}") }
-                    };
-                    let _ = reply.send(result);
-                }
-            }
+            driver
+                .run(hw_cmd_rx, maint_cmd_rx, event_tx, devices, presence)
+                .await
         });
     }
 
-    // Display server: broadcast to ws clients, plus axum task.
-    let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
+    // Forward state-machine display commands onto the broadcast channel.
     {
         let bcast = display_bcast.clone();
         tokio::spawn(async move { display::forwarder(display_rx, bcast).await });

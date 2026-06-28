@@ -31,6 +31,18 @@ On connect, before anything else, the device announces its role:
 `role → connection` and routes commands to the device that owns each verb. A
 second connection claiming a live role replaces the stale one.
 
+`BYE <reason>` is sent, and the connection closed, when the handshake fails:
+
+| `<reason>` | Cause |
+|---|---|
+| `bad_hello` | First line wasn't `HELLO <role>`, or didn't arrive within the handshake timeout. |
+| `unknown_role` | `<role>` isn't a known role. |
+| `bad_version` | Firmware major is incompatible (reserved; not yet enforced). |
+
+Role tokens are case-sensitive. The canonical spelling is the hyphenated form in
+the table below (`ai-judge`); the host also accepts the underscore form
+(`ai_judge`) it uses internally for the JSON API and calibration filenames.
+
 ### Roles
 
 | Role | Subsystem | Verbs it must accept |
@@ -53,7 +65,7 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | `GAVEL` | gavel | One gavel strike. |
 | `PANEL <pattern>` | ai-judge | Set face/panel animation (see vocab). |
 | `LIGHTS <state>` | *(deferred — no owner)* | Booth lighting. Not currently driven by any device; may return later. |
-| `PING` | any | Keepalive; device replies `PONG`. |
+| `PING` | any | Keepalive; acknowledged with `OK PING`, like any other command. |
 
 ### Vocabularies
 
@@ -82,7 +94,10 @@ Sent any time, not in reply to a command:
 | Line | Meaning |
 |---|---|
 | `BUTTON` | Start trigger (capacitive swear-in object) → begins a trial. |
-| `PONG` | Reply to `PING` (keepalive). |
+
+`PING` is acknowledged with `OK PING` (not a separate `PONG`), so every command
+resolves through the same one-ack-per-command path; the host tolerates a stray
+`PONG` line but devices should ack normally.
 
 There is no hardware e-stop event: emergency stop is driven from the operator
 panel (`/operator/estop`) and backed by physical power shutdowns.
@@ -99,5 +114,6 @@ panel (`/operator/estop`) and backed by physical power shutdowns.
 ## Implementations
 
 - Host: `orchestrator/src/hardware/` (`protocol.rs` serialises commands;
-  `tcp.rs` is the line driver / device registry).
+  `tcp.rs` is the multi-device registry — `HELLO` handshake, per-connection ack
+  matching, per-role routing).
 - Devices: each `firmware/<role>/` project (the turret included, `firmware/turret/`).

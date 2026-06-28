@@ -15,9 +15,15 @@ use tokio::sync::oneshot;
 
 use super::protocol::HardwareCommand;
 
-/// Device roles in the v2 multi-device protocol. The wire names match both the
-/// protocol spec's role table and the per-role calibration filenames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Device roles in the v2 multi-device protocol.
+///
+/// Two spellings coexist on purpose:
+/// - `as_str()` is the `snake_case` form used by the JSON API and the per-role
+///   calibration filenames (`ai_judge`, `gavel`, `turret`).
+/// - `from_wire()` parses the `HELLO <role>` token, accepting the protocol
+///   spec's canonical hyphenated spelling (`ai-judge`) and tolerating the
+///   underscore form so firmware authors can't trip on the separator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     AiJudge,
@@ -26,11 +32,24 @@ pub enum Role {
 }
 
 impl Role {
+    /// `snake_case` name — JSON API + calibration filenames.
     pub fn as_str(&self) -> &'static str {
         match self {
             Role::AiJudge => "ai_judge",
             Role::Gavel => "gavel",
             Role::Turret => "turret",
+        }
+    }
+
+    /// Parse the `HELLO <role>` wire token. Accepts the protocol spec's
+    /// hyphenated `ai-judge` and tolerates `ai_judge`; returns `None` for an
+    /// unknown role (caller replies `BYE unknown_role`).
+    pub fn from_wire(s: &str) -> Option<Role> {
+        match s {
+            "turret" => Some(Role::Turret),
+            "gavel" => Some(Role::Gavel),
+            "ai-judge" | "ai_judge" => Some(Role::AiJudge),
+            _ => None,
         }
     }
 }
