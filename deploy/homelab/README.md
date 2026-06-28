@@ -23,6 +23,7 @@ made persistent and put behind your existing Cloudflare Tunnel.
 | File | Purpose |
 |---|---|
 | `docker-compose.yml` | orchestrator + a Tailscale sidecar; publishes the UI on `127.0.0.1:${HOST_PORT}` (default `26878`) |
+| `docker-compose.editor.yml` | just the crimes-editor — no Tailscale/orchestrator, no secrets (see below) |
 | `config.homelab.toml` | inference → Spark over Tailscale, `hardware.driver = mock` |
 | `.env.example` | the two secrets + node hostname (copy to `.env`) |
 
@@ -69,6 +70,28 @@ Then gate it: Zero Trust → **Access → Applications → Self-hosted** on
 endpoints have no auth of their own, so Access is the gate. WebSockets
 (`/ws`, `/ws/view`) and the HTTPS the tunnel provides (needed for the plea mic's
 secure-context requirement) both work with no extra config.
+
+## Run just the crimes editor
+
+Only want the web crimes editor — curate the list without the booth, no
+Tailscale, no Spark, no secrets? Use the standalone one-service file:
+
+```bash
+cd deploy/homelab
+docker compose -f docker-compose.editor.yml up -d --build
+curl -fsS http://localhost:26879/health   # → ok
+```
+
+It publishes on `127.0.0.1:${EDITOR_HOST_PORT}` (default `26879`) and runs under
+its own project name, isolated from the full stack above. Point a second
+cloudflared public hostname at `localhost:26879` and gate it with Access, exactly
+like the orchestrator.
+
+> `docker compose up crimes-editor` against `docker-compose.yml` does **not**
+> work: Compose interpolates the whole file at load time, so the tailscale
+> service's `${TS_AUTHKEY:?…}` fails even when you only target the editor. Hence
+> the separate file. (No Docker? `cargo run --release -p crimes-editor` also runs
+> it — see [`orchestrator/crates/crimes-editor/README.md`](../../orchestrator/crates/crimes-editor/README.md).)
 
 ## Good to know
 

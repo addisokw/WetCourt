@@ -89,15 +89,28 @@ GET    /health              "ok"
 
 ## Deploy (homelab)
 
-A `crimes-editor` service is wired into `deploy/homelab/docker-compose.yml`,
-behind your existing host cloudflared. It needs **no tailnet/Spark access** — it
-only touches the crimes file. Steps:
+The editor needs **no tailnet/Spark access and no secrets** — it only touches the
+crimes file. Run it standalone with the one-service compose file:
+
+```sh
+cd deploy/homelab
+docker compose -f docker-compose.editor.yml up -d --build
+curl -fsS http://localhost:26879/health   # → ok
+```
+
+> Don't use `docker compose up crimes-editor` against the bundled
+> `docker-compose.yml` — Compose interpolates the whole file at load time, so the
+> tailscale service's mandatory `${TS_AUTHKEY:?…}` fails even though you only
+> asked for the editor. The dedicated `docker-compose.editor.yml` sidesteps that.
+> (No Docker at all? `cargo run --release -p crimes-editor` works too — see
+> *Run it locally* above.)
+
+Then expose it:
 
 1. Point a second cloudflared hostname (e.g. `crimes.example.com`) at
    `http://localhost:${EDITOR_HOST_PORT}` (default `26879`).
 2. Put a **Cloudflare Access** policy in front of that hostname with your
    collaborators' emails — that's your login, no app-level auth to build.
-3. `docker compose up -d --build crimes-editor`.
 
 The service bind-mounts the repo's `crimes/` dir, so every save lands directly in
 the working tree. Commit and push whenever you want to publish; the booth sees

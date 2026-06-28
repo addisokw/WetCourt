@@ -1,0 +1,30 @@
+# Standalone crimes-editor — run JUST the editor, with no tailscale/orchestrator
+# and no env vars required.
+#
+# The bundled docker-compose.yml can't bring up only this service: its tailscale
+# service uses ${TS_AUTHKEY:?...}, and Compose interpolates the WHOLE file at load
+# time, so that mandatory-variable check fails even when you target only
+# crimes-editor (`docker compose up crimes-editor`). This file sidesteps that by
+# defining the editor on its own.
+#
+#   cd deploy/homelab
+#   docker compose -f docker-compose.editor.yml up -d --build
+#   # then open http://localhost:26879  (override port with EDITOR_HOST_PORT)
+#
+# A distinct project name keeps it isolated from the full "homelab" stack, so the
+# two never reconcile/orphan each other's containers.
+
+name: wetcourt-crimes-editor
+
+services:
+  crimes-editor:
+    build:
+      context: ../../orchestrator
+      dockerfile: crates/crimes-editor/Dockerfile
+    ports:
+      - "127.0.0.1:${EDITOR_HOST_PORT:-26879}:8080"
+    volumes:
+      # The real crimes dir — edits land in the repo working tree; commit/push
+      # out-of-band whenever you want to publish them.
+      - ../../orchestrator/crimes:/app/crimes
+    restart: unless-stopped
