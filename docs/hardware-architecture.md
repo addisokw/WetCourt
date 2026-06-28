@@ -109,12 +109,15 @@ operator-console panel (MJPEG/WebRTC). The turret's *firmware*
 1. **Now:** add `protocol/` spec and this doc; **retire the old Rust firmware**
    (`firmware/` removed). ✅
 2. **When the first new board's firmware starts:** create `firmware/<role>/`
-   (e.g. `gavel/`) and add `firmware/README.md` board map.
+   and add `firmware/README.md` board map. ✅ (`firmware/turret/`)
 3. **When the first device connects:** add the `HELLO <role>` handshake + the
    device registry + per-role command routing in `orchestrator/src/hardware/`,
-   and drop the dead `ESTOP` reader branch from `tcp.rs`.
-4. **When the turret lands:** add `firmware/turret/` (firmware) and `vision/`
-   (camera process); wire the vision channel into the operator console.
+   and drop the dead `ESTOP` reader branch from `tcp.rs`. ✅
+   (`tcp.rs` is now the multi-device registry; verified end-to-end against a
+   socket — handshake, presence, calibrated AIM routing, disconnect cleanup.)
+4. **When the turret lands:** add `firmware/turret/` (firmware ✅) and `vision/`
+   (camera process — pending, Phase B); wire the vision channel into the
+   operator console.
 
 Nothing above is big-bang; each step is independent and tied to a real need.
 
