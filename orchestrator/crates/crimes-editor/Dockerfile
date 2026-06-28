@@ -23,8 +23,10 @@ COPY crates ./crates
 # rust-embed reads frontend/dist relative to the editor crate.
 COPY --from=frontend /fe/dist ./crates/crimes-editor/frontend/dist
 # Only the editor and its deps (crimes-core) compile; the booth crate is not in
-# the dependency closure of this bin, so its own frontend/dist is never needed.
-RUN cargo build --release --bin crimes-editor
+# the dependency closure of this package, so its own frontend/dist is never
+# needed. `-p` (not `--bin`) because crimes-editor is a non-root workspace member,
+# which `--bin` doesn't search from the workspace root.
+RUN cargo build --release -p crimes-editor
 
 # --- Runtime ---
 FROM debian:bookworm-slim
