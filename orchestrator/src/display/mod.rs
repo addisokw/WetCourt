@@ -676,6 +676,8 @@ async fn list_crimes(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
 struct AddCrimeReq {
     category: String,
     charge: String,
+    #[serde(default)]
+    subject: Option<String>,
 }
 
 async fn add_crime(
@@ -683,7 +685,7 @@ async fn add_crime(
     Json(body): Json<AddCrimeReq>,
 ) -> impl IntoResponse {
     let mut store = s.crimes.write().await;
-    match store.add(body.category, body.charge) {
+    match store.add(body.category, body.charge, body.subject) {
         Ok(c) => {
             info!(id = c.id, "crime added");
             (StatusCode::CREATED, Json(c.clone())).into_response()

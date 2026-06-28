@@ -26,6 +26,7 @@ export default function CrimesPanel() {
   // add form
   const [newCategory, setNewCategory] = createSignal('');
   const [newCharge, setNewCharge] = createSignal('');
+  const [newSubject, setNewSubject] = createSignal('');
   // list view filter (client-side browsing only; separate from the draw filter)
   const [viewCategory, setViewCategory] = createSignal('');
   // free-text search over the visible list (client-side only)
@@ -64,7 +65,10 @@ export default function CrimesPanel() {
     return crimes().filter(
       (c) =>
         (!viewCategory() || c.category === viewCategory()) &&
-        (!q || c.charge.toLowerCase().includes(q) || c.category.toLowerCase().includes(q))
+        (!q ||
+          c.charge.toLowerCase().includes(q) ||
+          c.category.toLowerCase().includes(q) ||
+          (c.subject ?? '').toLowerCase().includes(q))
     );
   });
 
@@ -154,6 +158,13 @@ export default function CrimesPanel() {
               </datalist>
               <input
                 type="text"
+                class="category-input"
+                placeholder="subject (optional)"
+                value={newSubject()}
+                onInput={(e) => setNewSubject(e.currentTarget.value)}
+              />
+              <input
+                type="text"
                 placeholder="The defendant stands accused of…"
                 value={newCharge()}
                 onInput={(e) => setNewCharge(e.currentTarget.value)}
@@ -162,8 +173,9 @@ export default function CrimesPanel() {
                 disabled={!newCharge() || !newCategory() || !!addErr()}
                 onClick={() =>
                   run('add', async () => {
-                    await addCrime(newCategory().trim(), newCharge().trim());
+                    await addCrime(newCategory().trim(), newCharge().trim(), newSubject());
                     setNewCharge('');
+                    setNewSubject('');
                   })
                 }
               >
@@ -218,6 +230,9 @@ export default function CrimesPanel() {
                           />
                         </label>
                         <span class="crime-cat">{c.category}</span>
+                        <Show when={c.subject}>
+                          <span class="crime-subject">{c.subject}</span>
+                        </Show>
                         <span class="crime-text">{c.charge}</span>
                         <button
                           class="mini"
@@ -250,6 +265,14 @@ export default function CrimesPanel() {
                             list="crime-categories"
                             value={e().category}
                             onInput={(ev) => setEditing({ ...e(), category: ev.currentTarget.value })}
+                          />
+                          <input
+                            type="text"
+                            placeholder="subject (optional)"
+                            value={e().subject ?? ''}
+                            onInput={(ev) =>
+                              setEditing({ ...e(), subject: ev.currentTarget.value || null })
+                            }
                           />
                           <textarea
                             rows={2}

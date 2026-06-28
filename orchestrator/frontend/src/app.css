@@ -692,6 +692,14 @@ button.plea.recording:hover { background: #8b2326; }
   min-width: 8ch;
   text-transform: uppercase;
 }
+.crime-subject {
+  color: #e3b341;
+  font-size: 0.72rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid #3d2c0a;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 .crime-text { flex: 1; color: #c9d1d9; font-size: 0.85rem; }
 .crime-list button.mini {
   padding: 0.1rem 0.45rem;

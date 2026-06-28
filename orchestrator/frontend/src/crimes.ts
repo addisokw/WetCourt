@@ -4,6 +4,8 @@ export interface Crime {
   id: number;
   category: string;
   charge: string;
+  /** Optional tag for who/what the charge is about (e.g. creator name). */
+  subject?: string | null;
   enabled: boolean;
 }
 
@@ -54,11 +56,15 @@ export async function fetchCrimes(): Promise<void> {
   apply((await res.json()) as CrimesResponse);
 }
 
-export async function addCrime(category: string, charge: string): Promise<void> {
+export async function addCrime(
+  category: string,
+  charge: string,
+  subject?: string | null,
+): Promise<void> {
   const res = await fetch('/operator/crimes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ category, charge }),
+    body: JSON.stringify({ category, charge, subject: subject?.trim() || null }),
   });
   if (!res.ok) throw new Error(await asError(res));
   await fetchCrimes();

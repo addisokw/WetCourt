@@ -13,6 +13,11 @@ pub struct Crime {
     pub id: u32,
     pub category: String,
     pub charge: String,
+    /// Optional tag for who/what the charge is about — e.g. the creator's name
+    /// for `category = "creator"` crimes. Keeps the broad category for the draw
+    /// filter while still attributing a charge to a specific subject.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
     #[serde(default = "d_true")]
     pub enabled: bool,
 }
@@ -33,6 +38,12 @@ impl Crime {
         }
         if len > 300 {
             bail!("charge too long: {len} chars (max 300)");
+        }
+        if let Some(s) = &self.subject {
+            let n = s.trim().chars().count();
+            if n < 1 || n > 60 {
+                bail!("subject must be 1-60 chars when present");
+            }
         }
         Ok(())
     }
@@ -119,9 +130,9 @@ impl CrimeStore {
         cats
     }
 
-    pub fn add(&mut self, category: String, charge: String) -> Result<&Crime> {
+    pub fn add(&mut self, category: String, charge: String, subject: Option<String>) -> Result<&Crime> {
         let id = self.crimes.iter().map(|c| c.id).max().unwrap_or(0) + 1;
-        let crime = Crime { id, category, charge, enabled: true };
+        let crime = Crime { id, category, charge, subject, enabled: true };
         crime.validate()?;
         self.crimes.push(crime);
         self.save()?;
@@ -249,6 +260,7 @@ mod tests {
                     id: *id,
                     category: (*cat).into(),
                     charge: (*charge).into(),
+                    subject: None,
                     enabled: true,
                 })
                 .collect(),
@@ -338,7 +350,7 @@ mod tests {
     #[test]
     fn crud_assigns_ids_and_persists() {
         let mut s = store_with(&[(7, "a", C1)]);
-        let id = s.add("b".into(), C2.into()).unwrap().id;
+        let id = s.add("b".into(), C2.into(), None).unwrap().id;
         assert_eq!(id, 8); // max + 1
         s.remove(7).unwrap();
         assert!(s.remove(7).is_err());
@@ -363,7 +375,7 @@ mod tests {
 
     #[test]
     fn validate_bounds() {
-        let mut c = Crime { id: 1, category: "a".into(), charge: C1.into(), enabled: true };
+        let mut c = Crime { id: 1, category: "a".into(), charge: C1.into(), subject: None, enabled: true };
         assert!(c.validate().is_ok());
         c.charge = "too short".into();
         assert!(c.validate().is_err());
