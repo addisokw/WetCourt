@@ -87,11 +87,19 @@ its own project name, isolated from the full stack above. Point a second
 cloudflared public hostname at `localhost:26879` and gate it with Access, exactly
 like the orchestrator.
 
-> `docker compose up crimes-editor` against `docker-compose.yml` does **not**
-> work: Compose interpolates the whole file at load time, so the tailscale
-> service's `${TS_AUTHKEY:?…}` fails even when you only target the editor. Hence
-> the separate file. (No Docker? `cargo run --release -p crimes-editor` also runs
-> it — see [`orchestrator/crates/crimes-editor/README.md`](../../orchestrator/crates/crimes-editor/README.md).)
+Manage it with the **same `-f` flag** (`down`, `logs`, `ps`, `restart`, …):
+
+```bash
+docker compose -f docker-compose.editor.yml logs -f
+docker compose -f docker-compose.editor.yml down
+```
+
+> Every editor command needs `-f docker-compose.editor.yml`. A bare
+> `docker compose up`/`down`/`logs` defaults to `docker-compose.yml` and fails at
+> load time on the tailscale service's `${TS_AUTHKEY:?…}` — Compose interpolates
+> the whole file before it does anything, even for `down`. (No Docker?
+> `cargo run --release -p crimes-editor` also runs the editor — see
+> [`orchestrator/crates/crimes-editor/README.md`](../../orchestrator/crates/crimes-editor/README.md).)
 
 ## Good to know
 
