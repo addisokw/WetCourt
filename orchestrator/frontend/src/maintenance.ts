@@ -12,11 +12,23 @@ export interface ServoCal {
   limit_max_deg: number;
 }
 
+// The gavel's strike geometry (servo µs positions + dwell ms). Mirrors the
+// backend `GavelCal` (src/calibration/mod.rs).
+export interface GavelCal {
+  rest: number;
+  raise: number;
+  strike: number;
+  raise_dwell_ms: number;
+  strike_dwell_ms: number;
+  settle_dwell_ms: number;
+}
+
 export interface Calibration {
   role: string;
   pan?: ServoCal | null;
   tilt?: ServoCal | null;
   fire_presets_ms: number[];
+  gavel?: GavelCal | null;
 }
 
 export interface DeviceInfo {
@@ -36,6 +48,8 @@ export type AckResult =
 export type CmdSpec =
   | { cmd: 'fire'; ms: number }
   | { cmd: 'gavel' }
+  | { cmd: 'gavel_strike'; rest: number; raise: number; strike: number; raise_dwell_ms: number; strike_dwell_ms: number; settle_dwell_ms: number }
+  | { cmd: 'gavel_jog'; us: number }
   | { cmd: 'aim'; pan: number; tilt: number }
   | { cmd: 'panel'; pattern: 'idle' | 'thinking' | 'verdict' }
   | { cmd: 'ping' };

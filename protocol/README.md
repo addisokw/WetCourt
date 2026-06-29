@@ -48,7 +48,7 @@ the table below (`ai-judge`); the host also accepts the underscore form
 | Role | Subsystem | Verbs it must accept |
 |---|---|---|
 | `ai-judge` | LED-matrix face + pan/tilt gaze | `PANEL`, `AIM`, `PING` |
-| `gavel` | servo gavel | `GAVEL`, `PING` |
+| `gavel` | servo gavel | `GAVEL`, `GJOG`, `PING` |
 | `turret` | squirt-gun pan/tilt aim | `AIM`, `PING` |
 | `squirt` | squirt-gun firing relay | `FIRE`, `PING` |
 | `swear-in` *(future)* | capacitive start trigger | `PING` (emits `BUTTON`) |
@@ -67,7 +67,8 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 |---|---|---|
 | `FIRE <ms>` | squirt | Fire the squirt gun for `<ms>` milliseconds. |
 | `AIM <pan> <tilt>` | turret, ai-judge | Point the pan/tilt mech (degrees or device-defined units). |
-| `GAVEL` | gavel | One gavel strike. |
+| `GAVEL [<rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms>]` | gavel | One gavel strike. The host normally sends all six tunables (servo µs positions + dwell ms, from `gavel.toml`) so the firmware stays stateless; a bare `GAVEL` uses the firmware's compiled defaults. |
+| `GJOG <us>` | gavel | Move the gavel servo to a raw pulse-width (µs) and hold — live position preview for console tuning. |
 | `PANEL <pattern>` | ai-judge | Set face/panel animation (see vocab). |
 | `LIGHTS <state>` | *(deferred — no owner)* | Booth lighting. Not currently driven by any device; may return later. |
 | `PING` | any | Keepalive; acknowledged with `OK PING`, like any other command. |

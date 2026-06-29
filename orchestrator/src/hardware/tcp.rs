@@ -259,7 +259,9 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         // board pulls the trigger.
         HardwareCommand::Fire(_) => RouteTarget::Role(Role::Squirt),
         HardwareCommand::Aim { .. } => RouteTarget::Role(Role::Turret),
-        HardwareCommand::Gavel => RouteTarget::Role(Role::Gavel),
+        HardwareCommand::Gavel
+        | HardwareCommand::GavelStrike { .. }
+        | HardwareCommand::GavelJog(_) => RouteTarget::Role(Role::Gavel),
         HardwareCommand::Panel(_) => RouteTarget::Role(Role::AiJudge),
         HardwareCommand::Lights(_) => RouteTarget::Skip,
         HardwareCommand::Ping => RouteTarget::SynthAck,

@@ -1,5 +1,13 @@
 role = "gavel"
 
-# The gavel has no pan/tilt and no FIRE — it only accepts GAVEL. This file
-# exists so the role shows up in the console; add tunables here if the gavel
-# servo ever needs calibration.
+# Strike geometry, tuned live from the Gavel maintenance tab. The host sends all
+# six values on every GAVEL so the firmware stays stateless (like the turret's
+# AIM). Positions are servo pulse-width µs; dwells are ms. Most builds swing the
+# head DOWN to strike (strike < rest < raise) — flip if your linkage is mirrored.
+[gavel]
+rest = 1500
+raise = 2000
+strike = 1100
+raise_dwell_ms = 180
+strike_dwell_ms = 120
+settle_dwell_ms = 160

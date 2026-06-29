@@ -212,7 +212,20 @@ struct CommandReq {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum CmdSpec {
     Fire { ms: u32 },
+    /// Strike using the target role's *saved* `gavel.toml` geometry.
     Gavel,
+    /// Strike using geometry from the request body — the console's "test strike"
+    /// of the current (possibly unsaved) form values.
+    GavelStrike {
+        rest: i32,
+        raise: i32,
+        strike: i32,
+        raise_dwell_ms: u32,
+        strike_dwell_ms: u32,
+        settle_dwell_ms: u32,
+    },
+    /// Jog the gavel servo to a raw pulse-width (µs) for live position preview.
+    GavelJog { us: i32 },
     Aim { pan: f32, tilt: f32 },
     Panel { pattern: String },
     Ping,
@@ -229,7 +242,38 @@ async fn maintenance_command(
     // Build the wire command, applying calibration for AIM (degrees → raw).
     let cmd = match req.spec {
         CmdSpec::Fire { ms } => HardwareCommand::Fire(ms),
-        CmdSpec::Gavel => HardwareCommand::Gavel,
+        CmdSpec::Gavel => {
+            // Plain "Strike" uses the saved geometry; bare GAVEL (firmware
+            // default) if the role has no [gavel] calibration yet.
+            let reg = s.calibration.read().await;
+            match reg.get(req.target.as_str()).and_then(|c| c.gavel.as_ref()) {
+                Some(g) => HardwareCommand::GavelStrike {
+                    rest: g.rest,
+                    raise: g.raise,
+                    strike: g.strike,
+                    raise_dwell_ms: g.raise_dwell_ms,
+                    strike_dwell_ms: g.strike_dwell_ms,
+                    settle_dwell_ms: g.settle_dwell_ms,
+                },
+                None => HardwareCommand::Gavel,
+            }
+        }
+        CmdSpec::GavelStrike {
+            rest,
+            raise,
+            strike,
+            raise_dwell_ms,
+            strike_dwell_ms,
+            settle_dwell_ms,
+        } => HardwareCommand::GavelStrike {
+            rest,
+            raise,
+            strike,
+            raise_dwell_ms,
+            strike_dwell_ms,
+            settle_dwell_ms,
+        },
+        CmdSpec::GavelJog { us } => HardwareCommand::GavelJog(us),
         CmdSpec::Ping => HardwareCommand::Ping,
         CmdSpec::Panel { pattern } => match pattern.as_str() {
             "idle" => HardwareCommand::Panel(PanelPattern::Idle),

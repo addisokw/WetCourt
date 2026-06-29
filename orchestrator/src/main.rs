@@ -134,12 +134,18 @@ async fn main() -> Result<()> {
         let devices = devices.clone();
         let presence = display_bcast.clone();
         let (hw_cmd_tx, hw_cmd_rx) = mpsc::channel::<hardware::HardwareCommand>(32);
-        // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver,
-        // applying the vision eye-safety gate to the trial FIRE on the way.
+        // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver.
+        // Two policy edges live here, both keeping policy out of the FSM:
+        //  - the vision eye-safety gate on the trial FIRE, and
+        //  - the gavel calibration edge — the FSM emits a bare `Gavel` and we
+        //    resolve its geometry from `gavel.toml` into a `GavelStrike` so real
+        //    verdict strikes honour the console-tuned values (mirroring how the
+        //    maintenance handler resolves AIM degrees→raw at its own edge).
         let gate_armed = targeting_armed.clone();
         let gate = vision_gate.clone();
         let gate_event_tx = event_tx.clone();
         let gate_bcast = display_bcast.clone();
+        let calibration_for_adapter = calibration.clone();
         tokio::spawn(async move {
             use hardware::HardwareCommand;
             let mut hardware_rx = hardware_rx;
@@ -166,6 +172,25 @@ async fn main() -> Result<()> {
                         .await;
                     continue;
                 }
+                // Gavel calibration edge: resolve the bare `Gavel` into a
+                // `GavelStrike` from gavel.toml (firmware default if uncalibrated).
+                let hc = match hc {
+                    HardwareCommand::Gavel => {
+                        let reg = calibration_for_adapter.read().await;
+                        match reg.get("gavel").and_then(|c| c.gavel.as_ref()) {
+                            Some(g) => HardwareCommand::GavelStrike {
+                                rest: g.rest,
+                                raise: g.raise,
+                                strike: g.strike,
+                                raise_dwell_ms: g.raise_dwell_ms,
+                                strike_dwell_ms: g.strike_dwell_ms,
+                                settle_dwell_ms: g.settle_dwell_ms,
+                            },
+                            None => HardwareCommand::Gavel,
+                        }
+                    }
+                    other => other,
+                };
                 if hw_cmd_tx.send(hc).await.is_err() {
                     break;
                 }
