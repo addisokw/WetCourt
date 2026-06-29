@@ -4,7 +4,7 @@ Working notes for the squirt-gun turret and its vision targeting. Captures what'
 done and the detailed design for what's next, so work can resume without
 re-deriving it.
 
-## Where things are (2026-06-29)
+## Where things are (2026-06-29, m4b done)
 
 **Phase A — hardware (done, on `main`).**
 - `firmware/turret/` (NanoC6 + 8-Servos, `AIM`) and `firmware/squirt/` (NanoC6 +
@@ -31,38 +31,33 @@ re-deriving it.
   shows the zone + `FIRE OK`/`NO FIRE`. Endpoints `/vision/confirm_head`,
   fields `fire_ok`/`eye_zone`/`eye_clear`/`head_confirm` in `/state`.
 
-## Next: m4b — fire on a guilty verdict, gated by `fire_ok`
+## m4b — fire on a guilty verdict, gated by `fire_ok` (done, on `main`)
 
-Wire the squirt to actually fire, safely. The FSM already fires on guilty
-(`sentence_commands()` in `orchestrator/src/state_machine/transitions.rs` emits
-`HardwareCommand::Fire` → registry routes to the `squirt` role). m4b gates that.
+The squirt fires on a guilty verdict, eye-safety-gated. As built:
+1. **Vision reports `fire_ok` (+ `locked`) on the aim POST body** (`/vision/aim`,
+   ~15 Hz), only while actively tracking (target set + person detected).
+2. **`VisionFireGate`** (`orchestrator/src/hardware/gate.rs`) stores the latest
+   `fire_ok` + a process-monotonic `now_ms()` timestamp; `fire_allowed(armed)`
+   is the fail-safe decision — transparent when disarmed, else requires a fresh
+   (`<= FIRE_OK_STALE_MS`, 300 ms) true `fire_ok`. Pure `decide()` helper is
+   unit-tested (armed/disarmed × fresh/stale × ok/not). The aim handler calls
+   `record()` on *every* frame (even disarmed) so the gate is fresh the instant
+   the operator arms.
+3. **Gate chokepoint = the `Command::Hardware` adapter in `main.rs`.** A trial
+   `Fire` while armed + not-allowed is **suppressed on the wire but a
+   `HardwareAck` is synthesized** so `ExecutingSentence` advances (never stalls —
+   mirrors absent-role handling), and a `DisplayEvent::FireHeld` is broadcast.
+   Disarmed ⇒ fire as today (operator owns aim).
+4. **Console:** amber "Shot held for safety" banner on the operator tab
+   (`App.tsx`, `fire_held` event → `fireHeldReason` signal, cleared at idle).
+5. **Tests:** gate logic covered by `gate.rs` unit tests (`cargo test -p booth`,
+   now 45). End-to-end fire on the real squirt board is hardware-only.
 
-Design:
-1. **Vision reports `fire_ok` to the orchestrator continuously.** Easiest: add
-   `fire_ok` (and `locked`) to the existing aim POST body (`/vision/aim`,
-   ~15 Hz). The orchestrator stores it in a shared `Arc<AtomicBool>` +
-   last-update `Instant` (treat stale > ~300 ms as not-ok). Vision only POSTs aim
-   when a target is set + a person is detected, so "no recent update" ⇒ not safe.
-2. **Gate the trial `Fire`.** Chokepoint: the `Command::Hardware → HardwareCommand`
-   adapter in `orchestrator/src/main.rs` (or `role_for`/router in `tcp.rs`).
-   Rule: **if `targeting_armed`**, only forward `Fire` to the squirt when the
-   stored `fire_ok` is fresh + true; otherwise **suppress the wire send but
-   synthesize a `HardwareAck`** so `ExecutingSentence` still advances (mirrors the
-   existing absent-role handling — never stall the trial). **If not armed**, fire
-   as today (legacy; operator owns aim). Log/display the suppression reason.
-3. **AppState** gains `vision_fire_ok: Arc<AtomicBool>` (+ a timestamp, e.g.
-   `Arc<AtomicU64>` ms). Plumb the gate state into whichever task routes `Fire`.
-4. **Console:** the Vision panel already shows `fire_ok`; add a small indicator
-   on the operator tab that a shot was **held for safety** when it happens.
-5. **Verify:** mock a guilty verdict with targeting armed + `fire_ok` toggled —
-   confirm the squirt only fires when `fire_ok`, and the FSM advances either way
-   (no 60 s stall). Socket test like the m3 relay test (fake squirt board).
-
-Risks/notes: keep the gate fail-safe (stale/unknown ⇒ no fire when armed). The
+Fail-safe invariant: stale/unknown/false `fire_ok` ⇒ **no fire** when armed. The
 turret only does `AIM`; the squirt only does `FIRE` — no role conflict between
 vision aiming and the FSM firing.
 
-## After m4b — Phase C (vision as a trial asset)
+## Next: Phase C (vision as a trial asset)
 
 - **Firing still for the printed report:** on `FIRE`, the orchestrator calls a
   vision `GRAB` to capture the annotated still (defendant + crosshair) for the
@@ -86,5 +81,5 @@ vision aiming and the FSM firing.
 - Orchestrator: `cargo run -- --config config.dev.toml` (or the homelab compose).
 - After frontend changes: `cd orchestrator/frontend && npm run build`, restart
   the orchestrator (debug serves `frontend/dist` from disk; release embeds it).
-- Tests: `cargo test -p booth` (39). The turret registry was verified end-to-end
+- Tests: `cargo test -p booth` (45). The turret registry was verified end-to-end
   against a fake-device socket; loop dynamics + servo/relay are hardware-only.

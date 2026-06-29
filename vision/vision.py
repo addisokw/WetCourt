@@ -149,15 +149,18 @@ def detect_loop(cfg):
     session = requests.Session()
     last_send = [0.0]
 
-    def send_aim(pan, tilt):
+    def send_aim(pan, tilt, fire_ok, locked):
         now = time.time()
         if now - last_send[0] < cfg.send_interval:
             return
         last_send[0] = now
         try:
+            # fire_ok rides the aim stream so the orchestrator can gate the trial
+            # FIRE on a *fresh* safety verdict (m4b). Because we only post while
+            # actively tracking, a stale value at the orchestrator means no fire.
             session.post(
                 f"{cfg.orchestrator.rstrip('/')}/vision/aim",
-                json={"pan": pan, "tilt": tilt},
+                json={"pan": pan, "tilt": tilt, "fire_ok": fire_ok, "locked": locked},
                 timeout=0.3,
             )
         except Exception:
@@ -199,7 +202,8 @@ def detect_loop(cfg):
         state["gains"] = {"pan": gp, "tilt": gt, "tolerance": tol}
         locked = False
         tp = (state.get("targets") or {}).get(part) if part != "none" else None
-        if tp and state.get("person"):
+        tracking = bool(tp and state.get("person"))
+        if tracking:
             ex, ey = tp[0] - bs[0], tp[1] - bs[1]
             step_pan = _clamp(gp * ex, -_MAX_STEP_DEG, _MAX_STEP_DEG)
             step_tilt = _clamp(gt * ey, -_MAX_STEP_DEG, _MAX_STEP_DEG)
@@ -208,7 +212,6 @@ def detect_loop(cfg):
             locked = abs(ex) <= tol and abs(ey) <= tol
             with _tlock:
                 _aim["pan"], _aim["tilt"] = aim_pan, aim_tilt
-            send_aim(aim_pan, aim_tilt)
         state["aim"] = {"pan": round(aim_pan, 1), "tilt": round(aim_tilt, 1)}
         state["locked"] = locked
 
@@ -229,6 +232,12 @@ def detect_loop(cfg):
         state["eye_clear"] = eye_clear
         state["head_confirm"] = head_confirm
         state["fire_ok"] = fire_ok
+
+        # Stream aim + the safety verdict to the orchestrator (relayed to the
+        # turret only while armed; fire_ok gates the trial FIRE). Sent only while
+        # actively tracking, so a stale value at the orchestrator ⇒ no fire.
+        if tracking:
+            send_aim(aim_pan, aim_tilt, fire_ok, locked)
 
         # Boresight marker (where the gun points) + the aim vector to the target.
         cv2.drawMarker(frame, (int(bs[0]), int(bs[1])), (0, 255, 255),

@@ -41,6 +41,10 @@ export const [phaseDeadlineLabel, setPhaseDeadlineLabel] = createSignal<string>(
 // events — independent of any state. Drives the pad (operator audio) and
 // the dim/pulse visuals on every view.
 export const [theaterActive, setTheaterActive] = createSignal<boolean>(false);
+// Eye-safety: set when the orchestrator suppresses a guilty-verdict FIRE because
+// vision targeting was armed without a fresh fire_ok (m4b). Surfaced as an
+// operator banner; cleared at idle/reset when the next trial begins.
+export const [fireHeldReason, setFireHeldReason] = createSignal<string>('');
 
 // TTS robot/glitch effect state now lives in robotSettings.ts (local to this
 // browser's audio; seeded into the graph at startup via index.tsx).
@@ -146,6 +150,7 @@ function handleEvent(ev: DisplayEvent) {
       setPleaRecordingActive(false);
       setPhaseDeadlineAt(0);
       setPhaseDeadlineLabel('');
+      setFireHeldReason('');
       if (theaterActive()) {
         setTheaterActive(false);
         if (!readOnly) stopTheater();
@@ -212,6 +217,9 @@ function handleEvent(ev: DisplayEvent) {
     // ---- Maintenance / hardware test plane ----
     case 'maintenance':
       setMaintenanceActive(Boolean(ev.active));
+      break;
+    case 'fire_held':
+      setFireHeldReason(String(ev.reason ?? 'held for safety'));
       break;
     case 'device_connected':
       onDeviceConnected(String(ev.role ?? ''), String(ev.addr ?? ''));

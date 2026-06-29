@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{atomic::{AtomicBool, AtomicUsize}, Arc};
+use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
 
 use anyhow::Result;
 use clap::Parser;
@@ -116,6 +116,15 @@ async fn main() -> Result<()> {
         mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
     let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
+    // Vision targeting arm switch + eye-safety fire gate (m4b), shared between
+    // the HTTP layer (AppState) and the hardware adapter below. `targeting_armed`
+    // gates whether vision drives the turret; `vision_gate` holds the latest
+    // `fire_ok` so a trial FIRE is suppressed when armed without a fresh verdict.
+    let targeting_armed = Arc::new(AtomicBool::new(false));
+    let vision_gate = Arc::new(hardware::gate::VisionFireGate::new(
+        hardware::gate::FIRE_OK_STALE_MS,
+    ));
+
     // Hardware driver (mock or tcp registry). Owns both command sources — the
     // trial state machine (via the Command::Hardware adapter) and the
     // maintenance console — plus the device snapshot and presence broadcast.
@@ -125,14 +134,40 @@ async fn main() -> Result<()> {
         let devices = devices.clone();
         let presence = display_bcast.clone();
         let (hw_cmd_tx, hw_cmd_rx) = mpsc::channel::<hardware::HardwareCommand>(32);
-        // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver.
+        // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver,
+        // applying the vision eye-safety gate to the trial FIRE on the way.
+        let gate_armed = targeting_armed.clone();
+        let gate = vision_gate.clone();
+        let gate_event_tx = event_tx.clone();
+        let gate_bcast = display_bcast.clone();
         tokio::spawn(async move {
+            use hardware::HardwareCommand;
             let mut hardware_rx = hardware_rx;
             while let Some(cmd) = hardware_rx.recv().await {
-                if let state_machine::Command::Hardware(hc) = cmd {
-                    if hw_cmd_tx.send(hc).await.is_err() {
-                        break;
-                    }
+                let state_machine::Command::Hardware(hc) = cmd else { continue };
+                // Eye-safety: while targeting is armed, a trial FIRE only reaches
+                // the squirt on a fresh `fire_ok`. Otherwise suppress the wire
+                // send but synthesize an ack so `ExecutingSentence` still advances
+                // (mirrors the absent-role handling — never stall the trial), and
+                // tell the console the shot was held.
+                if matches!(hc, HardwareCommand::Fire(_))
+                    && !gate.fire_allowed(gate_armed.load(Ordering::Relaxed))
+                {
+                    tracing::warn!("vision gate: holding trial FIRE (armed, no fresh fire_ok)");
+                    let _ = gate_bcast.send(DisplayMessage::Json(
+                        display::events::DisplayEvent::FireHeld {
+                            reason: "no fresh fire_ok".into(),
+                        },
+                    ));
+                    let _ = gate_event_tx
+                        .send(state_machine::Event::HardwareAck(
+                            "OK FIRE held_for_safety".into(),
+                        ))
+                        .await;
+                    continue;
+                }
+                if hw_cmd_tx.send(hc).await.is_err() {
+                    break;
                 }
             }
         });
@@ -181,7 +216,8 @@ async fn main() -> Result<()> {
         devices,
         vision_base_url: cfg.vision.base_url.clone(),
         vision_http,
-        targeting_armed: Arc::new(AtomicBool::new(false)),
+        targeting_armed,
+        vision_gate,
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;

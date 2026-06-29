@@ -81,6 +81,11 @@ pub struct AppState {
     /// this is set. Disarmed = the gun never moves from vision, even though
     /// vision keeps tracking. Operator-toggled via `/vision/arm`.
     pub targeting_armed: Arc<AtomicBool>,
+    /// Eye-safety fire gate (m4b). Vision reports `fire_ok` on each aim POST;
+    /// this stores the latest verdict so the trial `FIRE` path can require a
+    /// fresh `fire_ok` while targeting is armed. Shared with the hardware
+    /// adapter task in `main.rs`.
+    pub vision_gate: Arc<crate::hardware::gate::VisionFireGate>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -330,9 +335,22 @@ async fn vision_state(AxumState(s): AxumState<AppState>) -> Response {
 struct AimMsg {
     pan: f32,
     tilt: f32,
+    /// Eye-safety verdict for this frame (m4b). Optional so an older vision
+    /// build that omits it reads as not-ok — fail-safe.
+    #[serde(default)]
+    fire_ok: bool,
+    /// On-target flag (informational; `fire_ok` already subsumes lock). Accepted
+    /// for forward-compat with the vision aim body; not gated on directly.
+    #[serde(default)]
+    #[allow(dead_code)]
+    locked: bool,
 }
 
 async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) -> StatusCode {
+    // Record the safety verdict on every frame, even while disarmed, so the
+    // trial FIRE gate has a fresh value the instant the operator arms.
+    s.vision_gate.record(aim.fire_ok);
+
     if !s.targeting_armed.load(Ordering::Relaxed) {
         return StatusCode::NO_CONTENT; // disarmed: don't move the gun
     }

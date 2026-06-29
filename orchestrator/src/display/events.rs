@@ -45,6 +45,10 @@ pub enum DisplayEvent {
     /// Maintenance mode entered/left — confirms the FSM transition to the
     /// console (whose direct-control tabs gate on it).
     Maintenance { active: bool },
+    /// A trial `FIRE` was suppressed by the vision eye-safety gate (targeting was
+    /// armed but vision had no fresh `fire_ok`). The trial still advances; this
+    /// is operator feedback that the shot was *held*, not silently dropped.
+    FireHeld { reason: String },
     /// The active persona's robot voice-effect params. Pushed to each audio
     /// client on connect and broadcast whenever the active persona changes or
     /// its robot settings are edited, so playback colour follows the persona.

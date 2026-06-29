@@ -7,6 +7,7 @@ import {
   emergencyStop,
   endPlea,
   fetchCrossExam,
+  fireHeldReason,
   log,
   phaseDeadlineAt,
   phaseDeadlineLabel,
@@ -92,6 +93,12 @@ export default function App() {
       <Show when={recording()}>
         <div class="recording-banner">
           <span class="dot" /> Recording — speak your plea, click Stop or press P when done.
+        </div>
+      </Show>
+      <Show when={fireHeldReason()}>
+        <div class="fire-held-banner">
+          <span class="dot" /> Shot held for safety — vision was armed without a fresh fire_ok
+          ({fireHeldReason()}). The sentence advanced without firing.
         </div>
       </Show>
       <section class="monitors">
