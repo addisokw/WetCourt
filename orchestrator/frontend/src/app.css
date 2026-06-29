@@ -151,6 +151,26 @@ button.plea.recording:hover { background: #8b2326; }
   display: inline-block;
 }
 
+/* Superseded: another operator console took over this /ws session. This tab is
+   dormant until the operator clicks "Take control here". */
+.superseded-banner {
+  background: #161b22;
+  color: #8b949e;
+  padding: 0.6rem 2rem;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+}
+.superseded-banner .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8b949e;
+  display: inline-block;
+}
+
 .judge-face {
   padding: 1rem 2rem;
   display: flex;

@@ -6,6 +6,11 @@ import { applyRobotParamsToGraph } from './robotParams';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
+// Close code the server sends to an operator socket that a newer console has
+// superseded (must match WS_SUPERSEDED in display/mod.rs). On this code the
+// client goes dormant instead of auto-reconnecting.
+const WS_SUPERSEDED = 4000;
+
 export interface LogEntry {
   ts: number;
   ev: DisplayEvent | { type: string; binary_bytes: number };
@@ -125,7 +130,15 @@ export function connect(opts: { readOnly?: boolean } = {}) {
     }
   };
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
+    // The server closes an operator socket with WS_SUPERSEDED when a newer
+    // console connects (last-connection-wins). Go dormant rather than
+    // reconnecting — otherwise two open consoles evict each other forever.
+    // Reload (or call connect()) to reclaim control in this tab.
+    if (event.code === WS_SUPERSEDED) {
+      setCurrentState('superseded');
+      return;
+    }
     setCurrentState('reconnecting');
     setTimeout(() => connect({ readOnly }), reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 8000);
@@ -289,6 +302,14 @@ export async function setCrossExam(enabled: boolean): Promise<void> {
   } catch {
     await fetchCrossExam();
   }
+}
+
+/// Reclaim control in this tab after being superseded by another console.
+/// Reconnecting bumps the server generation, so this tab becomes the live one
+/// and the other goes dormant.
+export function reconnect() {
+  reconnectDelay = 500;
+  connect({ readOnly });
 }
 
 export async function startTrial() {

@@ -4,7 +4,7 @@ use std::time::Duration;
 use axum::{
     body::Body,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
         Path, State as AxumState,
     },
     http::StatusCode,
@@ -31,6 +31,12 @@ pub mod assets;
 pub mod events;
 
 use events::{ClientEvent, DisplayEvent};
+
+/// Application close code sent to an operator `/ws` session that a newer client
+/// has superseded. The frontend treats this code as "go dormant" (don't
+/// auto-reconnect), so two consoles can't supersede each other indefinitely.
+/// Application-reserved range is 4000–4999.
+const WS_SUPERSEDED: u16 = 4000;
 
 /// What the orchestrator pushes down the WebSocket. The display task fans these
 /// out to whichever client is currently connected.
@@ -596,6 +602,16 @@ async fn ws_session(mut socket: WebSocket, state: AppState, my_gen: usize) {
             _ = supersede_check.tick() => {
                 if state.ws_generation.load(Ordering::SeqCst) != my_gen {
                     info!("ws superseded by a newer client");
+                    // Tell the displaced client *why* it's closing so it stays
+                    // dormant instead of auto-reconnecting — otherwise two open
+                    // operator consoles supersede each other forever (each
+                    // reconnect bumps the generation and evicts the other).
+                    let _ = socket
+                        .send(Message::Close(Some(CloseFrame {
+                            code: WS_SUPERSEDED,
+                            reason: "superseded".into(),
+                        })))
+                        .await;
                     break;
                 }
             }
