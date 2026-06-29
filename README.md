@@ -35,6 +35,9 @@ Each subproject has its own README for ops details:
 - [`docs/hardware-architecture.md`](docs/hardware-architecture.md) — the
   hardware fleet plan (firmware per board, device protocol, vision) and
   [`protocol/`](protocol/README.md) — the device wire spec.
+- [`docs/thermal-printer.md`](docs/thermal-printer.md) — the keepsake transcript
+  printed for defendants: architecture, casebook trial log, config, and how to
+  continue the work (M3 blast photo).
 
 ## Quick start
 
