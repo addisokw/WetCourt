@@ -1,13 +1,9 @@
 role = "gavel"
 
-# Strike geometry, tuned live from the Gavel maintenance tab. The host sends all
-# six values on every GAVEL so the firmware stays stateless (like the turret's
-# AIM). Positions are servo pulse-width µs; dwells are ms. Most builds swing the
-# head DOWN to strike (strike < rest < raise) — flip if your linkage is mirrored.
 [gavel]
-rest = 1500
-raise = 2000
-strike = 1100
-raise_dwell_ms = 180
-strike_dwell_ms = 120
-settle_dwell_ms = 160
+rest = 1800
+raise = 1100
+strike = 1950
+raise_dwell_ms = 1000
+strike_dwell_ms = 1000
+settle_dwell_ms = 1000
