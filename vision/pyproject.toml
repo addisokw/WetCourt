@@ -1,0 +1,17 @@
+[project]
+name = "wetcourt-vision"
+version = "0.1.0"
+description = "Wet Court turret vision — sensing + feed"
+requires-python = ">=3.10"
+# MediaPipe ships CPU wheels for Windows x86_64 and Linux aarch64 (the Spark),
+# so no GPU is required.
+dependencies = [
+    "opencv-python>=4.8",
+    "mediapipe>=0.10",
+    "flask>=3.0",
+    "numpy>=1.24",
+]
+
+[tool.uv]
+# An application, not a library — don't try to build/install this project itself.
+package = false
