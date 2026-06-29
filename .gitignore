@@ -1,0 +1,11 @@
+# Rust build output
+/target
+
+# Local printer config (generate your own with `tp config`)
+/tp.conf
+
+# Test images / scratch output
+*.jpg
+*.jpeg
+*.png
+*.bin
