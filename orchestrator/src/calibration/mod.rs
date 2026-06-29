@@ -65,8 +65,60 @@ impl ServoCal {
     }
 }
 
+/// The gavel's strike geometry. The host sends all six values on every `GAVEL`
+/// so the firmware stays stateless: three servo positions (pulse-width µs) for
+/// the rap — `rest` → `raise` → `strike` → `rest` — plus the per-move dwell (ms)
+/// that lets each move physically arrive before the next.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GavelCal {
+    /// Idle position (servo µs).
+    pub rest: i32,
+    /// Wind-up position (servo µs).
+    pub raise: i32,
+    /// Strike position — where the head bangs the block (servo µs).
+    pub strike: i32,
+    /// Dwell after the wind-up (ms).
+    pub raise_dwell_ms: u32,
+    /// Dwell after the strike — the bang (ms).
+    pub strike_dwell_ms: u32,
+    /// Dwell on the return to rest before acking (ms).
+    pub settle_dwell_ms: u32,
+}
+
+impl GavelCal {
+    /// Plausible servo pulse-width window (µs). The firmware clamps to its own
+    /// hard range too; this just rejects nonsense in the console.
+    const US_MIN: i32 = 400;
+    const US_MAX: i32 = 2600;
+    /// No single dwell should exceed this (ms) — a slow servo is ~1s of travel.
+    const DWELL_MAX_MS: u32 = 5000;
+
+    fn validate(&self) -> Result<()> {
+        for (name, us) in [("rest", self.rest), ("raise", self.raise), ("strike", self.strike)] {
+            if us < Self::US_MIN || us > Self::US_MAX {
+                bail!(
+                    "gavel.{name} ({us}) must be within [{}, {}] µs",
+                    Self::US_MIN,
+                    Self::US_MAX
+                );
+            }
+        }
+        for (name, ms) in [
+            ("raise_dwell_ms", self.raise_dwell_ms),
+            ("strike_dwell_ms", self.strike_dwell_ms),
+            ("settle_dwell_ms", self.settle_dwell_ms),
+        ] {
+            if ms > Self::DWELL_MAX_MS {
+                bail!("gavel.{name} ({ms}) must be ≤ {} ms", Self::DWELL_MAX_MS);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// All calibration for one device role. Axes are optional (the gavel has none),
-/// `fire_presets_ms` is the turret's quick-fire button durations.
+/// `fire_presets_ms` is the turret's quick-fire button durations, `gavel` is the
+/// gavel's strike geometry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Calibration {
     pub role: String,
@@ -76,6 +128,8 @@ pub struct Calibration {
     pub tilt: Option<ServoCal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fire_presets_ms: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gavel: Option<GavelCal>,
 }
 
 static ROLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -97,6 +151,9 @@ impl Calibration {
         }
         if self.fire_presets_ms.iter().any(|&ms| ms == 0) {
             bail!("fire_presets_ms must all be > 0");
+        }
+        if let Some(g) = &self.gavel {
+            g.validate()?;
         }
         Ok(())
     }
@@ -211,6 +268,18 @@ mod tests {
             pan: Some(pan_cal()),
             tilt: Some(pan_cal()),
             fire_presets_ms: vec![60, 150, 280],
+            gavel: None,
+        }
+    }
+
+    fn gavel_cal() -> GavelCal {
+        GavelCal {
+            rest: 1500,
+            raise: 2000,
+            strike: 1100,
+            raise_dwell_ms: 180,
+            strike_dwell_ms: 120,
+            settle_dwell_ms: 160,
         }
     }
 
@@ -251,8 +320,38 @@ mod tests {
             pan: None,
             tilt: None,
             fire_presets_ms: vec![],
+            gavel: Some(gavel_cal()),
         };
         assert!(gavel.aim_to_raw(0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn gavel_cal_roundtrips_through_toml() {
+        let cal = Calibration {
+            role: "gavel".into(),
+            pan: None,
+            tilt: None,
+            fire_presets_ms: vec![],
+            gavel: Some(gavel_cal()),
+        };
+        let text = toml::to_string_pretty(&cal).unwrap();
+        let back: Calibration = toml::from_str(&text).unwrap();
+        assert_eq!(back, cal);
+        assert!(back.validate().is_ok());
+    }
+
+    #[test]
+    fn gavel_cal_rejects_out_of_range_position() {
+        let mut g = gavel_cal();
+        g.strike = 50; // below the µs window
+        assert!(g.validate().is_err());
+    }
+
+    #[test]
+    fn gavel_cal_rejects_absurd_dwell() {
+        let mut g = gavel_cal();
+        g.raise_dwell_ms = 60_000;
+        assert!(g.validate().is_err());
     }
 
     #[test]

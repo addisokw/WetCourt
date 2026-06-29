@@ -131,6 +131,46 @@ button.plea.recording:hover { background: #8b2326; }
   50% { opacity: 0.3; }
 }
 
+/* Eye-safety hold (m4b): a guilty FIRE was suppressed because vision was armed
+   without a fresh fire_ok. Amber, distinct from the red recording banner. */
+.fire-held-banner {
+  background: #211c11;
+  color: #e3b341;
+  padding: 0.6rem 2rem;
+  border-bottom: 1px solid #bb8009;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+.fire-held-banner .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e3b341;
+  display: inline-block;
+}
+
+/* Superseded: another operator console took over this /ws session. This tab is
+   dormant until the operator clicks "Take control here". */
+.superseded-banner {
+  background: #161b22;
+  color: #8b949e;
+  padding: 0.6rem 2rem;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+}
+.superseded-banner .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8b949e;
+  display: inline-block;
+}
+
 .judge-face {
   padding: 1rem 2rem;
   display: flex;
@@ -723,6 +763,63 @@ button.plea.recording:hover { background: #8b2326; }
   padding: 0.2rem 0;
 }
 .crime-edit textarea { resize: vertical; }
+
+/* ---- Vision panel ---- */
+.vision-feed { position: relative; display: inline-block; max-width: 100%; }
+.vision-feed img {
+  display: block;
+  max-width: 100%;
+  min-width: 320px;
+  min-height: 240px;
+  background: #0b0f14;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+}
+.vision-offline {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-align: center;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid #30363d;
+  border-radius: 4px;
+}
+.vision-offline code { color: #79c0ff; }
+.vision-state { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.vision-state b { color: #79c0ff; }
+.vision-state b.locked { color: #56d364; }
+.vision-state b.nofire { color: #f85149; }
+.vision-feed.crosshair img { cursor: crosshair; }
+.vision-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.vision-row > label {
+  color: #8b949e; font-size: 0.78rem; min-width: 7ch;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.vision-armed {
+  color: #f85149; font-weight: bold; letter-spacing: 0.06em;
+  border: 1px solid #6e1b1b; background: #2d0f0f;
+  padding: 0.05rem 0.45rem; border-radius: 3px; font-size: 0.78rem;
+}
+.panel-card button.mini {
+  padding: 0.25rem 0.6rem; font-size: 0.85rem; cursor: pointer;
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px;
+}
+.panel-card button.mini:hover { border-color: #58a6ff; }
+.panel-card button.mini.active { background: rgba(31, 111, 235, 0.2); border-color: #58a6ff; color: #fff; }
+.arm-btn {
+  padding: 0.35rem 0.9rem; border-radius: 4px; cursor: pointer;
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+}
+.arm-btn.armed { background: #6e1b1b; border-color: #f85149; color: #ffa198; }
+.gain-input {
+  width: 5.5rem; background: #0d1117; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 4px; padding: 0.2rem 0.4rem;
+  font: inherit; font-variant-numeric: tabular-nums;
+}
 
 /* ============ Maintenance / hardware test console ============ */
 .shell {

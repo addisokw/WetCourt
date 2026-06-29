@@ -14,7 +14,7 @@ spec.
 | Turret aim | M5Stack NanoC6 (esp32c6) + 8-Servos | `AIM`, `PING` | [`turret/`](turret/) | **in progress** |
 | Squirt fire | M5Stack NanoC6 (esp32c6) + relay | `FIRE`, `PING` | [`squirt/`](squirt/) | **in progress** |
 | AI judge (face + gaze) | Adafruit Matrix Portal M4 (SAMD51) | `PANEL`, gaze `AIM` | `ai-judge/` | planned |
-| Gavel | M5Stack NanoC6 (esp32c6) | `GAVEL` | `gavel/` | planned |
+| Gavel | M5Stack NanoC6 (esp32c6) + 8-Servos | `GAVEL`, `GJOG`, `PING` | [`gavel/`](gavel/) | **in progress** |
 | Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `swear-in/` | future |
 
 The turret's **aim** and **fire** are two separate NanoC6 boards: the servo board

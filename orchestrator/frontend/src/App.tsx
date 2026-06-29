@@ -3,10 +3,12 @@ import {
   beginPlea,
   connect,
   currentState,
+  reconnect,
   deliberation,
   emergencyStop,
   endPlea,
   fetchCrossExam,
+  fireHeldReason,
   log,
   phaseDeadlineAt,
   phaseDeadlineLabel,
@@ -92,6 +94,18 @@ export default function App() {
       <Show when={recording()}>
         <div class="recording-banner">
           <span class="dot" /> Recording — speak your plea, click Stop or press P when done.
+        </div>
+      </Show>
+      <Show when={fireHeldReason()}>
+        <div class="fire-held-banner">
+          <span class="dot" /> Shot held for safety — vision was armed without a fresh fire_ok
+          ({fireHeldReason()}). The sentence advanced without firing.
+        </div>
+      </Show>
+      <Show when={currentState() === 'superseded'}>
+        <div class="superseded-banner">
+          <span class="dot" /> This console was taken over by another operator window.
+          <button class="mini" onClick={reconnect}>Take control here</button>
         </div>
       </Show>
       <section class="monitors">

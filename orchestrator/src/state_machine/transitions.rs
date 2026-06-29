@@ -472,6 +472,7 @@ mod tests {
             default_persona_id: "wettington".into(),
             crimes: CrimesConfig::default(),
             printer: PrinterConfig::default(),
+            vision: VisionConfig::default(),
         }
     }
 

@@ -7,6 +7,7 @@ use crate::config::{HardwareConfig, MockHwConfig};
 use crate::display::DisplayMessage;
 use crate::state_machine::Event;
 
+pub mod gate;
 pub mod maintenance;
 pub mod mock;
 pub mod protocol;

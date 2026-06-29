@@ -6,6 +6,11 @@ import { applyRobotParamsToGraph } from './robotParams';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
 
+// Close code the server sends to an operator socket that a newer console has
+// superseded (must match WS_SUPERSEDED in display/mod.rs). On this code the
+// client goes dormant instead of auto-reconnecting.
+const WS_SUPERSEDED = 4000;
+
 export interface LogEntry {
   ts: number;
   ev: DisplayEvent | { type: string; binary_bytes: number };
@@ -41,6 +46,10 @@ export const [phaseDeadlineLabel, setPhaseDeadlineLabel] = createSignal<string>(
 // events — independent of any state. Drives the pad (operator audio) and
 // the dim/pulse visuals on every view.
 export const [theaterActive, setTheaterActive] = createSignal<boolean>(false);
+// Eye-safety: set when the orchestrator suppresses a guilty-verdict FIRE because
+// vision targeting was armed without a fresh fire_ok (m4b). Surfaced as an
+// operator banner; cleared at idle/reset when the next trial begins.
+export const [fireHeldReason, setFireHeldReason] = createSignal<string>('');
 
 // TTS robot/glitch effect state now lives in robotSettings.ts (local to this
 // browser's audio; seeded into the graph at startup via index.tsx).
@@ -121,7 +130,15 @@ export function connect(opts: { readOnly?: boolean } = {}) {
     }
   };
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
+    // The server closes an operator socket with WS_SUPERSEDED when a newer
+    // console connects (last-connection-wins). Go dormant rather than
+    // reconnecting — otherwise two open consoles evict each other forever.
+    // Reload (or call connect()) to reclaim control in this tab.
+    if (event.code === WS_SUPERSEDED) {
+      setCurrentState('superseded');
+      return;
+    }
     setCurrentState('reconnecting');
     setTimeout(() => connect({ readOnly }), reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 8000);
@@ -146,6 +163,7 @@ function handleEvent(ev: DisplayEvent) {
       setPleaRecordingActive(false);
       setPhaseDeadlineAt(0);
       setPhaseDeadlineLabel('');
+      setFireHeldReason('');
       if (theaterActive()) {
         setTheaterActive(false);
         if (!readOnly) stopTheater();
@@ -212,6 +230,9 @@ function handleEvent(ev: DisplayEvent) {
     // ---- Maintenance / hardware test plane ----
     case 'maintenance':
       setMaintenanceActive(Boolean(ev.active));
+      break;
+    case 'fire_held':
+      setFireHeldReason(String(ev.reason ?? 'held for safety'));
       break;
     case 'device_connected':
       onDeviceConnected(String(ev.role ?? ''), String(ev.addr ?? ''));
@@ -281,6 +302,14 @@ export async function setCrossExam(enabled: boolean): Promise<void> {
   } catch {
     await fetchCrossExam();
   }
+}
+
+/// Reclaim control in this tab after being superseded by another console.
+/// Reconnecting bumps the server generation, so this tab becomes the live one
+/// and the other goes dormant.
+export function reconnect() {
+  reconnectDelay = 500;
+  connect({ readOnly });
 }
 
 export async function startTrial() {
