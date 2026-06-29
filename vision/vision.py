@@ -24,7 +24,8 @@ import threading
 import time
 
 import cv2
-from flask import Flask, Response, jsonify
+import requests
+from flask import Flask, Response, jsonify, request
 
 # MediaPipe Tasks API (the legacy `solutions` API was removed in 0.10.x). The
 # Tasks PoseLandmarker uses a downloadable `.task` model bundle; same 33-landmark
@@ -74,6 +75,27 @@ _lock = threading.Lock()
 _latest_jpeg: bytes | None = None
 _latest_state: dict = {"ts": 0.0, "person": False}
 
+# Targeting state, set by the operator via the control endpoints and read by the
+# servo loop. `_boresight` is the camera pixel the gun points at (fixed, because
+# the camera moves with the gun); `_aim` is the commanded turret aim (degrees)
+# the loop integrates toward putting the target on the boresight.
+_tlock = threading.Lock()
+_target_part = "none"          # "none" | "chest" | "head"
+_boresight: list | None = None  # [x, y]; defaults to frame center
+_aim = {"pan": 0.0, "tilt": 0.0}
+# Live-tunable servo gains (deg of aim per pixel of error; sign matters) and the
+# lock tolerance (px). Seeded from the CLI flags in main(), then editable from
+# the operator console via POST /gains.
+_tune = {"gain_pan": 0.025, "gain_tilt": 0.025, "tolerance": 12}
+
+# Cap the per-frame aim change so a too-high gain can't fling the gun across its
+# whole range in one step — softens overshoot while tuning.
+_MAX_STEP_DEG = 8.0
+
+
+def _clamp(v, lo, hi):
+    return lo if v < lo else hi if v > hi else v
+
 
 def _mid(a, b):
     return ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
@@ -100,6 +122,25 @@ def detect_loop(cfg):
         )
         landmarker = PoseLandmarker.create_from_options(opts)
 
+    # Throttled aim sender to the orchestrator (which relays to the turret only
+    # when armed). Short timeout + swallow errors so the loop never stalls.
+    session = requests.Session()
+    last_send = [0.0]
+
+    def send_aim(pan, tilt):
+        now = time.time()
+        if now - last_send[0] < cfg.send_interval:
+            return
+        last_send[0] = now
+        try:
+            session.post(
+                f"{cfg.orchestrator.rstrip('/')}/vision/aim",
+                json={"pan": pan, "tilt": tilt},
+                timeout=0.3,
+            )
+        except Exception:
+            pass
+
     t0 = time.perf_counter()
     last_ts = -1
     while True:
@@ -122,8 +163,42 @@ def detect_loop(cfg):
             if result.pose_landmarks:
                 _annotate(frame, result.pose_landmarks[0], w, h, state)
 
-        # Center reticle (the camera's optical axis — boresight is calibrated later).
-        cv2.drawMarker(frame, (w // 2, h // 2), (90, 90, 90), cv2.MARKER_CROSS, 18, 1)
+        # --- Targeting servo (vision-owned). Nudge the commanded aim so the
+        # target body part moves onto the boresight pixel; the orchestrator
+        # relays it to the turret only when armed. Gains/sign are hardware-tuned. ---
+        with _tlock:
+            part = _target_part
+            bs = list(_boresight) if _boresight else [w // 2, h // 2]
+            aim_pan, aim_tilt = _aim["pan"], _aim["tilt"]
+            gp, gt, tol = _tune["gain_pan"], _tune["gain_tilt"], _tune["tolerance"]
+        state["target_part"] = part
+        state["boresight"] = bs
+        state["gains"] = {"pan": gp, "tilt": gt, "tolerance": tol}
+        locked = False
+        tp = (state.get("targets") or {}).get(part) if part != "none" else None
+        if tp and state.get("person"):
+            ex, ey = tp[0] - bs[0], tp[1] - bs[1]
+            step_pan = _clamp(gp * ex, -_MAX_STEP_DEG, _MAX_STEP_DEG)
+            step_tilt = _clamp(gt * ey, -_MAX_STEP_DEG, _MAX_STEP_DEG)
+            aim_pan = _clamp(aim_pan + step_pan, -cfg.pan_limit, cfg.pan_limit)
+            aim_tilt = _clamp(aim_tilt + step_tilt, -cfg.tilt_limit, cfg.tilt_limit)
+            locked = abs(ex) <= tol and abs(ey) <= tol
+            with _tlock:
+                _aim["pan"], _aim["tilt"] = aim_pan, aim_tilt
+            send_aim(aim_pan, aim_tilt)
+        state["aim"] = {"pan": round(aim_pan, 1), "tilt": round(aim_tilt, 1)}
+        state["locked"] = locked
+
+        # Boresight marker (where the gun points) + the aim vector to the target.
+        cv2.drawMarker(frame, (int(bs[0]), int(bs[1])), (0, 255, 255),
+                       cv2.MARKER_TILTED_CROSS, 20, 2)
+        if tp:
+            col = (0, 255, 0) if locked else (0, 165, 255)
+            cv2.arrowedLine(frame, (int(bs[0]), int(bs[1])),
+                            (int(tp[0]), int(tp[1])), col, 2, tipLength=0.2)
+            if locked:
+                cv2.putText(frame, "LOCKED", (int(bs[0]) - 42, int(bs[1]) - 24),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, cfg.quality])
         if ok:
@@ -220,6 +295,69 @@ def state():
         return jsonify(_latest_state)
 
 
+@app.route("/target", methods=["POST"])
+def set_target():
+    """Choose the body part to track ("none" | "chest" | "head")."""
+    global _target_part
+    data = request.get_json(force=True, silent=True) or {}
+    part = data.get("part", "none")
+    if part not in ("none", "chest", "head"):
+        return ("bad part", 400)
+    with _tlock:
+        _target_part = part
+        if part != "none":
+            # Acquire from center each time targeting (re)starts, so the
+            # commanded aim and the gun's actual position stay in sync.
+            _aim["pan"] = 0.0
+            _aim["tilt"] = 0.0
+    return ("", 204)
+
+
+@app.route("/center", methods=["POST"])
+def center():
+    """Stop tracking and reset the aim integrator to center. Paired with the
+    orchestrator commanding the turret back to 0,0 — a one-click recovery from a
+    bad overshoot without entering maintenance."""
+    global _target_part
+    with _tlock:
+        _target_part = "none"
+        _aim["pan"] = 0.0
+        _aim["tilt"] = 0.0
+    return ("", 204)
+
+
+@app.route("/gains", methods=["POST"])
+def set_gains():
+    """Live-tune the servo gains / lock tolerance. Any subset of
+    {gain_pan, gain_tilt, tolerance}; gains may be negative to flip the sign."""
+    data = request.get_json(force=True, silent=True) or {}
+    with _tlock:
+        try:
+            if "gain_pan" in data:
+                _tune["gain_pan"] = float(data["gain_pan"])
+            if "gain_tilt" in data:
+                _tune["gain_tilt"] = float(data["gain_tilt"])
+            if "tolerance" in data:
+                _tune["tolerance"] = max(1, int(data["tolerance"]))
+        except (TypeError, ValueError):
+            return ("bad number", 400)
+    return ("", 204)
+
+
+@app.route("/boresight", methods=["POST"])
+def set_boresight():
+    """Set the boresight pixel (where the gun points in the camera image)."""
+    global _boresight
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        x, y = int(data["x"]), int(data["y"])
+    except Exception:
+        return ("need integer x,y", 400)
+    with _tlock:
+        _boresight = [x, y]
+    return ("", 204)
+
+
 @app.route("/health")
 def health():
     return "ok"
@@ -235,7 +373,24 @@ def main():
     p.add_argument("--quality", type=int, default=int(os.environ.get("BOOTH_VISION_QUALITY", 80)))
     p.add_argument("--model", default=os.environ.get("BOOTH_VISION_MODEL", _MODEL_PATH),
                    help="pose .task model path (auto-downloaded if missing)")
+    # --- Targeting servo ---
+    p.add_argument("--orchestrator", default=os.environ.get("BOOTH_VISION_ORCH", "http://localhost:8080"),
+                   help="orchestrator base URL to stream aim to (/vision/aim)")
+    p.add_argument("--gain-pan", type=float, default=float(os.environ.get("BOOTH_VISION_GAIN_PAN", 0.025)),
+                   help="deg of pan per pixel of error (sign is hardware-dependent; tune live)")
+    p.add_argument("--gain-tilt", type=float, default=float(os.environ.get("BOOTH_VISION_GAIN_TILT", 0.025)))
+    p.add_argument("--tolerance", type=int, default=int(os.environ.get("BOOTH_VISION_TOL", 12)),
+                   help="pixel error within which the target counts as LOCKED")
+    p.add_argument("--pan-limit", type=float, default=90.0)
+    p.add_argument("--tilt-limit", type=float, default=45.0)
+    p.add_argument("--send-interval", type=float, default=0.066, help="min seconds between aim posts (~15 Hz)")
     cfg = p.parse_args()
+
+    # Seed the live-tunable gains from the CLI flags.
+    with _tlock:
+        _tune["gain_pan"] = cfg.gain_pan
+        _tune["gain_tilt"] = cfg.gain_tilt
+        _tune["tolerance"] = cfg.tolerance
 
     t = threading.Thread(target=detect_loop, args=(cfg,), daemon=True)
     t.start()

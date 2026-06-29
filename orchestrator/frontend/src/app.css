@@ -751,6 +751,34 @@ button.plea.recording:hover { background: #8b2326; }
 .vision-offline code { color: #79c0ff; }
 .vision-state { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 .vision-state b { color: #79c0ff; }
+.vision-state b.locked { color: #56d364; }
+.vision-feed.crosshair img { cursor: crosshair; }
+.vision-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.vision-row > label {
+  color: #8b949e; font-size: 0.78rem; min-width: 7ch;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.vision-armed {
+  color: #f85149; font-weight: bold; letter-spacing: 0.06em;
+  border: 1px solid #6e1b1b; background: #2d0f0f;
+  padding: 0.05rem 0.45rem; border-radius: 3px; font-size: 0.78rem;
+}
+.panel-card button.mini {
+  padding: 0.25rem 0.6rem; font-size: 0.85rem; cursor: pointer;
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px;
+}
+.panel-card button.mini:hover { border-color: #58a6ff; }
+.panel-card button.mini.active { background: rgba(31, 111, 235, 0.2); border-color: #58a6ff; color: #fff; }
+.arm-btn {
+  padding: 0.35rem 0.9rem; border-radius: 4px; cursor: pointer;
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+}
+.arm-btn.armed { background: #6e1b1b; border-color: #f85149; color: #ffa198; }
+.gain-input {
+  width: 5.5rem; background: #0d1117; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 4px; padding: 0.2rem 0.4rem;
+  font: inherit; font-variant-numeric: tabular-nums;
+}
 
 /* ============ Maintenance / hardware test console ============ */
 .shell {

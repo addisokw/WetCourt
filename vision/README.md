@@ -10,12 +10,33 @@ talking to the orchestrator over the network (see
 booth PC for dev and migrates to the DGX Spark (a `dgx-ai-stack/` container) for
 production — same code, the webcam and config follow it.
 
-## Status — Phase B, milestone 1 (sensing + feed)
+## Status — Phase B, milestones 1–3
 
-Done here: capture + MediaPipe pose, target points (chest, shoulders, head, rough
-eyes), annotated MJPEG feed, `/state` JSON. Still to come: orchestrator
-integration + operator panel, closed-loop AIM targeting, and the eye-exclusion
-safety zone (precise FaceMesh eyes) before any auto-fire.
+Done: capture + MediaPipe pose, target points, annotated MJPEG feed, `/state`
+JSON (m1); orchestrator reverse-proxy + operator panel (m2); **vision-owned
+closed-loop targeting** — a proportional servo that streams aim to the
+orchestrator, which relays it to the turret only while armed (m3). Still to come:
+the eye-exclusion safety zone (precise FaceMesh eyes), head-shot operator
+confirmation, and firing on verdict (m4).
+
+## Targeting (m3)
+
+The camera is bolted to the gun, so the gun always points at a fixed **boresight
+pixel**. The loop nudges the commanded turret aim so the chosen body part moves
+onto that pixel:
+
+```
+each frame, if a target part is set and a person is detected:
+  err = target_pixel - boresight_pixel
+  aim += gain * err        (per axis; integrates to zero error)
+  POST aim -> orchestrator  (relayed to the turret only while ARMED)
+```
+
+Operator workflow (in the console **Vision** tab): pick a target part, click the
+feed to set the boresight, watch the overlay track (gun still still), then
+**Arm** to let it drive the turret. **Tune `--gain-pan/--gain-tilt` and their
+sign** on the real rig so the target converges without oscillating — the sign
+depends on servo direction + camera orientation. Disarm stops the gun instantly.
 
 ## Run (dev, booth PC)
 
@@ -42,8 +63,14 @@ an offline booth.
 |---|---|
 | `GET /` | HTML page embedding the live feed |
 | `GET /feed` | annotated MJPEG stream |
-| `GET /state` | latest detection JSON (target pixels, frame size, eyes) |
+| `GET /state` | latest detection JSON (target pixels, boresight, aim, locked, eyes) |
+| `POST /target` | `{"part":"none"\|"chest"\|"head"}` — choose what to track |
+| `POST /boresight` | `{"x":int,"y":int}` — set the boresight pixel |
 | `GET /health` | `ok` |
+
+The operator drives `/target` and `/boresight` through the orchestrator
+(`/vision/target`, `/vision/boresight`) so the console stays same-origin; aim is
+streamed to the orchestrator's `/vision/aim` and gated by `/vision/arm`.
 
 `/state` shape:
 
@@ -62,6 +89,9 @@ an offline booth.
 | `--port` | `BOOTH_VISION_PORT` | `8091` |
 | `--width` / `--height` | `BOOTH_VISION_WIDTH/HEIGHT` | `640` / `480` |
 | `--quality` | `BOOTH_VISION_QUALITY` | `80` |
+| `--orchestrator` | `BOOTH_VISION_ORCH` | `http://localhost:8080` |
+| `--gain-pan` / `--gain-tilt` | `BOOTH_VISION_GAIN_PAN/TILT` | `0.025` (tune live; sign matters) |
+| `--tolerance` | `BOOTH_VISION_TOL` | `12` (px for LOCKED) |
 
 ## Safety note
 

@@ -1,11 +1,10 @@
 role = "turret"
-# Pan/tilt aim only — firing lives on the `squirt` role (calibration/squirt.toml).
 
 [pan]
 min = 1000
 max = 2000
 center = 1500
-invert = false
+invert = true
 limit_min_deg = -90.0
 limit_max_deg = 90.0
 
@@ -13,6 +12,6 @@ limit_max_deg = 90.0
 min = 1000
 max = 2000
 center = 1500
-invert = false
+invert = true
 limit_min_deg = -45.0
-limit_max_deg = 45.0
+limit_max_deg = 25.0

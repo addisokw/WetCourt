@@ -44,7 +44,10 @@ pub enum DisplayMessage {
 pub struct AppState {
     pub event_tx: mpsc::Sender<Event>,
     pub display_bcast: broadcast::Sender<DisplayMessage>,
-    pub ws_clients: Arc<AtomicUsize>,
+    /// Monotonic `/ws` connection generation. Each new operator client bumps it
+    /// and supersedes the previous one (last-connection-wins), so a reconnect is
+    /// never rejected by a stale session that hasn't cleaned up yet.
+    pub ws_generation: Arc<AtomicUsize>,
     /// Buffer for binary plea audio uploaded by the frontend across multiple
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
@@ -73,6 +76,11 @@ pub struct AppState {
     /// HTTP client for the vision proxy. No global timeout — the MJPEG feed is
     /// an infinite stream; a per-request timeout guards the short /state calls.
     pub vision_http: reqwest::Client,
+    /// Hardware safety gate for vision targeting: vision streams aim to
+    /// `/vision/aim`, but the orchestrator only relays it to the turret while
+    /// this is set. Disarmed = the gun never moves from vision, even though
+    /// vision keeps tracking. Operator-toggled via `/vision/arm`.
+    pub targeting_armed: Arc<AtomicBool>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -105,6 +113,13 @@ pub fn router(state: AppState) -> Router {
         // ---- Vision proxy (reverse-proxies the vision process) ----
         .route("/vision/feed", get(vision_feed))
         .route("/vision/state", get(vision_state))
+        // ---- Vision targeting ----
+        .route("/vision/aim", post(vision_aim))
+        .route("/vision/arm", get(get_targeting_arm).post(set_targeting_arm))
+        .route("/vision/target", post(vision_target))
+        .route("/vision/boresight", post(vision_boresight))
+        .route("/vision/gains", post(vision_gains))
+        .route("/vision/center", post(vision_center))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -307,6 +322,119 @@ async fn vision_state(AxumState(s): AxumState<AppState>) -> Response {
     }
 }
 
+/// Aim command streamed from the vision process (degrees). Relayed to the turret
+/// only when targeting is armed; otherwise accepted-and-ignored so vision can
+/// track visibly without the gun moving.
+#[derive(Deserialize)]
+struct AimMsg {
+    pan: f32,
+    tilt: f32,
+}
+
+async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) -> StatusCode {
+    if !s.targeting_armed.load(Ordering::Relaxed) {
+        return StatusCode::NO_CONTENT; // disarmed: don't move the gun
+    }
+    // Apply the turret calibration (degrees → raw µs, clamped to limits).
+    let raw = {
+        let reg = s.calibration.read().await;
+        reg.get(Role::Turret.as_str())
+            .and_then(|c| c.aim_to_raw(aim.pan, aim.tilt).ok())
+    };
+    if let Some((pan, tilt)) = raw {
+        let _ = s
+            .maint_cmd_tx
+            .send(MaintenanceCommand {
+                target: Role::Turret,
+                cmd: HardwareCommand::Aim { pan, tilt },
+                reply: None, // fire-and-forget high-rate stream
+            })
+            .await;
+    }
+    StatusCode::NO_CONTENT
+}
+
+#[derive(Serialize, Deserialize)]
+struct ArmState {
+    armed: bool,
+}
+
+async fn get_targeting_arm(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    Json(ArmState { armed: s.targeting_armed.load(Ordering::Relaxed) })
+}
+
+async fn set_targeting_arm(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<ArmState>,
+) -> impl IntoResponse {
+    s.targeting_armed.store(body.armed, Ordering::Relaxed);
+    info!(armed = body.armed, "vision targeting arm");
+    StatusCode::NO_CONTENT
+}
+
+/// Forward the operator's targeting-control POSTs (target part, boresight pixel)
+/// to the vision process, keeping the console same-origin.
+async fn vision_forward_post(s: &AppState, sub: &str, body: Bytes) -> Response {
+    let url = format!("{}/{}", s.vision_base_url.trim_end_matches('/'), sub);
+    match s
+        .vision_http
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .timeout(Duration::from_secs(2))
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+            (status, resp.bytes().await.unwrap_or_default()).into_response()
+        }
+        Err(_) => (StatusCode::BAD_GATEWAY, "vision offline").into_response(),
+    }
+}
+
+async fn vision_target(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
+    vision_forward_post(&s, "target", body).await
+}
+
+async fn vision_boresight(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
+    vision_forward_post(&s, "boresight", body).await
+}
+
+async fn vision_gains(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
+    vision_forward_post(&s, "gains", body).await
+}
+
+/// One-click recovery from an overshoot: disarm targeting, reset vision's aim
+/// integrator, and command the turret back to center — works even while
+/// disarmed, so the operator doesn't have to enter maintenance to re-center.
+async fn vision_center(AxumState(s): AxumState<AppState>) -> Response {
+    s.targeting_armed.store(false, Ordering::Relaxed);
+    // Reset the vision-side integrator + stop tracking (best-effort).
+    let _ = s
+        .vision_http
+        .post(format!("{}/center", s.vision_base_url.trim_end_matches('/')))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await;
+    // Command the turret back to center (0°,0° → center µs via calibration).
+    let raw = {
+        let reg = s.calibration.read().await;
+        reg.get(Role::Turret.as_str()).and_then(|c| c.aim_to_raw(0.0, 0.0).ok())
+    };
+    if let Some((pan, tilt)) = raw {
+        let _ = s
+            .maint_cmd_tx
+            .send(MaintenanceCommand {
+                target: Role::Turret,
+                cmd: HardwareCommand::Aim { pan, tilt },
+                reply: None,
+            })
+            .await;
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn list_calibrations(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     let reg = s.calibration.read().await;
     let cals: Vec<Calibration> = reg.list().into_iter().cloned().collect();
@@ -357,13 +485,12 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     AxumState(state): AxumState<AppState>,
 ) -> impl IntoResponse {
-    let prev = state.ws_clients.fetch_add(1, Ordering::SeqCst);
-    if prev > 0 {
-        state.ws_clients.fetch_sub(1, Ordering::SeqCst);
-        warn!("rejecting ws upgrade: client already connected");
-        return (StatusCode::CONFLICT, "single client only").into_response();
-    }
-    ws.on_upgrade(move |socket| ws_session(socket, state))
+    // Last connection wins: bump the generation; the previous session notices it
+    // is no longer current and exits. This makes reconnects (and the operator
+    // re-opening the page) reliable instead of getting a "single client only"
+    // rejection from a not-yet-cleaned-up stale socket.
+    let my_gen = state.ws_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    ws.on_upgrade(move |socket| ws_session(socket, state, my_gen))
 }
 
 /// Read-only WebSocket for presentational monitors (judge face, case info).
@@ -423,7 +550,7 @@ fn robot_params_event(p: &Persona) -> DisplayEvent {
     }
 }
 
-async fn ws_session(mut socket: WebSocket, state: AppState) {
+async fn ws_session(mut socket: WebSocket, state: AppState, my_gen: usize) {
     info!("ws client connected");
     let _ = socket
         .send(Message::Text(
@@ -438,9 +565,17 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
             .await;
     }
     let mut bcast_rx = state.display_bcast.subscribe();
+    // Periodically check whether a newer client has superseded us.
+    let mut supersede_check = tokio::time::interval(Duration::from_millis(400));
 
     loop {
         tokio::select! {
+            _ = supersede_check.tick() => {
+                if state.ws_generation.load(Ordering::SeqCst) != my_gen {
+                    info!("ws superseded by a newer client");
+                    break;
+                }
+            }
             ev = bcast_rx.recv() => match ev {
                 Ok(DisplayMessage::Json(de)) => {
                     let json = serde_json::to_string(&de).unwrap();
@@ -472,7 +607,6 @@ async fn ws_session(mut socket: WebSocket, state: AppState) {
         }
     }
 
-    state.ws_clients.fetch_sub(1, Ordering::SeqCst);
     info!("ws client disconnected");
 }
 

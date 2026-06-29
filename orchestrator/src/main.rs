@@ -168,7 +168,7 @@ async fn main() -> Result<()> {
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
-        ws_clients: Arc::new(AtomicUsize::new(0)),
+        ws_generation: Arc::new(AtomicUsize::new(0)),
         plea_buffer: Arc::new(Mutex::new(Vec::new())),
         personas,
         crimes,
@@ -181,6 +181,7 @@ async fn main() -> Result<()> {
         devices,
         vision_base_url: cfg.vision.base_url.clone(),
         vision_http,
+        targeting_armed: Arc::new(AtomicBool::new(false)),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;
