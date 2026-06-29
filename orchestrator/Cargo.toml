@@ -9,6 +9,7 @@ edition = "2021"
 
 [dependencies]
 crimes-core = { path = "crates/crimes-core" }
+thermal_printer = { path = "crates/thermal-printer" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower-http = { version = "0.6", features = ["fs", "trace"] }

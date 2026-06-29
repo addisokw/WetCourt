@@ -352,6 +352,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thermal_printer",
  "thiserror 1.0.69",
  "tokio",
  "tokio-serial",

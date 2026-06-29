@@ -14,6 +14,10 @@ mod fallbacks;
 mod hardware;
 mod inference;
 mod personas;
+// Thermal-printer keepsake transcript. M1 lands the renderer; the live trial
+// path that drives it is wired in M2, hence unused from the binary for now.
+#[allow(dead_code)]
+mod printer;
 mod state_machine;
 
 use display::{AppState, DisplayMessage};
