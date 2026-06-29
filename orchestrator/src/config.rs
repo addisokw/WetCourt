@@ -20,6 +20,8 @@ pub struct Config {
     pub default_persona_id: String,
     #[serde(default)]
     pub crimes: CrimesConfig,
+    #[serde(default)]
+    pub printer: PrinterConfig,
 }
 
 fn d_default_persona_id() -> String { "wettington".into() }
@@ -52,6 +54,42 @@ impl Default for CrimesConfig {
 fn d_crimes_file() -> String { "crimes/wet_court_crimes.json".into() }
 fn d_crimes_source() -> String { "list".into() }
 fn d_no_repeat_window() -> usize { 15 }
+
+/// Thermal-printer keepsake output. The casebook trial log
+/// (`[logging] transcripts_jsonl`) is written regardless of `mode`; this only
+/// governs the physical receipt.
+#[derive(Debug, Deserialize, Clone)]
+pub struct PrinterConfig {
+    /// "off" (no receipt), "mock" (render + log the byte count, no USB), or
+    /// "real" (render + send to the USB printer).
+    #[serde(default = "d_printer_mode")]
+    pub mode: String,
+    /// ESC/POS dot width — 576 for a standard 80mm head (512 on some clones).
+    #[serde(default = "d_printer_width")]
+    pub width_dots: u32,
+    /// Footer QR target. Editable on-site (the booth may point at a day page).
+    #[serde(default = "d_printer_qr")]
+    pub qr_url: String,
+    /// "Find us here" footer line. Editable on-site as the booth moves.
+    #[serde(default = "d_printer_loc")]
+    pub booth_location: String,
+}
+
+impl Default for PrinterConfig {
+    fn default() -> Self {
+        Self {
+            mode: d_printer_mode(),
+            width_dots: d_printer_width(),
+            qr_url: d_printer_qr(),
+            booth_location: d_printer_loc(),
+        }
+    }
+}
+
+fn d_printer_mode() -> String { "mock".into() }
+fn d_printer_width() -> u32 { 576 }
+fn d_printer_qr() -> String { "https://wetcourt.lol".into() }
+fn d_printer_loc() -> String { "Find the Wet Court near you".into() }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InferenceConfig {

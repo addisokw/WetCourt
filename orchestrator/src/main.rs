@@ -14,9 +14,8 @@ mod fallbacks;
 mod hardware;
 mod inference;
 mod personas;
-// Thermal-printer keepsake transcript. M1 lands the renderer; the live trial
-// path that drives it is wired in M2, hence unused from the binary for now.
-#[allow(dead_code)]
+// Thermal-printer keepsake transcript: report renderer, casebook trial log, and
+// the printer service. Driven from the state machine at each completed verdict.
 mod printer;
 mod state_machine;
 
@@ -95,6 +94,26 @@ async fn main() -> Result<()> {
         "calibration loaded"
     );
     let calibration = Arc::new(tokio::sync::RwLock::new(calibration_registry));
+
+    // Casebook: the append-only trial log (`[logging] transcripts_jsonl`),
+    // resolved relative to the config file like the other deployment resources.
+    // It also seeds the case counter. The printer service renders + emits the
+    // keepsake receipt per completed verdict, per `[printer] mode`.
+    let casebook_path = cli
+        .config
+        .parent()
+        .map(|p| p.join(&cfg.logging.transcripts_jsonl))
+        .unwrap_or_else(|| PathBuf::from(&cfg.logging.transcripts_jsonl));
+    let casebook = Arc::new(printer::Casebook::open(&casebook_path));
+    tracing::info!(
+        path = %casebook_path.display(),
+        next_case = casebook.next_case_no(),
+        "casebook ready"
+    );
+    let print_tx = printer::service::spawn(cfg.printer.clone());
+    // The state machine needs its own persona handle; `personas` is moved into
+    // AppState below.
+    let personas_for_sm = personas.clone();
 
     // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
     // still mocked. Set [inference] mode = "mock" for offline dev.
@@ -188,7 +207,7 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx);
+    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx);
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {

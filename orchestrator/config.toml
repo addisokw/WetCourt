@@ -68,3 +68,13 @@ listen_addr = "0.0.0.0:8080"
 level = "info"
 log_file = "/var/log/booth/booth.log"
 transcripts_jsonl = "/var/log/booth/transcripts.jsonl"
+
+# Thermal-printer keepsake transcript handed to defendants. The casebook trial
+# log (transcripts_jsonl above) is written regardless; this governs the physical
+# receipt only. mode: "off" | "mock" (render, no USB) | "real" (send to USB).
+# qr_url and booth_location are meant to be edited on-site as the booth moves.
+[printer]
+mode = "real"
+width_dots = 576
+qr_url = "https://wetcourt.lol"
+booth_location = "Find the Wet Court near you"

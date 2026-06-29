@@ -15,6 +15,7 @@
 pub mod casebook;
 pub mod record;
 pub mod report;
+pub mod service;
 
 pub use casebook::Casebook;
 pub use record::TrialRecord;

@@ -1,12 +1,14 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tokio::time::MissedTickBehavior;
 use tracing::info;
 
 use crate::config::Config;
+use crate::personas::PersonaRegistry;
+use crate::printer::{Casebook, TrialRecord};
 
 pub mod commands;
 pub mod events;
@@ -32,6 +34,31 @@ pub struct Runtime {
     inference_tx: mpsc::Sender<Command>,
     hardware_tx: mpsc::Sender<Command>,
     display_tx: mpsc::Sender<Command>,
+    /// Read once per trial to snapshot the presiding judge's name for the
+    /// keepsake (mid-trial persona changes don't apply, by design).
+    personas: Arc<RwLock<PersonaRegistry>>,
+    /// The append-only trial log; also the source of the case counter.
+    casebook: Arc<Casebook>,
+    /// Next case number, seeded from the casebook at startup and bumped once per
+    /// recorded verdict (so aborted trials don't consume numbers).
+    next_case_no: AtomicU64,
+    /// Finalized records go here for the printer service to render + emit.
+    print_tx: mpsc::Sender<TrialRecord>,
+    /// Accumulates the in-flight trial's pieces; `None` between trials.
+    draft: Option<TrialDraft>,
+}
+
+/// Mutable scratchpad that gathers one trial's pieces as they flow past the
+/// Runtime. The pure state machine drops charge/plea/cross once the verdict is
+/// reached, so the impure shell collects them here and finalizes into a
+/// [`TrialRecord`] when sentence execution begins.
+struct TrialDraft {
+    judge_name: String,
+    ts: String,
+    charge: String,
+    plea: String,
+    cross: Option<states::CrossExam>,
+    verdict: Option<states::Verdict>,
 }
 
 impl Runtime {
@@ -45,8 +72,27 @@ impl Runtime {
         inference_tx: mpsc::Sender<Command>,
         hardware_tx: mpsc::Sender<Command>,
         display_tx: mpsc::Sender<Command>,
+        personas: Arc<RwLock<PersonaRegistry>>,
+        casebook: Arc<Casebook>,
+        print_tx: mpsc::Sender<TrialRecord>,
     ) -> Self {
-        Self { state: State::Idle, cfg, cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx }
+        let next_case_no = AtomicU64::new(casebook.next_case_no());
+        Self {
+            state: State::Idle,
+            cfg,
+            cross_enabled,
+            maintenance,
+            is_idle,
+            event_rx,
+            inference_tx,
+            hardware_tx,
+            display_tx,
+            personas,
+            casebook,
+            next_case_no,
+            print_tx,
+            draft: None,
+        }
     }
 
     pub async fn run(mut self) {
@@ -64,6 +110,7 @@ impl Runtime {
     async fn handle(&mut self, ev: Event) {
         let prev_name = self.state.name();
         let interesting = !matches!(ev, Event::Tick);
+        let is_start = matches!(ev, Event::OperatorStart);
         let prev = std::mem::replace(&mut self.state, State::Idle);
         let cross_enabled = self.cross_enabled.load(Ordering::Relaxed);
         let (next, cmds) = transitions::step(prev, ev, &self.cfg, cross_enabled);
@@ -72,14 +119,111 @@ impl Runtime {
         } else if interesting && !cmds.is_empty() {
             tracing::debug!(state = next.name(), "event handled, no transition");
         }
+
+        // Keepsake/casebook: open a fresh draft on trial start, harvest the
+        // trial's pieces as they pass, and finalize the moment sentence
+        // execution begins (the verdict is final by then).
+        if is_start {
+            self.begin_draft().await;
+        }
+        self.harvest(&next, &cmds);
+        let entering_sentence =
+            prev_name != "executing_sentence" && next.name() == "executing_sentence";
+
         self.state = next;
         // Refresh the REST-gate mirrors to match the new state.
         self.maintenance
             .store(matches!(self.state, State::Maintenance), Ordering::Relaxed);
         self.is_idle
             .store(matches!(self.state, State::Idle), Ordering::Relaxed);
+
+        if entering_sentence {
+            self.finalize_trial();
+        }
+
         for cmd in cmds {
             self.dispatch(cmd).await;
+        }
+    }
+
+    /// Begin a fresh trial draft, snapshotting the presiding judge and the
+    /// wall-clock open time.
+    async fn begin_draft(&mut self) {
+        let judge_name = self.personas.read().await.active().display_name.clone();
+        self.draft = Some(TrialDraft {
+            judge_name,
+            ts: chrono::Local::now().to_rfc3339(),
+            charge: String::new(),
+            plea: String::new(),
+            cross: None,
+            verdict: None,
+        });
+    }
+
+    /// Copy the trial's pieces out of the new state and the dispatched commands
+    /// into the draft. No-op when no trial is in flight.
+    fn harvest(&mut self, s: &State, cmds: &[Command]) {
+        let Some(draft) = self.draft.as_mut() else { return };
+        use State::*;
+        match s {
+            DisplayingCharge { charge, .. }
+            | AwaitingPlea { charge, .. }
+            | FlushingPlea { charge, .. }
+            | Transcribing { charge, .. } => draft.charge = charge.clone(),
+            CrossGeneratingQuestion { charge, plea, .. }
+            | CrossSpeaking { charge, plea, .. }
+            | CrossAwaitingAnswer { charge, plea, .. }
+            | CrossFlushingAnswer { charge, plea, .. }
+            | CrossTranscribing { charge, plea, .. }
+            | Deliberating { charge, plea, .. } => {
+                draft.charge = charge.clone();
+                draft.plea = plea.clone();
+            }
+            PronouncingVerdict { verdict, .. } | ExecutingSentence { verdict, .. } => {
+                if draft.verdict.is_none() {
+                    draft.verdict = Some(verdict.clone());
+                }
+            }
+            _ => {}
+        }
+        // The full cross-examination exchange only exists in the Deliberate
+        // command (the state keeps the question but not the answer).
+        for c in cmds {
+            if let Command::Deliberate { cross: Some(cx), .. } = c {
+                draft.cross = Some(cx.clone());
+            }
+        }
+    }
+
+    /// Assemble the finalized [`TrialRecord`], append it to the casebook, and
+    /// queue it for printing. Assigns the case number here so only completed
+    /// verdicts consume one.
+    fn finalize_trial(&mut self) {
+        let Some(draft) = self.draft.take() else { return };
+        let Some(verdict) = draft.verdict else {
+            tracing::warn!("reached sentence with no captured verdict; not recording");
+            return;
+        };
+        let case_no = self.next_case_no.fetch_add(1, Ordering::SeqCst);
+        let record = TrialRecord {
+            case_no,
+            ts: draft.ts,
+            charge: draft.charge,
+            plea: draft.plea,
+            cross: draft.cross,
+            judge_name: draft.judge_name,
+            guilty: verdict.guilty,
+            deliberation: verdict.deliberation,
+            remarks: verdict.remarks,
+        };
+        match self.casebook.record(&record) {
+            Ok(()) => info!(case_no = record.case_no, guilty = record.guilty, "trial recorded"),
+            Err(e) => tracing::error!("casebook append failed: {e:#}"),
+        }
+        // Non-blocking: a backed-up printer drops the receipt rather than
+        // stalling the trial loop. The casebook line is already durable.
+        if let Err(e) = self.print_tx.try_send(record) {
+            tracing::warn!("keepsake not queued for print: {e}");
         }
     }
 
@@ -101,5 +245,115 @@ impl Runtime {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    use crate::config::*;
+    use crate::state_machine::states::Verdict;
+
+    fn mk_cfg() -> Config {
+        Config {
+            inference: InferenceConfig {
+                mode: "mock".into(), base_url: "x".into(), chat_model: "x".into(),
+                stt_model: "x".into(), tts_model: "x".into(), tts_voice: "x".into(),
+                charge_timeout_secs: 10, verdict_first_token_timeout_secs: 15,
+                verdict_total_timeout_secs: 30, stt_timeout_secs: 5, tts_timeout_secs: 10,
+                enable_thinking: false, api_key: None,
+            },
+            hardware: HardwareConfig { driver: "mock".into(), serial_port: "x".into(), baud: 0, ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into() },
+            mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
+            mock_inference: MockInferenceConfig::default(),
+            squirt: SquirtConfig { duration_ms: 150 },
+            trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 0, cooldown_secs: 1, guilty_bias: 1.0 },
+            cross_examination: CrossExamConfig { enabled: false, answer_window_secs: 1, question_timeout_secs: 1 },
+            display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
+            logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },
+            default_persona_id: "judge".into(),
+            crimes: CrimesConfig::default(),
+            printer: PrinterConfig::default(),
+        }
+    }
+
+    fn write_persona(dir: &std::path::Path) {
+        std::fs::write(
+            dir.join("judge.toml"),
+            "id = \"judge\"\ndisplay_name = \"Judge Testwater\"\nsystem_prompt = \"be a judge\"\nguilty_bias = 0.5\ntts_voice = \"bm_george\"\n",
+        )
+        .unwrap();
+    }
+
+    /// Drive a full trial through the Runtime with explicit events (bypassing
+    /// the inference/hardware tasks) and assert it finalizes into both the
+    /// casebook and the print queue, with all fields harvested correctly.
+    #[tokio::test]
+    async fn trial_finalizes_into_casebook_and_print_queue() {
+        let tag = std::process::id();
+        let pdir = std::env::temp_dir().join(format!("wc_sm_personas_{tag}"));
+        std::fs::create_dir_all(&pdir).unwrap();
+        write_persona(&pdir);
+        let book = std::env::temp_dir().join(format!("wc_sm_casebook_{tag}.jsonl"));
+        let _ = std::fs::remove_file(&book);
+
+        let personas = Arc::new(RwLock::new(
+            PersonaRegistry::load_from_dir(&pdir, "judge").unwrap(),
+        ));
+        let casebook = Arc::new(Casebook::open(&book));
+
+        let (_event_tx, event_rx) = mpsc::channel::<Event>(16);
+        let (inf_tx, _inf_rx) = mpsc::channel::<Command>(16);
+        let (hw_tx, _hw_rx) = mpsc::channel::<Command>(16);
+        let (disp_tx, _disp_rx) = mpsc::channel::<Command>(64);
+        let (print_tx, mut print_rx) = mpsc::channel::<TrialRecord>(8);
+
+        let mut rt = Runtime::new(
+            Arc::new(mk_cfg()),
+            Arc::new(AtomicBool::new(false)), // cross-exam off → simplest path
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(true)),
+            event_rx,
+            inf_tx,
+            hw_tx,
+            disp_tx,
+            personas,
+            casebook.clone(),
+            print_tx,
+        );
+
+        rt.handle(Event::OperatorStart).await;
+        rt.handle(Event::ChargeReady("the CHARGE".into())).await;
+        rt.handle(Event::Tick).await; // charge_display_secs = 0 → AwaitingPlea
+        rt.handle(Event::PleaAudioReceived(vec![1, 2, 3])).await; // → Transcribing
+        rt.handle(Event::TranscriptReady("the PLEA".into())).await; // → Deliberating
+        rt.handle(Event::VerdictReady(Verdict {
+            guilty: true,
+            deliberation: "the DELIB".into(),
+            remarks: "the REMARKS".into(),
+            pre_announced: false,
+        }))
+        .await; // → PronouncingVerdict
+        rt.handle(Event::TtsFinished).await; // → ExecutingSentence → finalize
+
+        // Queued for printing, with every field harvested from the right place.
+        let rec = print_rx.try_recv().expect("a record was queued for print");
+        assert_eq!(rec.case_no, 1);
+        assert_eq!(rec.charge, "the CHARGE");
+        assert_eq!(rec.plea, "the PLEA");
+        assert_eq!(rec.judge_name, "Judge Testwater");
+        assert!(rec.guilty);
+        assert_eq!(rec.deliberation, "the DELIB");
+        assert_eq!(rec.remarks, "the REMARKS");
+
+        // Appended to the casebook, and the counter advanced.
+        let txt = std::fs::read_to_string(&book).unwrap();
+        assert_eq!(txt.lines().count(), 1);
+        assert_eq!(casebook.next_case_no(), 2);
+
+        let _ = std::fs::remove_file(&book);
+        let _ = std::fs::remove_dir_all(&pdir);
     }
 }
