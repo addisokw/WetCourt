@@ -1,0 +1,28 @@
+[package]
+name = "thermal_printer"
+version = "0.1.0"
+edition = "2021"
+description = "Explore & drive a generic 80mm ESC/POS thermal printer over USB"
+
+[lib]
+name = "thermal_printer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tp"
+path = "src/main.rs"
+
+[dependencies]
+rusb = "0.9"
+anyhow = "1"
+image = { version = "0.25", optional = true }
+
+[features]
+default = ["image"]
+# Enables image-file loading + dithering (raster::from_path/from_image). Pulls a
+# heavy decode tree; disable with default-features = false if you only draw via
+# Canvas and build ESC/POS by hand.
+image = ["dep:image"]
+
+[profile.release]
+opt-level = 2
