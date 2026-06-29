@@ -11,15 +11,18 @@ import {
 import AiJudgePanel from './panels/AiJudgePanel';
 import GavelPanel from './panels/GavelPanel';
 import TurretPanel from './panels/TurretPanel';
+import VisionPanel from './panels/VisionPanel';
 
-type Tab = 'operator' | 'judge_mind' | 'judge_body' | 'gavel' | 'turret';
+type Tab = 'operator' | 'judge_mind' | 'vision' | 'judge_body' | 'gavel' | 'turret';
 type Kind = 'operator' | 'config' | 'hardware';
 
 // 'config' tabs hit the /operator/* endpoints and are safe live (ungated).
 // 'hardware' tabs send direct device commands and require maintenance mode.
+// The Vision feed is read-only monitoring, so it's ungated too.
 const TABS: Array<{ id: Tab; label: string; kind: Kind }> = [
   { id: 'operator', label: 'Operator', kind: 'operator' },
   { id: 'judge_mind', label: 'Judge Mind', kind: 'config' },
+  { id: 'vision', label: 'Vision', kind: 'config' },
   { id: 'judge_body', label: 'Judge Body', kind: 'hardware' },
   { id: 'gavel', label: 'Gavel', kind: 'hardware' },
   { id: 'turret', label: 'Turret', kind: 'hardware' },
@@ -105,6 +108,13 @@ export default function Shell() {
         <Show when={tab() === 'judge_mind'}>
           <div class="maint-tab">
             <JudgeMindPanel />
+          </div>
+        </Show>
+
+        {/* Vision feed — read-only monitoring, ungated. */}
+        <Show when={tab() === 'vision'}>
+          <div class="maint-tab">
+            <VisionPanel />
           </div>
         </Show>
 

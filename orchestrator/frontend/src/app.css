@@ -724,6 +724,34 @@ button.plea.recording:hover { background: #8b2326; }
 }
 .crime-edit textarea { resize: vertical; }
 
+/* ---- Vision panel ---- */
+.vision-feed { position: relative; display: inline-block; max-width: 100%; }
+.vision-feed img {
+  display: block;
+  max-width: 100%;
+  min-width: 320px;
+  min-height: 240px;
+  background: #0b0f14;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+}
+.vision-offline {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-align: center;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid #30363d;
+  border-radius: 4px;
+}
+.vision-offline code { color: #79c0ff; }
+.vision-state { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.vision-state b { color: #79c0ff; }
+
 /* ============ Maintenance / hardware test console ============ */
 .shell {
   display: flex;

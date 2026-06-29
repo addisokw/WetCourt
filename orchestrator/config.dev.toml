@@ -74,6 +74,12 @@ question_timeout_secs = 12
 [display]
 listen_addr = "0.0.0.0:8080"
 
+[vision]
+# Turret vision process (serves /feed + /state). The orchestrator reverse-proxies
+# it at /vision/* so the console stays same-origin. Dev: the booth PC's localhost
+# (run `cd vision && uv run vision.py`). Prod: the vision container on the Spark.
+base_url = "http://localhost:8091"
+
 [logging]
 level = "info,booth=debug"
 log_file = "./booth.log"

@@ -20,6 +20,28 @@ pub struct Config {
     pub default_persona_id: String,
     #[serde(default)]
     pub crimes: CrimesConfig,
+    #[serde(default)]
+    pub vision: VisionConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct VisionConfig {
+    /// Base URL of the turret vision process (serves /feed and /state). The
+    /// orchestrator reverse-proxies these at /vision/* so the console stays
+    /// same-origin (works through the tunnel for remote operators). Dev: the
+    /// booth PC's localhost; prod: the vision container on the Spark.
+    #[serde(default = "d_vision_base_url")]
+    pub base_url: String,
+}
+
+impl Default for VisionConfig {
+    fn default() -> Self {
+        Self { base_url: d_vision_base_url() }
+    }
+}
+
+fn d_vision_base_url() -> String {
+    "http://localhost:8091".into()
 }
 
 fn d_default_persona_id() -> String { "wettington".into() }

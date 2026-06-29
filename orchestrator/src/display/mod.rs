@@ -2,12 +2,13 @@ use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
 use std::time::Duration;
 
 use axum::{
+    body::Body,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State as AxumState,
     },
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -66,6 +67,12 @@ pub struct AppState {
     /// Snapshot of currently-connected devices for `GET /maintenance/devices`.
     /// The device registry keeps this in sync; empty until it lands.
     pub devices: Arc<RwLock<Vec<DeviceInfo>>>,
+    /// Base URL of the turret vision process; the orchestrator reverse-proxies
+    /// its feed/state at `/vision/*` so the console stays same-origin.
+    pub vision_base_url: String,
+    /// HTTP client for the vision proxy. No global timeout — the MJPEG feed is
+    /// an infinite stream; a per-request timeout guards the short /state calls.
+    pub vision_http: reqwest::Client,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -95,6 +102,9 @@ pub fn router(state: AppState) -> Router {
         .route("/maintenance/calibration", get(list_calibrations))
         .route("/maintenance/calibration/{role}", get(get_calibration).put(update_calibration))
         .route("/maintenance/calibration/{role}/save", post(save_calibration))
+        // ---- Vision proxy (reverse-proxies the vision process) ----
+        .route("/vision/feed", get(vision_feed))
+        .route("/vision/state", get(vision_state))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -247,6 +257,54 @@ async fn maintenance_command(
 async fn maintenance_devices(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     let devices = s.devices.read().await.clone();
     (StatusCode::OK, Json(devices))
+}
+
+/// Reverse-proxy the vision process's MJPEG feed. Streamed (no per-request
+/// timeout — it's an infinite multipart stream); a `502` is returned if the
+/// vision process is unreachable so the panel can show "offline".
+async fn vision_feed(AxumState(s): AxumState<AppState>) -> Response {
+    let url = format!("{}/feed", s.vision_base_url.trim_end_matches('/'));
+    match s.vision_http.get(&url).send().await {
+        Ok(resp) => {
+            let mut builder = Response::builder().status(resp.status().as_u16());
+            if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+                builder = builder.header(axum::http::header::CONTENT_TYPE, ct.as_bytes());
+            }
+            builder
+                .body(Body::from_stream(resp.bytes_stream()))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Err(e) => {
+            debug!("vision feed proxy: {e}");
+            (StatusCode::BAD_GATEWAY, "vision offline").into_response()
+        }
+    }
+}
+
+/// Proxy the vision process's `/state` JSON (short, with a guard timeout).
+async fn vision_state(AxumState(s): AxumState<AppState>) -> Response {
+    let url = format!("{}/state", s.vision_base_url.trim_end_matches('/'));
+    match s
+        .vision_http
+        .get(&url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+            match resp.bytes().await {
+                Ok(body) => (
+                    status,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    body,
+                )
+                    .into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("vision read error: {e}")).into_response(),
+            }
+        }
+        Err(_) => (StatusCode::BAD_GATEWAY, "vision offline").into_response(),
+    }
 }
 
 async fn list_calibrations(AxumState(s): AxumState<AppState>) -> impl IntoResponse {

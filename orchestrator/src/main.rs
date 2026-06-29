@@ -159,6 +159,12 @@ async fn main() -> Result<()> {
     let maintenance = Arc::new(AtomicBool::new(false));
     let is_idle = Arc::new(AtomicBool::new(true));
 
+    // HTTP client for the vision reverse-proxy. No global timeout — the MJPEG
+    // feed is an infinite stream; a per-request timeout guards the /state calls.
+    let vision_http = reqwest::Client::builder()
+        .build()
+        .expect("building vision http client");
+
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -173,6 +179,8 @@ async fn main() -> Result<()> {
         is_idle: is_idle.clone(),
         calibration,
         devices,
+        vision_base_url: cfg.vision.base_url.clone(),
+        vision_http,
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;
