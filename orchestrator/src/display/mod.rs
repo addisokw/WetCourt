@@ -120,6 +120,7 @@ pub fn router(state: AppState) -> Router {
         .route("/vision/boresight", post(vision_boresight))
         .route("/vision/gains", post(vision_gains))
         .route("/vision/center", post(vision_center))
+        .route("/vision/confirm_head", post(vision_confirm_head))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -403,6 +404,10 @@ async fn vision_boresight(AxumState(s): AxumState<AppState>, body: Bytes) -> Res
 
 async fn vision_gains(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
     vision_forward_post(&s, "gains", body).await
+}
+
+async fn vision_confirm_head(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
+    vision_forward_post(&s, "confirm_head", body).await
 }
 
 /// One-click recovery from an overshoot: disarm targeting, reset vision's aim

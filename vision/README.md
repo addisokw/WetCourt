@@ -10,14 +10,31 @@ talking to the orchestrator over the network (see
 booth PC for dev and migrates to the DGX Spark (a `dgx-ai-stack/` container) for
 production — same code, the webcam and config follow it.
 
-## Status — Phase B, milestones 1–3
+## Status — Phase B, milestones 1–4a
 
 Done: capture + MediaPipe pose, target points, annotated MJPEG feed, `/state`
 JSON (m1); orchestrator reverse-proxy + operator panel (m2); **vision-owned
 closed-loop targeting** — a proportional servo that streams aim to the
-orchestrator, which relays it to the turret only while armed (m3). Still to come:
-the eye-exclusion safety zone (precise FaceMesh eyes), head-shot operator
-confirmation, and firing on verdict (m4).
+orchestrator, which relays it to the turret only while armed (m3); the
+**eye-exclusion safety layer** — a no-fire zone around the eyes, a `fire_ok`
+flag, and head-shot operator confirmation (m4a, *computed + shown only — nothing
+fires yet*). Still to come: firing on a guilty verdict gated by `fire_ok` (m4b).
+
+## Eye-safety (m4a)
+
+A conservative **eye-exclusion zone** is built from the pose eye points (bounding
+box padded by `--eye-pad`, more upward toward the brow). The **impact point** is
+the boresight; `fire_ok` requires:
+
+- **chest:** locked (the torso is inherently clear of the eyes);
+- **head:** locked **and** operator-confirmed (`/confirm_head`) **and** eyes
+  detected **and** the impact (+`--impact-radius` px) clear of the eye zone;
+- **forehead** is never offered as a target.
+
+The feed overlays the eye zone (red if the impact would hit it) and a
+`FIRE OK` / `NO FIRE` flag. This is conservative by design — a coarse, generous
+zone errs toward *not* firing near the face. (FaceMesh would give tighter eye
+landmarks; a future precision upgrade.)
 
 ## Targeting (m3)
 
@@ -66,6 +83,9 @@ an offline booth.
 | `GET /state` | latest detection JSON (target pixels, boresight, aim, locked, eyes) |
 | `POST /target` | `{"part":"none"\|"chest"\|"head"}` — choose what to track |
 | `POST /boresight` | `{"x":int,"y":int}` — set the boresight pixel |
+| `POST /gains` | `{gain_pan?,gain_tilt?,tolerance?}` — live-tune the servo |
+| `POST /confirm_head` | `{"enabled":bool}` — operator gate for head shots |
+| `POST /center` | stop tracking, reset aim integrator (recovery) |
 | `GET /health` | `ok` |
 
 The operator drives `/target` and `/boresight` through the orchestrator
@@ -92,6 +112,8 @@ streamed to the orchestrator's `/vision/aim` and gated by `/vision/arm`.
 | `--orchestrator` | `BOOTH_VISION_ORCH` | `http://localhost:8080` |
 | `--gain-pan` / `--gain-tilt` | `BOOTH_VISION_GAIN_PAN/TILT` | `0.025` (tune live; sign matters) |
 | `--tolerance` | `BOOTH_VISION_TOL` | `12` (px for LOCKED) |
+| `--eye-pad` | `BOOTH_VISION_EYE_PAD` | `0.8` (eye-zone size; bigger = safer) |
+| `--impact-radius` | `BOOTH_VISION_IMPACT_R` | `25` (px impact uncertainty) |
 
 ## Safety note
 

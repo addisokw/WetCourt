@@ -16,6 +16,9 @@ interface VisionState {
   aim?: { pan: number; tilt: number };
   locked?: boolean;
   gains?: { pan: number; tilt: number; tolerance: number };
+  fire_ok?: boolean;
+  eye_clear?: boolean;
+  head_confirm?: boolean;
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -97,6 +100,21 @@ export default function VisionPanel() {
     setArmed(false);
   }
 
+  async function setHeadConfirm(on: boolean) {
+    await post('/vision/confirm_head', { enabled: on });
+  }
+
+  // Why the system would/wouldn't fire right now (display only this milestone).
+  function fireStatus(): { ok: boolean; text: string } {
+    const s = state();
+    if (!s || (s.target_part ?? 'none') === 'none') return { ok: false, text: 'no target' };
+    if (s.fire_ok) return { ok: true, text: 'FIRE OK' };
+    if (!s.locked) return { ok: false, text: 'NO FIRE — not locked' };
+    if (s.target_part === 'head' && !s.head_confirm) return { ok: false, text: 'NO FIRE — confirm head shot' };
+    if (s.target_part === 'head' && s.eye_clear === false) return { ok: false, text: 'NO FIRE — eyes at risk' };
+    return { ok: false, text: 'NO FIRE' };
+  }
+
   function nudgeGain(axis: 'pan' | 'tilt', d: number) {
     const cur = (axis === 'pan' ? panVal() : tiltVal()) ?? 0;
     const v = round3(cur + d);
@@ -160,6 +178,17 @@ export default function VisionPanel() {
           </div>
         </div>
 
+        <Show when={part() === 'head'}>
+          <div class="vision-row">
+            <label>head shot</label>
+            <button class={`mini ${state()?.head_confirm ? 'active' : ''}`}
+              onClick={() => void setHeadConfirm(!state()?.head_confirm)}>
+              {state()?.head_confirm ? 'confirmed' : 'confirm head shot'}
+            </button>
+            <span class="muted small">head never fires unless confirmed + eyes clear</span>
+          </div>
+        </Show>
+
         <div class="vision-row">
           <label>boresight</label>
           <button class={`mini ${boresightMode() ? 'active' : ''}`} onClick={() => setBoresightMode(!boresightMode())}>
@@ -210,6 +239,9 @@ export default function VisionPanel() {
           <li>
             lock:{' '}
             <b class={state()?.locked ? 'locked' : ''}>{state()?.locked ? 'LOCKED' : 'tracking…'}</b>
+          </li>
+          <li>
+            fire: <b class={fireStatus().ok ? 'locked' : 'nofire'}>{fireStatus().text}</b>
           </li>
           <Show when={state()?.aim}>
             <li class="muted small">aim {state()!.aim!.pan}°, {state()!.aim!.tilt}°</li>

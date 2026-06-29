@@ -83,6 +83,8 @@ _tlock = threading.Lock()
 _target_part = "none"          # "none" | "chest" | "head"
 _boresight: list | None = None  # [x, y]; defaults to frame center
 _aim = {"pan": 0.0, "tilt": 0.0}
+# Operator must explicitly confirm head shots; chest never needs it.
+_head_confirm = False
 # Live-tunable servo gains (deg of aim per pixel of error; sign matters) and the
 # lock tolerance (px). Seeded from the CLI flags in main(), then editable from
 # the operator console via POST /gains.
@@ -95,6 +97,26 @@ _MAX_STEP_DEG = 8.0
 
 def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
+
+
+def _eye_zone(eyes, pad_frac):
+    """Conservative eye-exclusion box from the two eye points: their bounding box
+    padded by a fraction of the inter-eye distance, more upward (toward the brow /
+    forehead, the danger above) and less downward so a nose/chin shot can clear."""
+    if not eyes or len(eyes) < 2:
+        return None
+    (lx, ly), (rx, ry) = eyes[0], eyes[1]
+    sep = max(20.0, ((rx - lx) ** 2 + (ry - ly) ** 2) ** 0.5)
+    pad = pad_frac * sep
+    xs, ys = (lx, rx), (ly, ry)
+    return [min(xs) - pad, min(ys) - pad * 1.3, max(xs) + pad, max(ys) + pad * 0.6]
+
+
+def _circle_hits_box(cx, cy, r, box):
+    """True if a circle (impact point + uncertainty radius) overlaps the box."""
+    nx = _clamp(cx, box[0], box[2])
+    ny = _clamp(cy, box[1], box[3])
+    return (cx - nx) ** 2 + (cy - ny) ** 2 <= r * r
 
 
 def _mid(a, b):
@@ -171,6 +193,7 @@ def detect_loop(cfg):
             bs = list(_boresight) if _boresight else [w // 2, h // 2]
             aim_pan, aim_tilt = _aim["pan"], _aim["tilt"]
             gp, gt, tol = _tune["gain_pan"], _tune["gain_tilt"], _tune["tolerance"]
+            head_confirm = _head_confirm
         state["target_part"] = part
         state["boresight"] = bs
         state["gains"] = {"pan": gp, "tilt": gt, "tolerance": tol}
@@ -189,6 +212,24 @@ def detect_loop(cfg):
         state["aim"] = {"pan": round(aim_pan, 1), "tilt": round(aim_tilt, 1)}
         state["locked"] = locked
 
+        # --- Safety: eye-exclusion zone + fire_ok (this milestone computes and
+        # shows it; it does not fire anything yet). The impact point is the
+        # boresight; it must clear the eye zone (+ uncertainty) to be safe. ---
+        zone = _eye_zone(state.get("eyes"), cfg.eye_pad)
+        eye_clear = zone is None or not _circle_hits_box(bs[0], bs[1], cfg.impact_radius, zone)
+        if part == "chest":
+            fire_ok = locked  # torso is inherently clear of the eyes
+        elif part == "head":
+            # Head shots require a lock, operator confirmation, detected eyes,
+            # and the impact clear of the eye zone.
+            fire_ok = locked and head_confirm and zone is not None and eye_clear
+        else:
+            fire_ok = False
+        state["eye_zone"] = zone
+        state["eye_clear"] = eye_clear
+        state["head_confirm"] = head_confirm
+        state["fire_ok"] = fire_ok
+
         # Boresight marker (where the gun points) + the aim vector to the target.
         cv2.drawMarker(frame, (int(bs[0]), int(bs[1])), (0, 255, 255),
                        cv2.MARKER_TILTED_CROSS, 20, 2)
@@ -199,6 +240,19 @@ def detect_loop(cfg):
             if locked:
                 cv2.putText(frame, "LOCKED", (int(bs[0]) - 42, int(bs[1]) - 24),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Eye-exclusion zone (red when the impact would hit it) + fire status.
+        if zone is not None:
+            zc = (40, 40, 255) if not eye_clear else (60, 90, 160)
+            cv2.rectangle(frame, (int(zone[0]), int(zone[1])),
+                          (int(zone[2]), int(zone[3])), zc, 2)
+            cv2.putText(frame, "eyes", (int(zone[0]), int(zone[1]) - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, zc, 1)
+        if part != "none":
+            txt = "FIRE OK" if fire_ok else "NO FIRE"
+            fc = (0, 255, 0) if fire_ok else (40, 40, 255)
+            cv2.putText(frame, txt, (int(bs[0]) - 40, int(bs[1]) + 32),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, fc, 2)
 
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, cfg.quality])
         if ok:
@@ -313,6 +367,16 @@ def set_target():
     return ("", 204)
 
 
+@app.route("/confirm_head", methods=["POST"])
+def confirm_head():
+    """Operator gate for head shots: head never fires unless this is enabled."""
+    global _head_confirm
+    data = request.get_json(force=True, silent=True) or {}
+    with _tlock:
+        _head_confirm = bool(data.get("enabled", False))
+    return ("", 204)
+
+
 @app.route("/center", methods=["POST"])
 def center():
     """Stop tracking and reset the aim integrator to center. Paired with the
@@ -384,6 +448,11 @@ def main():
     p.add_argument("--pan-limit", type=float, default=90.0)
     p.add_argument("--tilt-limit", type=float, default=45.0)
     p.add_argument("--send-interval", type=float, default=0.066, help="min seconds between aim posts (~15 Hz)")
+    # --- Eye-safety ---
+    p.add_argument("--eye-pad", type=float, default=float(os.environ.get("BOOTH_VISION_EYE_PAD", 0.8)),
+                   help="eye-exclusion padding as a fraction of inter-eye distance (bigger = safer)")
+    p.add_argument("--impact-radius", type=int, default=int(os.environ.get("BOOTH_VISION_IMPACT_R", 25)),
+                   help="impact uncertainty radius (px) added around the boresight for the no-fire test")
     cfg = p.parse_args()
 
     # Seed the live-tunable gains from the CLI flags.
