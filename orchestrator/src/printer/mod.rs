@@ -12,8 +12,10 @@
 //! - **M3:** fill the reserved "moment of justice" photo slot from the vision
 //!   service's firing-still.
 
+pub mod casebook;
 pub mod record;
 pub mod report;
 
+pub use casebook::Casebook;
 pub use record::TrialRecord;
 pub use report::{render, ReportOpts};

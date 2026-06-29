@@ -8,7 +8,7 @@ pub const NO_DEFENSE: &str = "[no defense offered]";
 
 /// One judge follow-up and the defendant's reply, threaded into deliberation
 /// when cross-examination ran.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossExam {
     pub question: String,
     pub answer: String,

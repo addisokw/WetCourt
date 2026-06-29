@@ -1,18 +1,23 @@
 //! The data captured from one trial, plus the docket-alias generator.
 
+use serde::{Deserialize, Serialize};
+
 use crate::state_machine::states::CrossExam;
 
-/// Everything the keepsake transcript needs about a single trial. Assembled at
-/// verdict time (M2) and handed to [`super::report::render`]. It owns its
+/// Everything the keepsake transcript needs about a single trial — and also the
+/// exact shape persisted to the casebook (one JSON line per verdict). Assembled
+/// at verdict time (M2) and handed to [`super::report::render`]. It owns its
 /// strings so a finished record can outlive the trial's transient state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrialRecord {
-    /// Monotonic case counter (persisted across restarts in M2). Drives both the
-    /// printed "Case No." and the deterministic docket alias.
+    /// Monotonic case counter. Recovered on startup from the casebook (highest
+    /// `case_no` on disk + 1). Drives both the printed "Case No." and the
+    /// deterministic docket alias.
     pub case_no: u64,
-    /// Pre-formatted wall-clock stamp, e.g. "2026-06-28 14:09". Kept as a string
-    /// so the renderer stays free of clock/timezone concerns; M1 passes a literal.
-    pub timestamp: String,
+    /// Wall-clock capture time in RFC 3339, e.g. "2026-06-28T14:09:33-05:00".
+    /// Canonical/sortable for the log; the printed header derives a friendly
+    /// form via [`Self::display_time`].
+    pub ts: String,
     /// The absurd charge drawn against the defendant.
     pub charge: String,
     /// Verbatim STT plea. May be the [`NO_DEFENSE`] sentinel when the defendant
@@ -40,6 +45,17 @@ impl TrialRecord {
     /// The defendant's generated nickname, e.g. `The Soggy Litigant`.
     pub fn docket_alias(&self) -> String {
         docket_alias(self.case_no)
+    }
+
+    /// "YYYY-MM-DD HH:MM" carved out of the RFC 3339 `ts` for the printed
+    /// header. Falls back to the raw string if `ts` isn't the expected shape.
+    pub fn display_time(&self) -> String {
+        let t = &self.ts;
+        if t.len() >= 16 && t.as_bytes()[10] == b'T' {
+            format!("{} {}", &t[..10], &t[11..16])
+        } else {
+            t.clone()
+        }
     }
 }
 
@@ -79,7 +95,7 @@ impl TrialRecord {
     pub fn sample_guilty() -> Self {
         Self {
             case_no: 42,
-            timestamp: "2026-06-28 14:09".into(),
+            ts: "2026-06-28T14:09:33-05:00".into(),
             charge: "Operating a rubber duck at an unlicensed volume within 50ft \
                      of a municipal fountain"
                 .into(),
@@ -105,7 +121,7 @@ impl TrialRecord {
     pub fn sample_acquitted() -> Self {
         Self {
             case_no: 7,
-            timestamp: "2026-06-28 14:21".into(),
+            ts: "2026-06-28T14:21:00-05:00".into(),
             charge: "Suspicion of being far too dry in a designated splash zone".into(),
             plea: "I was framed. I am, if anything, the wettest person here.".into(),
             cross: None,
@@ -144,6 +160,15 @@ mod tests {
         let s = docket_alias(42);
         assert!(s.starts_with("The "), "got {s}");
         assert_eq!(s.split_whitespace().count(), 3, "expected 'The Adj Noun', got {s}");
+    }
+
+    #[test]
+    fn display_time_carves_friendly_form() {
+        assert_eq!(TrialRecord::sample_guilty().display_time(), "2026-06-28 14:09");
+        // Malformed ts falls back to the raw string.
+        let mut rec = TrialRecord::sample_guilty();
+        rec.ts = "whenever".into();
+        assert_eq!(rec.display_time(), "whenever");
     }
 
     #[test]

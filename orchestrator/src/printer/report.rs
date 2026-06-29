@@ -119,7 +119,7 @@ fn caption(b: &mut Builder, rec: &TrialRecord, cols: usize) {
         .bold(false)
         .font(Font::B)
         .line(&format!("aka \"{}\"", asciify(&rec.docket_alias())))
-        .line(&format!("Case No. {}   {}", rec.case_label(), asciify(&rec.timestamp)))
+        .line(&format!("Case No. {}   {}", rec.case_label(), rec.display_time()))
         .font(Font::A);
     heavy_rule(b, cols);
 }
