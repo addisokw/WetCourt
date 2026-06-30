@@ -4,6 +4,33 @@ A design document for an interactive courtroom exhibit booth. An LLM acts as jud
 
 This document captures architectural decisions and is intended to inform an implementation session. It's prescriptive about boundaries and protocols; less prescriptive about implementation details inside each component.
 
+> **Status (2026-06): foundational design doc — several sections superseded.**
+> The boundaries, fallback philosophy, deployment-as-a-knob model, and
+> pipelined-TTS approach below all still hold and are the best big-picture read.
+> But parts have moved on as the build progressed; cross-check these against the
+> current docs:
+> - **Hardware is no longer a single USB-serial microcontroller.** It's a
+>   distributed fleet of WiFi/TCP devices that dial in and announce a role
+>   (`HELLO <role>`). This supersedes §4.4, the serial protocol in §5.2, the
+>   `serial` driver notes in §6.5, and Phase 4. Current design:
+>   [`hardware-architecture.md`](hardware-architecture.md) and
+>   [`../protocol/README.md`](../protocol/README.md).
+> - **The squirt is binary.** A guilty verdict fires one fixed duration
+>   (`[squirt] duration_ms`); the 1–5 intensity scale and the
+>   intensity→duration mapping in §5.3 are gone. Conviction rate is the
+>   `[trial] guilty_bias` / per-persona bias knob, not a number in the prompt.
+> - **The state machine has grown** beyond §3: a `Maintenance` state (hardware
+>   test plane) and an optional cross-examination branch were added, and
+>   `Cooldown` is folded into `ExecutingSentence`. See
+>   `orchestrator/src/state_machine/`.
+> - **Newer subsystems not covered here:** vision-guided turret targeting with
+>   an eye-safety fire gate ([`turret-vision-roadmap.md`](turret-vision-roadmap.md))
+>   and the thermal-printer keepsake + casebook
+>   ([`thermal-printer.md`](thermal-printer.md)).
+> - **Display server (§6.4):** the operator `/ws` is single-client
+>   (last-connection-wins); a read-only `/ws/view` fans out to audience monitors.
+> The top-level [`README.md`](../README.md) reflects the current system.
+
 ---
 
 ## 1. Overview
