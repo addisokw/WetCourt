@@ -58,7 +58,7 @@ pub enum HardwareCommand {
     GavelJog(i32),
     /// Point a pan/tilt mechanism. Values are *raw* device units — the host
     /// applies per-device calibration (degrees → raw) before building this.
-    /// Owned by the `turret` and `ai-judge` roles (see protocol spec).
+    /// Owned by the `turret` and `judge-neck` roles (see protocol spec).
     Aim { pan: i32, tilt: i32 },
     Lights(LightState),
     Panel(PanelPattern),

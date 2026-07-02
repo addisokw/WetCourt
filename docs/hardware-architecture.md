@@ -15,8 +15,11 @@ and its responsibilities are being redistributed across independent devices.
 The build now splits into several independent subsystems, each with its own
 firmware and microcontroller, plus a non-MCU vision process:
 
-- **AI judge** — LED-matrix face (Adafruit Matrix Portal M4 / SAMD51) and a
-  pan/tilt gaze mechanism.
+- **AI judge** — **two** boards: `firmware/judge-face/` drives the LED-matrix
+  face (Adafruit Matrix Portal M4 / SAMD51, `PANEL`), and `firmware/judge-neck/`
+  drives the pan/tilt gaze (NanoC6 + 8-servo, `AIM`). They're split because the
+  HUB75 panel + Protomatter timing fully occupy the Matrix Portal, so the gaze
+  reuses the turret's NanoC6 + 8-servo recipe on its own board.
 - **Squirt-gun turret** — **two** NanoC6 boards: `firmware/turret/` drives the
   pan/tilt mech (`AIM`), and `firmware/squirt/` drives the firing relay (`FIRE`).
   They're split because the servo board claims the NanoC6's only Grove I2C pins,
@@ -54,7 +57,8 @@ Two things are intentionally **out of scope** for now:
 WetCourt/
 ├── orchestrator/          # brain + operator UI. Owns the DEVICE REGISTRY + protocol host
 ├── firmware/              # one self-contained project per independently-flashed board
-│   ├── ai-judge/          #   Matrix Portal M4 (SAMD51): LED face + pan/tilt gaze
+│   ├── judge-face/        #   Matrix Portal M4 (SAMD51): LED-matrix face — PANEL
+│   ├── judge-neck/        #   M5 NanoC6 (esp32c6) + 8-servo: pan/tilt gaze — AIM
 │   ├── gavel/             #   M5 NanoC6 (esp32c6): servo gavel
 │   ├── turret/            #   M5 NanoC6 (esp32c6): pan/tilt servos — AIM
 │   ├── squirt/            #   M5 NanoC6 (esp32c6): firing relay — FIRE
@@ -76,7 +80,8 @@ hardware = a new sibling dir + one registry entry + a role in the spec.
 
 | Subsystem | Board / MCU | Owns (verbs / events) | Lives in |
 |---|---|---|---|
-| AI judge (face + gaze) | Adafruit Matrix Portal M4 (SAMD51) | `PANEL`, gaze `AIM` | `firmware/ai-judge/` |
+| Judge face | Adafruit Matrix Portal M4 (SAMD51 + AirLift) | `PANEL` | `firmware/judge-face/` |
+| Judge neck (gaze) | M5Stack NanoC6 (esp32c6) + 8-servo | gaze `AIM` | `firmware/judge-neck/` |
 | Gavel | M5Stack NanoC6 (esp32c6) | `GAVEL` | `firmware/gavel/` |
 | Turret (aim) | M5Stack NanoC6 (esp32c6) + camera | turret `AIM`; tracking | `firmware/turret/` + `vision/` |
 | Squirt (fire) | M5Stack NanoC6 (esp32c6) | `FIRE` | `firmware/squirt/` |
@@ -93,7 +98,7 @@ The hardware layer goes from **one connection → a device registry**:
   on connect, identifies itself with `HELLO <role>` (see the protocol spec).
 - The orchestrator keeps a registry of `role → connection` and **routes** each
   `HardwareCommand` to the device that owns that verb (e.g. `FIRE` → `turret`,
-  `GAVEL` → `gavel`, `PANEL` → `ai-judge`).
+  `GAVEL` → `gavel`, `PANEL` → `judge-face`).
 - `HardwareCommand` gains a target (or each verb maps to a role); acks/timeouts
   stay per-command but are tracked per-connection.
 - A command whose target device is absent degrades gracefully (log + skip),

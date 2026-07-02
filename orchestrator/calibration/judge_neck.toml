@@ -1,0 +1,20 @@
+role = "judge_neck"
+
+# Pan/tilt gaze for the judge head (NanoC6 + 8-servo board). The LED face is a
+# separate board (role judge_face); PANEL patterns are sent directly
+# (idle / thinking / verdict), not calibrated here.
+[pan]
+min = 1000
+max = 2000
+center = 1500
+invert = false
+limit_min_deg = -60.0
+limit_max_deg = 60.0
+
+[tilt]
+min = 1000
+max = 2000
+center = 1500
+invert = false
+limit_min_deg = -30.0
+limit_max_deg = 30.0

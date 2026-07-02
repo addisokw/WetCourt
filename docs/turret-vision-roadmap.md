@@ -12,7 +12,7 @@ re-deriving it.
   beyond the servo I2C bus. Servos confirmed working on the rig.
 - Orchestrator multi-device registry: `HELLO <role>` handshake, per-role routing,
   per-connection ack matching (`orchestrator/src/hardware/tcp.rs`). Roles:
-  `ai_judge`, `gavel`, `turret`, `squirt`. Calibration in
+  `judge_face`, `judge_neck`, `gavel`, `turret`, `squirt`. Calibration in
   `orchestrator/calibration/*.toml` (turret pan/tilt → servo µs, `invert=true`).
 
 **Phase B — vision (m1–m4a done, on `main`).**

@@ -79,7 +79,7 @@ is a service or a device it talks to over a network boundary.
    │  • turret  AIM (pan/tilt)   │◀────▶│  webcam → MediaPipe pose →    │
    │  • squirt  FIRE (relay)     │ aim  │  target points, MJPEG feed,   │
    │  • gavel   GAVEL (servo)    │stream│  closed-loop aim + fire_ok    │
-   │  • ai-judge PANEL (future)  │      │  eye-safety verdict           │
+   │  • judge  PANEL + gaze AIM  │      │  eye-safety verdict           │
    └─────────────────────────────┘      └──────────────────────────────┘
 ```
 
@@ -286,7 +286,8 @@ Commands are line-based ASCII (`VERB args\n`), each answered with `OK <verb>` or
 | turret | `turret` | `AIM <pan_us> <tilt_us>`, `PING` | NanoC6 + 8-Servos (pan/tilt) |
 | squirt | `squirt` | `FIRE <ms>`, `PING` | NanoC6 + 3A relay |
 | gavel | `gavel` | `GAVEL [geometry]`, `GJOG <us>`, `PING` | NanoC6 + 8-Servos (arm) |
-| *(future)* | `ai-judge` | `PANEL`, `AIM`, `PING` | face panel / eye gimbal |
+| judge-face | `judge-face` | `PANEL`, `PING` | Matrix Portal M4 + 64×32 HUB75 panel |
+| judge-neck | `judge-neck` | `AIM <pan_us> <tilt_us>`, `PING` | NanoC6 + 8-Servos (pan/tilt gaze) |
 
 The turret (aim) and squirt (fire) are split across two boards because the
 NanoC6's only Grove pins are consumed by the servo board's I2C on the turret.

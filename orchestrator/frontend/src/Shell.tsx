@@ -8,7 +8,7 @@ import {
   fetchDevices,
   maintenanceActive,
 } from './maintenance';
-import AiJudgePanel from './panels/AiJudgePanel';
+import JudgeBodyPanel from './panels/JudgeBodyPanel';
 import GavelPanel from './panels/GavelPanel';
 import TurretPanel from './panels/TurretPanel';
 import VisionPanel from './panels/VisionPanel';
@@ -134,7 +134,7 @@ export default function Shell() {
               }
             >
               <Switch>
-                <Match when={tab() === 'judge_body'}><AiJudgePanel /></Match>
+                <Match when={tab() === 'judge_body'}><JudgeBodyPanel /></Match>
                 <Match when={tab() === 'gavel'}><GavelPanel /></Match>
                 <Match when={tab() === 'turret'}><TurretPanel /></Match>
               </Switch>

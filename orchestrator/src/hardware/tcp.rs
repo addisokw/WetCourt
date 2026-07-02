@@ -258,11 +258,14 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         // Aim and fire are separate boards: the turret pans/tilts, the squirt
         // board pulls the trigger.
         HardwareCommand::Fire(_) => RouteTarget::Role(Role::Squirt),
+        // Trial AIM is the squirt turret. The judge's gaze (`JudgeNeck`) also
+        // accepts AIM, but it's driven from the maintenance console / vision,
+        // not the trial FSM, so the untargeted verb→role map points at Turret.
         HardwareCommand::Aim { .. } => RouteTarget::Role(Role::Turret),
         HardwareCommand::Gavel
         | HardwareCommand::GavelStrike { .. }
         | HardwareCommand::GavelJog(_) => RouteTarget::Role(Role::Gavel),
-        HardwareCommand::Panel(_) => RouteTarget::Role(Role::AiJudge),
+        HardwareCommand::Panel(_) => RouteTarget::Role(Role::JudgeFace),
         HardwareCommand::Lights(_) => RouteTarget::Skip,
         HardwareCommand::Ping => RouteTarget::SynthAck,
     }

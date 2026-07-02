@@ -19,14 +19,23 @@ use super::protocol::HardwareCommand;
 ///
 /// Two spellings coexist on purpose:
 /// - `as_str()` is the `snake_case` form used by the JSON API and the per-role
-///   calibration filenames (`ai_judge`, `gavel`, `turret`).
+///   calibration filenames (`judge_neck`, `gavel`, `turret`).
 /// - `from_wire()` parses the `HELLO <role>` token, accepting the protocol
-///   spec's canonical hyphenated spelling (`ai-judge`) and tolerating the
+///   spec's canonical hyphenated spelling (`judge-neck`) and tolerating the
 ///   underscore form so firmware authors can't trip on the separator.
+///
+/// The judge head is split across two boards, like turret/squirt: `JudgeFace`
+/// (Matrix Portal LED face — owns `PANEL`) and `JudgeNeck` (NanoC6 + servos for
+/// pan/tilt gaze — owns `AIM`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
-    AiJudge,
+    /// LED-matrix face — owns `PANEL`. The pan/tilt gaze is the separate
+    /// `JudgeNeck` board.
+    JudgeFace,
+    /// Pan/tilt gaze for the judge head — owns `AIM`. Calibrated via
+    /// `judge_neck.toml`.
+    JudgeNeck,
     Gavel,
     /// Pan/tilt aim mechanism — owns `AIM`. (The firing relay is a separate
     /// `Squirt` board because the NanoC6 has no spare GPIO alongside the
@@ -40,7 +49,8 @@ impl Role {
     /// `snake_case` name — JSON API + calibration filenames.
     pub fn as_str(&self) -> &'static str {
         match self {
-            Role::AiJudge => "ai_judge",
+            Role::JudgeFace => "judge_face",
+            Role::JudgeNeck => "judge_neck",
             Role::Gavel => "gavel",
             Role::Turret => "turret",
             Role::Squirt => "squirt",
@@ -48,14 +58,15 @@ impl Role {
     }
 
     /// Parse the `HELLO <role>` wire token. Accepts the protocol spec's
-    /// hyphenated `ai-judge` and tolerates `ai_judge`; returns `None` for an
+    /// hyphenated `judge-neck` and tolerates `judge_neck`; returns `None` for an
     /// unknown role (caller replies `BYE unknown_role`).
     pub fn from_wire(s: &str) -> Option<Role> {
         match s {
             "turret" => Some(Role::Turret),
             "squirt" => Some(Role::Squirt),
             "gavel" => Some(Role::Gavel),
-            "ai-judge" | "ai_judge" => Some(Role::AiJudge),
+            "judge-face" | "judge_face" => Some(Role::JudgeFace),
+            "judge-neck" | "judge_neck" => Some(Role::JudgeNeck),
             _ => None,
         }
     }

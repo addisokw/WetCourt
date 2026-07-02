@@ -40,22 +40,27 @@ second connection claiming a live role replaces the stale one.
 | `bad_version` | Firmware major is incompatible (reserved; not yet enforced). |
 
 Role tokens are case-sensitive. The canonical spelling is the hyphenated form in
-the table below (`ai-judge`); the host also accepts the underscore form
-(`ai_judge`) it uses internally for the JSON API and calibration filenames.
+the table below (`judge-neck`); the host also accepts the underscore form
+(`judge_neck`) it uses internally for the JSON API and calibration filenames.
 
 ### Roles
 
 | Role | Subsystem | Verbs it must accept |
 |---|---|---|
-| `ai-judge` | LED-matrix face + pan/tilt gaze | `PANEL`, `AIM`, `PING` |
+| `judge-face` | LED-matrix judge face | `PANEL`, `PING` |
+| `judge-neck` | judge-head pan/tilt gaze | `AIM`, `PING` |
 | `gavel` | servo gavel | `GAVEL`, `GJOG`, `PING` |
 | `turret` | squirt-gun pan/tilt aim | `AIM`, `PING` |
 | `squirt` | squirt-gun firing relay | `FIRE`, `PING` |
 | `swear-in` *(future)* | capacitive start trigger | `PING` (emits `BUTTON`) |
 
-`turret` and `squirt` are split across two NanoC6 boards: the servo board claims
-the NanoC6's only I2C-capable Grove pins for pan/tilt, leaving no GPIO for the
-firing relay, so the relay gets its own board.
+Two subsystems are split across two boards each. `turret` and `squirt`: the
+servo board claims the NanoC6's only I2C-capable Grove pins for pan/tilt,
+leaving no GPIO for the firing relay, so the relay gets its own board. The judge
+head, `judge-face` and `judge-neck`: the LED matrix runs on an Adafruit Matrix
+Portal M4 (which the HUB75 panel + Protomatter timing fully occupy), while the
+gaze pan/tilt reuses the turret's proven NanoC6 + 8-servo recipe on its own
+board.
 
 New roles are added here first, then implemented.
 
@@ -66,10 +71,10 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | Line | Role(s) | Meaning |
 |---|---|---|
 | `FIRE <ms>` | squirt | Fire the squirt gun for `<ms>` milliseconds. |
-| `AIM <pan> <tilt>` | turret, ai-judge | Point the pan/tilt mech (degrees or device-defined units). |
+| `AIM <pan> <tilt>` | turret, judge-neck | Point the pan/tilt mech (degrees or device-defined units). |
 | `GAVEL [<rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms>]` | gavel | One gavel strike. The host normally sends all six tunables (servo µs positions + dwell ms, from `gavel.toml`) so the firmware stays stateless; a bare `GAVEL` uses the firmware's compiled defaults. |
 | `GJOG <us>` | gavel | Move the gavel servo to a raw pulse-width (µs) and hold — live position preview for console tuning. |
-| `PANEL <pattern>` | ai-judge | Set face/panel animation (see vocab). |
+| `PANEL <pattern>` | judge-face | Set face/panel animation (see vocab). |
 | `LIGHTS <state>` | *(deferred — no owner)* | Booth lighting. Not currently driven by any device; may return later. |
 | `PING` | any | Keepalive; acknowledged with `OK PING`, like any other command. |
 

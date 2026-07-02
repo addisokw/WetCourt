@@ -5,27 +5,24 @@ import AimControl from './AimControl';
 
 const PATTERNS = ['idle', 'thinking', 'verdict'] as const;
 
-export default function AiJudgePanel() {
+// The judge head is two independently-flashed boards: the LED-matrix face
+// (role judge_face, owns PANEL) and the pan/tilt gaze neck (role judge_neck,
+// owns AIM). They share this one console tab.
+export default function JudgeBodyPanel() {
   const [ack, run] = useAck();
 
   return (
     <div class="panel-card">
       <header class="panel-card-head">
-        <h2>AI judge — face &amp; gaze</h2>
-        <DeviceBadge role="ai_judge" />
+        <h2>Judge body — face &amp; neck</h2>
       </header>
 
       <section class="panel-section">
-        <h3>Gaze</h3>
-        <AimControl role="ai_judge" />
-      </section>
-
-      <section class="panel-section">
-        <h3>Face panel</h3>
+        <h3>Face <DeviceBadge role="judge_face" /></h3>
         <div class="btn-row">
           <For each={PATTERNS}>
             {(pattern) => (
-              <button onClick={() => void run(sendCommand('ai_judge', { cmd: 'panel', pattern }))}>
+              <button onClick={() => void run(sendCommand('judge_face', { cmd: 'panel', pattern }))}>
                 {pattern}
               </button>
             )}
@@ -35,7 +32,12 @@ export default function AiJudgePanel() {
       </section>
 
       <section class="panel-section">
-        <CalibrationEditor role="ai_judge" />
+        <h3>Neck (gaze) <DeviceBadge role="judge_neck" /></h3>
+        <AimControl role="judge_neck" />
+      </section>
+
+      <section class="panel-section">
+        <CalibrationEditor role="judge_neck" />
       </section>
     </div>
   );
