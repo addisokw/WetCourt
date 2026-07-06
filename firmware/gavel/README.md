@@ -6,14 +6,13 @@ for verdicts and "order in the court."
 | | |
 |---|---|
 | **Board** | M5Stack NanoC6 (ESP32-C6) |
-| **Servo** | M5Stack 8-Servos board (I2C `0x25`) — **ch0 = gavel arm** |
+| **Servo** | signal **directly on Grove `G2`** (50 Hz PWM, adapter cable) — no 8-Servos board; both units are taken by the turret and judge-neck pan/tilts |
 | **Owns verbs** | `GAVEL`, `GJOG`, `PING` |
 | **Role** | `gavel` (sent in the `HELLO` handshake) |
 | **Protocol** | [`../../protocol/README.md`](../../protocol/README.md) (v2) |
 
 One `GAVEL` is one rap: the firmware swings the arm **REST → RAISE → STRIKE →
-REST** and acks `OK GAVEL` (or `ERR GAVEL no_servo_board` if the 8-Servos board
-isn't on the bus).
+REST** and acks `OK GAVEL` after the swing completes.
 
 Like the turret, the firmware is **stateless**: the host sends the full strike
 geometry on every command —
@@ -29,10 +28,12 @@ position preview while tuning.
 
 ## Wiring
 
-- **8-Servos board** on the NanoC6 **Grove port** (I2C): `SDA = GPIO2`,
-  `SCL = GPIO1` (`I2C(0, scl=Pin(1), sda=Pin(2))`). Gavel servo → **channel 0**.
-- Power the **servo rail from the 8-Servos board's external input**, not from the
-  NanoC6 — a beefy servo's stall current will brown out the MCU. Share grounds.
+- **Servo signal** → Grove **`G2`** (the yellow / SDA-position wire) via an
+  adapter cable; the firmware drives it as 50 Hz PWM (`PWM(Pin(2), freq=50)`,
+  pulse width in µs via `duty_ns`).
+- **Power the servo from an external 5 V supply, NOT the Grove 5 V pin** — a
+  beefy servo's stall current will brown out the NanoC6. Share grounds
+  (servo GND ↔ Grove GND ↔ supply GND).
 
 ## Runtime & files (MicroPython)
 
@@ -89,6 +90,9 @@ strike (`STRIKE < REST < RAISE`); flip if mirrored. Dwells are clamped to
 - **One rap per `GAVEL`** to match the spec's "one gavel strike." If "order in the
   court" should be a flurry, that's a protocol change (a `GAVEL <n>` arg), to be
   agreed in `protocol/README.md` first — not a silent firmware divergence.
-- **MicroPython port not yet verified on hardware** — the Arduino version was;
-  logic is stub-tested host-side. First bench session: `./deploy.sh`, then re-run
-  the Gavel tab bring-up (jog + test strike).
+- **No servo presence detection**: direct PWM can't tell whether a servo is
+  attached or powered (the old 8-Servos board could be probed on I2C), so
+  `GAVEL`/`GJOG` always ack `OK` — watch the mech, not just the ack.
+- **Servo motion not yet verified on hardware** (the adapter cable doesn't
+  exist yet); the board itself is commissioned — flashed, on WiFi, OTA-updated
+  by name, acks verified over the wire.

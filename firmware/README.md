@@ -15,7 +15,7 @@ spec.
 | Squirt fire | M5Stack NanoC6 (esp32c6) + relay, MicroPython | `FIRE`, `PING` | [`squirt/`](squirt/) | **in progress** |
 | Judge face | Adafruit Matrix Portal M4 (SAMD51 + AirLift), CircuitPython | `FACE`, `AUDIO`, `PERSONA`, `AIM`, `PANEL` *(legacy)*, `PING` | [`judge-face/`](judge-face/) | **in progress** |
 | Judge neck (gaze) | M5Stack NanoC6 (esp32c6) + 8-Servos, MicroPython | `AIM`, `PING` | [`judge-neck/`](judge-neck/) | scaffolded |
-| Gavel | M5Stack NanoC6 (esp32c6) + 8-Servos, MicroPython | `GAVEL`, `GJOG`, `PING` | [`gavel/`](gavel/) | **in progress** |
+| Gavel | M5Stack NanoC6 (esp32c6), servo direct on G2, MicroPython | `GAVEL`, `GJOG`, `PING` | [`gavel/`](gavel/) | **in progress** |
 | Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `swear-in/` | future |
 
 Two subsystems are each split across two boards for a hardware reason. The
