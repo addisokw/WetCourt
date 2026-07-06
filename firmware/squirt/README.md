@@ -22,26 +22,38 @@ routes `AIM` → `turret` and `FIRE` → `squirt`.
 
 The **3A Relay** plugs into this NanoC6's **Grove port**. Its control signal
 lands on a Grove GPIO — `GPIO2` (SDA position) or `GPIO1` (SCL position).
-`squirt.ino` defaults `RELAY_PIN = 2`; if the relay doesn't click, set it to `1`.
+`main.py` defaults `RELAY_PIN = 2`; if the relay doesn't click, set it to `1`.
 HIGH = fire.
 
-## Configure before flashing
+## Runtime & files (MicroPython)
 
-1. **Secrets** (gitignored): `cp secrets.example.h secrets.h`, then fill in
+MicroPython reimplementation of the retired Arduino sketch (git history has
+it): same hardware and wire contract. `main.py` is the relay pin + `FIRE`
+handler — off at boot, off in a `finally` after every pulse, duration clamped
+to 1000 ms. The protocol client (WiFi, dial, `HELLO`, line loop, RGB status
+LED: red = no WiFi · amber = dialing · green = connected) is the shared
+[`../micropython/wetline.py`](../micropython/wetline.py).
+
+## Setup
+
+1. **Flash MicroPython** (one-time): **v1.28.0 `ESP32_GENERIC_C6`** from
+   <https://micropython.org/download/ESP32_GENERIC_C6/>.
+
+   ```sh
+   pip3 install esptool mpremote
+   python3 -m esptool --port /dev/cu.usbmodem* erase-flash
+   python3 -m esptool --port /dev/cu.usbmodem* --baud 460800 \
+       write-flash 0x0 ESP32_GENERIC_C6-*.bin     # C6 is RISC-V: offset 0x0
+   ```
+
+2. **Secrets** (gitignored): `cp secrets.example.py secrets.py`, then fill in
    `WIFI_SSID` / `WIFI_PASS` / `ORCH_HOST` (orchestrator LAN IP) / `ORCH_PORT`
-   (`8090`).
-2. **Relay pin**: confirm `RELAY_PIN` in `squirt.ino` (see Wiring).
+   (`8090`). Confirm `RELAY_PIN` in `main.py` (see Wiring).
+3. **Deploy**: `./deploy.sh` — copies `main.py`, `secrets.py`, and the shared
+   `wetline.py`, then resets. Watch it with `mpremote repl`.
 
-## Build & flash
-
-Arduino IDE or `arduino-cli` with the **ESP32 board package** (select the
-*M5NanoC6* / ESP32-C6 target). No extra libraries — only `WiFi.h` from the ESP32
-core.
-
-```sh
-arduino-cli compile --fqbn esp32:esp32:m5stack_nanoc6 firmware/squirt
-arduino-cli upload  --fqbn esp32:esp32:m5stack_nanoc6 -p <PORT> firmware/squirt
-```
+> The MicroPython port is not yet verified on hardware (the Arduino version
+> was); logic is stub-tested host-side.
 
 ## Bring-up
 

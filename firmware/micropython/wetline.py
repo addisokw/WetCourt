@@ -3,8 +3,11 @@
 # The role-agnostic half of a device firmware: brings up WiFi, dials the
 # orchestrator, completes the HELLO handshake, then services newline-delimited
 # commands, acking exactly once per command (see ../../protocol/README.md).
-# The role name and its verb handlers come from main.py — the other NanoC6
-# boards (turret/squirt/gavel) can reuse this file unchanged.
+# The role name and its verb handlers come from each board's main.py.
+#
+# SHARED by all the MicroPython boards (judge-neck, turret, squirt, gavel):
+# this file lives once here in firmware/micropython/ and every board's
+# deploy.sh copies it onto the device — edit it here, not per board.
 #
 # Status RGB LED (NanoC6 onboard WS2812):
 #   red   = WiFi down / associating

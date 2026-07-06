@@ -1,5 +1,5 @@
 #!/bin/sh
-# Deploy the judge-neck MicroPython firmware to a NanoC6 via mpremote.
+# Deploy the gavel MicroPython firmware to a NanoC6 via mpremote.
 #
 # Prereqs (see README.md):
 #   - MicroPython ESP32_GENERIC_C6 flashed at offset 0x0 (one-time)

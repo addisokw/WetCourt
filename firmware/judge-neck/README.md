@@ -19,9 +19,9 @@ hardware, same wire contract.
 | File | Role |
 |---|---|
 | `main.py` | servo driver + `AIM` handler (runs at boot) |
-| `wetline.py` | role-agnostic protocol client: WiFi, dial, `HELLO`, line loop, status LED — reusable by the other NanoC6 boards |
+| [`../micropython/wetline.py`](../micropython/wetline.py) | shared protocol client: WiFi, dial, `HELLO`, line loop, status LED (one copy for all NanoC6 boards) |
 | `secrets.example.py` | template for WiFi/orchestrator config (copy → `secrets.py`, gitignored) |
-| `deploy.sh` | copy the three files to the board via `mpremote` |
+| `deploy.sh` | copy `main.py` + `secrets.py` + the shared `wetline.py` to the board via `mpremote` |
 
 ## Setup
 
