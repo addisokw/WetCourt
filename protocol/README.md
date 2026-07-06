@@ -47,7 +47,7 @@ the table below (`judge-neck`); the host also accepts the underscore form
 
 | Role | Subsystem | Verbs it must accept |
 |---|---|---|
-| `judge-face` | LED-matrix judge face | `PANEL`, `PING` |
+| `judge-face` | LED-matrix judge face | `FACE`, `AUDIO`, `PERSONA`, `PANEL` *(legacy)*, `PING` |
 | `judge-neck` | judge-head pan/tilt gaze | `AIM`, `PING` |
 | `gavel` | servo gavel | `GAVEL`, `GJOG`, `PING` |
 | `turret` | squirt-gun pan/tilt aim | `AIM`, `PING` |
@@ -74,17 +74,28 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | `AIM <pan> <tilt>` | turret, judge-neck | Point the pan/tilt mech (degrees or device-defined units). |
 | `GAVEL [<rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms>]` | gavel | One gavel strike. The host normally sends all six tunables (servo µs positions + dwell ms, from `gavel.toml`) so the firmware stays stateless; a bare `GAVEL` uses the firmware's compiled defaults. |
 | `GJOG <us>` | gavel | Move the gavel servo to a raw pulse-width (µs) and hold — live position preview for console tuning. |
-| `PANEL <pattern>` | judge-face | Set face/panel animation (see vocab). |
+| `FACE <phase>` | judge-face | Set the eye/face phase (see vocab). Supersedes `PANEL`. |
+| `AUDIO <level>` | judge-face | Live mic envelope, `0.0`–`1.0`; stream at ~20–30 Hz while `listening` (drives pupil dilation). Acked like any command. |
+| `PERSONA <name>` | judge-face | Switch the judge's visual persona (see vocab). |
+| `PANEL <pattern>` | judge-face | *Legacy* face animation (see vocab); kept while the host migrates to `FACE`. |
 | `LIGHTS <state>` | *(deferred — no owner)* | Booth lighting. Not currently driven by any device; may return later. |
 | `PING` | any | Keepalive; acknowledged with `OK PING`, like any other command. |
 
 ### Vocabularies
 
 - `LIGHTS <state>`: `splash_idle` · `splash_arming` · `guilty` · `not_guilty`
-- `PANEL <pattern>`: `idle` · `thinking` · `verdict`
+- `FACE <phase>`: `idle` · `listening` · `deliberating` · `verdict:guilty` ·
+  `verdict:innocent`
+- `PERSONA <name>`: `honorable` · `magistrate` · `cosmic` · `nullpointer` ·
+  `petunia`
+- `PANEL <pattern>` *(legacy)*: `idle` · `thinking` · `verdict`. The firmware
+  maps these onto `FACE` phases: `idle`→`idle`, `thinking`→`deliberating`,
+  `verdict`→`verdict:guilty`.
 
-These mirror the orchestrator's `LightState` / `PanelPattern`. Extend in both
-places together.
+`LIGHTS`/`PANEL` mirror the orchestrator's `LightState` / `PanelPattern` —
+extend in both places together. `FACE`/`AUDIO`/`PERSONA` are spec'd
+firmware-first (the judge-face CircuitPython eye implements them); the
+orchestrator still emits only `PANEL` today and should migrate to `FACE`.
 
 ## Acks (device → host)
 

@@ -1,0 +1,12 @@
+# Wet Court judge-face — copy to settings.toml (gitignored) and fill in.
+# CircuitPython exposes these via os.getenv (see config.py).
+
+WIFI_SSID = "your-ssid"
+WIFI_PASS = "your-password"
+ORCH_HOST = "192.168.1.50"   # orchestrator LAN IP
+ORCH_PORT = 8090
+
+# Optional:
+# EYE_DEMO = 1               # force demo mode (never dial the orchestrator)
+# EYE_PERSONA = "honorable"  # boot persona: honorable | magistrate | cosmic
+#                            #               | nullpointer | petunia

@@ -1,3 +1,5 @@
 # Local network config + WiFi credentials — never publish to the repo.
-# Copy secrets.example.h to secrets.h and fill it in.
+# Copy settings.toml.example to settings.toml and fill it in.
+settings.toml
+# Leftover from the retired Arduino sketch (was the same role: local creds).
 secrets.h
