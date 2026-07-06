@@ -26,9 +26,11 @@ refresh timing fully occupy the Matrix Portal M4, so the pan/tilt gaze reuses th
 turret's NanoC6 + 8-servo recipe on its own board (role `judge-neck`).
 
 All four NanoC6 boards run **MicroPython** (v1.28.0 `ESP32_GENERIC_C6`), each a
-thin `main.py` of hardware glue over one shared protocol client —
-[`micropython/wetline.py`](micropython/) — the single exception to the
-islands rule, deployed per board by its `deploy.sh`. The judge face stays
+thin `main.py` of hardware glue over shared support code in
+[`micropython/`](micropython/) — the single exception to the islands rule,
+deployed per board by its `deploy.sh`: `wetline.py` (the protocol client) and
+`ota.py` (token-gated, staged, sha256-verified **WiFi updates** via
+`otapush.py` — no cable after first deploy). The judge face stays
 CircuitPython for displayio.
 
 Each device dials the orchestrator over TCP and identifies with `HELLO <role>`;

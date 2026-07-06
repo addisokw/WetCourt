@@ -20,7 +20,7 @@ from machine import Pin, I2C
 
 import wetline
 
-FW_VERSION = "0.2"           # 0.2 = MicroPython rewrite (0.1 was Arduino)
+FW_VERSION = "0.3"           # 0.3 adds OTA; 0.2 was the MicroPython rewrite
 
 # 8-Servos board (verified: I2C 0x25; STM32 sub-MCU).
 SERVO_ADDR = 0x25

@@ -44,10 +44,13 @@ hardware, same wire contract.
 3. **Deploy**: `./deploy.sh` — copies `wetline.py`, `secrets.py`, `main.py`
    and resets; the board boots into `main.py`. Watch it with
    `mpremote repl`.
+4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;
+   afterwards `python3 ../micropython/otapush.py <board-ip>` updates over WiFi,
+   no cable (see [`../micropython/`](../micropython/README.md)).
 
 ## Protocol
 
-Dials the orchestrator, `HELLO judge-neck 0.2`, then services (one ack per
+Dials the orchestrator, `HELLO judge-neck 0.3`, then services (one ack per
 command, per [the device protocol](../../protocol/README.md)):
 
 | Command | Effect |

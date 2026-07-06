@@ -27,7 +27,7 @@ _RED = (16, 0, 0)
 _AMBER = (16, 8, 0)
 _GREEN = (0, 12, 0)
 
-_EAGAIN = 11
+_EAGAIN = (11, 35)   # lwip / BSD spellings (35 shows up in host-side testing)
 _np = None
 
 
@@ -99,7 +99,7 @@ def _connect(role, version):
     return s
 
 
-def _serve(sock, wlan, handlers):
+def _serve(sock, wlan, handlers, ota):
     """Service the link until it drops (always exits by raising OSError)."""
     buf = bytearray()
 
@@ -114,7 +114,7 @@ def _serve(sock, wlan, handlers):
             if data == b"":
                 raise OSError(-1, "peer closed")
         except OSError as e:
-            if not (e.args and e.args[0] == _EAGAIN):   # EAGAIN = no data yet
+            if not (e.args and e.args[0] in _EAGAIN):   # EAGAIN = no data yet
                 raise
         if data:
             for b in data:
@@ -131,6 +131,8 @@ def _serve(sock, wlan, handlers):
                 else:
                     buf = bytearray()                    # drop a runaway line
         else:
+            if ota:
+                ota.poll()
             time.sleep_ms(10)
         now = time.ticks_ms()
         if time.ticks_diff(now, wifi_check) > 2000:
@@ -139,9 +141,24 @@ def _serve(sock, wlan, handlers):
                 raise OSError(-1, "wifi dropped")
 
 
+def _make_ota():
+    """OTA update listener (see ota.py) — None when disabled or not deployed."""
+    try:
+        import ota
+        return ota.server_from_secrets()
+    except Exception as e:
+        print("ota: disabled (%s)" % e)
+        return None
+
+
 def run(role, version, handlers):
-    """Run forever: WiFi -> dial -> HELLO -> serve, reconnecting on failure."""
+    """Run forever: WiFi -> dial -> HELLO -> serve, reconnecting on failure.
+
+    The OTA listener is polled at every idle point WiFi allows, so firmware
+    can be pushed even while the orchestrator is down.
+    """
     wlan = network.WLAN(network.STA_IF)
+    ota = _make_ota()
     while True:
         if not _ensure_wifi(wlan):
             continue                       # _ensure_wifi already waited ~15 s
@@ -150,12 +167,15 @@ def run(role, version, handlers):
             sock = _connect(role, version)
         except OSError as e:
             print("link:", e)
-            time.sleep(2)                  # backoff before redial
+            for _ in range(20):            # ~2 s backoff, OTA stays serviced
+                if ota:
+                    ota.poll()
+                time.sleep_ms(100)
             continue
         _led(_GREEN)
         print("connected to orchestrator")
         try:
-            _serve(sock, wlan, handlers)
+            _serve(sock, wlan, handlers, ota)
         except OSError as e:
             print("link dropped:", e)
         try:

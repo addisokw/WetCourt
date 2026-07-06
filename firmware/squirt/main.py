@@ -19,7 +19,7 @@ from machine import Pin
 
 import wetline
 
-FW_VERSION = "0.2"           # 0.2 = MicroPython rewrite (0.1 was Arduino)
+FW_VERSION = "0.3"           # 0.3 adds OTA; 0.2 was the MicroPython rewrite
 
 # Relay signal pin. The 3A Relay's control wire lands on a NanoC6 Grove pin —
 # GPIO2 (SDA position) or GPIO1 (SCL position). CONFIRM which by testing; if

@@ -20,6 +20,7 @@ PORT="${1:-}"
 MP="mpremote${PORT:+ connect $PORT}"
 echo "deploying via ${MP} ..."
 $MP cp "$SRC/../micropython/wetline.py" :wetline.py
+$MP cp "$SRC/../micropython/ota.py" :ota.py
 $MP cp "$SRC/secrets.py" :secrets.py
 $MP cp "$SRC/main.py" :main.py
 $MP reset

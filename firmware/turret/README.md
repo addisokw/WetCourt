@@ -51,6 +51,9 @@ red = no WiFi · amber = dialing · green = connected) is the shared
    (`8090`).
 3. **Deploy**: `./deploy.sh` — copies `main.py`, `secrets.py`, and the shared
    `wetline.py`, then resets. Watch it with `mpremote repl`.
+4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;
+   afterwards `python3 ../micropython/otapush.py <board-ip>` updates over WiFi,
+   no cable (see [`../micropython/`](../micropython/README.md)).
 
 ## Bring-up / calibration
 

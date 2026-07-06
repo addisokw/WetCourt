@@ -21,7 +21,7 @@ geometry on every command —
 (servo µs positions + dwell ms). These live in
 `orchestrator/calibration/gavel.toml` and are tuned live from the **Gavel
 maintenance tab** (see below). A **bare** `GAVEL` (no args) is still accepted and
-falls back to the compiled defaults in `gavel.ino`, so the board is usable
+falls back to the compiled defaults in `main.py`, so the board is usable
 stand-alone.
 
 `GJOG <us>` moves the servo to a raw pulse-width and holds — the console's live
@@ -66,6 +66,9 @@ strike (`STRIKE < REST < RAISE`); flip if mirrored. Dwells are clamped to
    (`8090`).
 3. **Deploy**: `./deploy.sh` — copies `main.py`, `secrets.py`, and the shared
    `wetline.py`, then resets. Watch it with `mpremote repl`.
+4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;
+   afterwards `python3 ../micropython/otapush.py <board-ip>` updates over WiFi,
+   no cable (see [`../micropython/`](../micropython/README.md)).
 
 ## Bring-up
 
