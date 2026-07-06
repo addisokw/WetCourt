@@ -29,13 +29,20 @@ import personas
 from eye_face import snoise
 
 _PANEL_MAP = {"idle": "idle", "thinking": "deliberating", "verdict": "verdict:guilty"}
-_RETRY_MS = 8000
+# Connection attempts block the render loop (sync esp32spi API), so space
+# them well apart: a down orchestrator costs one ≤3 s hitch per window, and
+# a live one is picked up within ~20 s. Consecutive failures back off
+# exponentially (20 → 40 → 80 s) so absent infrastructure barely hitches.
+_RETRY_MS = 20000
+_RETRY_MAX_MS = 80000
+_CONNECT_TIMEOUT_S = 3
 
 
 class DemoSource:
-    _SCRIPT = (("idle", 5.0), ("listening", 8.0), ("deliberating", 5.0),
-               ("verdict:guilty", 2.5), ("idle", 4.0), ("listening", 7.0),
-               ("deliberating", 4.0), ("verdict:innocent", 4.0))
+    # No verdict phases here: the guilty strobe is a deliberate rapid red
+    # flash (synced to the squirt when the host commands it) and reads as a
+    # glitch when the idle demo rehearses it. Trigger verdicts via FACE.
+    _SCRIPT = (("idle", 6.0), ("listening", 9.0), ("deliberating", 5.0))
 
     def __init__(self):
         self._i = -1
@@ -77,6 +84,7 @@ class OrchestratorLink:
         self._line = bytearray()
         self._next_try = ticks_ms()
         self._last_alive = ticks_ms()
+        self._fails = 0
         self._enabled = bool(config.WIFI_SSID and config.ORCH_HOST)
         if not self._enabled:
             print("link: no WIFI_SSID/ORCH_HOST in settings.toml — demo mode only")
@@ -98,9 +106,18 @@ class OrchestratorLink:
         try:
             self._connect()
             self._last_alive = ticks_ms()
+            self._fails = 0
             return True
         except Exception as e:                 # any failure → backoff, keep animating
             print("link:", e)
+            if "not responding" in str(e) and self._esp is not None:
+                # AirLift wedged mid-transaction (busy pin stuck) — only a
+                # hard reset recovers it; WiFi reassociates on the next try.
+                try:
+                    self._esp.reset()
+                    print("link: AirLift reset")
+                except Exception:
+                    pass
             self._drop(ticks_ms())
             return False
 
@@ -124,12 +141,23 @@ class OrchestratorLink:
         if not self._esp.is_connected:
             self._esp.connect_AP(config.WIFI_SSID, config.WIFI_PASS)
             print("wifi: up,", self._esp.pretty_ip(self._esp.ip_address))
+
+        # Reachability gate: dialing a dead host leaves the NINA stack
+        # mid-SYN and wedges the AirLift ("ESP32 not responding"), costing a
+        # reset + WiFi reassociation. A failed ping is milliseconds.
+        try:
+            rtt = self._esp.ping(config.ORCH_HOST)
+        except Exception:
+            rtt = None
+        if rtt is None or rtt >= 4000:
+            raise OSError("orchestrator host not answering ping")
+
         sock = self._pool.socket(self._pool.AF_INET, self._pool.SOCK_STREAM)
-        sock.settimeout(4)
+        sock.settimeout(_CONNECT_TIMEOUT_S)
         sock.connect((config.ORCH_HOST, config.ORCH_PORT))
         sock.send(b"HELLO judge-face " + config.FW_VERSION.encode() + b"\n")
 
-        # Await WELCOME / BYE (handshake is the one blocking read, ≤4 s).
+        # Await WELCOME / BYE (handshake is the one blocking read, ≤3 s).
         first = bytearray()
         while b"\n" not in first:
             n = sock.recv_into(self._rbuf)
@@ -154,7 +182,9 @@ class OrchestratorLink:
             except OSError:
                 pass
             self._sock = None
-        self._next_try = ticks_add(now, _RETRY_MS)
+        delay = min(_RETRY_MS * (1 << min(self._fails, 4)), _RETRY_MAX_MS)
+        self._fails += 1
+        self._next_try = ticks_add(now, delay)
 
     def _service(self, eye, now):
         n = 0

@@ -2,12 +2,14 @@
 # displayio so per-frame Python work stays tiny (brief §4a).
 #
 # Layers (bottom → top):
-#   0  background   full-panel very-dark fill (8,6,8)
+#   0  background   full-panel fill; pure black in normal phases (LEDs off
+#                   beyond the eye), flooded by the verdict recolor
 #   1  iris tile    one small bitmap: sclera halo + striated iris + limbal
 #                   ring + pupil + catchlight. Gaze = move the TileGrid.
 #                   Dilation = redraw only the ~19x19 pupil box.
-#   2  eyelids      two full-panel dark bars slid in from the top/bottom
-#                   edges; off-panel except during blinks/deliberation.
+#
+# No eyelids/blink: the prototype's lid bars read as the frame shrinking on
+# the physical portrait panel, so they're removed (operator preference).
 #
 # Verdict effects don't touch the bitmaps at all: guilty strobes by lerping
 # every palette entry toward red at ~10 Hz plus a whole-face horizontal
@@ -18,8 +20,8 @@
 #
 # Geometry is parameterized from the display (works portrait or landscape).
 # Deviation from the prototype: iris striations are static per persona (the
-# M4 can't re-texture the disc every frame); drift + blink + dilation carry
-# the "alive" reading.
+# M4 can't re-texture the disc every frame); drift + dilation carry the
+# "alive" reading.
 
 import math
 import random
@@ -38,8 +40,7 @@ _P_IRIS0 = 11                     # 12 mix steps x 4 brightness: 11..58
 _P_COUNT = 64                     # bitmap value_count (>=59, power of two)
 _BRIGHT = (0.30, 0.55, 0.80, 1.00)  # limbal-ring brightness quantization
 
-_BG = (8, 6, 8)                   # off-pixel background (brief §3.8)
-_LID = (2, 1, 3)                  # eyelid bars
+_BG = (0, 0, 0)                   # off pixels stay truly off (was (8,6,8))
 _RED = (255, 36, 18)              # guilty strobe target
 _GREEN = (46, 220, 96)            # innocent bloom target
 
@@ -89,24 +90,16 @@ class EyeFace:
         self._iris_bmp = displayio.Bitmap(self.TILE, self.TILE, _P_COUNT)
         self._iris = displayio.TileGrid(self._iris_bmp, pixel_shader=self._iris_pal)
 
-        self._lid_pal = displayio.Palette(1)
-        self._lid_pal[0] = _rgb(_LID)
-        lid_bmp = displayio.Bitmap(self.W, self.H, 1)
-        self._lid_top = displayio.TileGrid(lid_bmp, pixel_shader=self._lid_pal, y=-self.H)
-        self._lid_bot = displayio.TileGrid(lid_bmp, pixel_shader=self._lid_pal, y=self.H)
-
         self.group = displayio.Group()
-        for layer in (bg, self._iris, self._lid_top, self._lid_bot):
-            self.group.append(layer)
+        self.group.append(bg)
+        self.group.append(self._iris)
 
         # -- state ---------------------------------------------------------
-        self._t = 1.0                 # persona-speed-scaled animation clock
-        #  (starts past the blink window at t≈0 so the eye doesn't boot mid-blink)
+        self._t = 0.0                 # persona-speed-scaled animation clock
         self._phase = "idle"
         self._phase_elapsed = 0.0     # real seconds since last phase change
         self._a_target = 0.0          # raw audio level from the host
         self._a = 0.0                 # smoothed
-        self._open = 1.0              # smoothed lid openness
         self._dil = -1                # current pupil radius (px, quantized)
         self._blend = None            # (target_rgb, f) currently on the palettes
         self._slug = None
@@ -155,7 +148,7 @@ class EyeFace:
         self._a_target = min(1.0, max(0.0, level))
 
     def tick(self, dt):
-        """Advance drift/blink/dilation and update the layers. Call every frame."""
+        """Advance drift/dilation and update the layers. Call every frame."""
         phase = self._phase
         deliberating = phase == "deliberating"
         self._t += dt * self._speed * (1.6 if deliberating else 1.0)
@@ -190,22 +183,8 @@ class EyeFace:
             self._dil = dil
             self._redraw_pupil()
 
-        # 3. Blink (brief §3.3): ~0.5 s dip roughly every 8.5 s of eye time;
-        #    deliberation narrows the lids to ~0.55 (suspicion).
-        bc = (t * 0.7) % 6.0
-        open_t = min(1.0, 0.05 + 3.8 * abs(bc - 0.25)) if bc < 0.5 else 1.0
-        if deliberating:
-            open_t = min(open_t, 0.55)
-        self._open += (open_t - self._open) * min(1.0, dt * 14)
-        edge = self._open * (self.H * 0.47)
-        ty = int(self.CY - edge) - self.H
-        by = int(self.CY + edge)
-        if ty != self._lid_top.y:
-            self._lid_top.y = ty
-        if by != self._lid_bot.y:
-            self._lid_bot.y = by
-
-        # 4. Verdict overrides (palette recolor + jitter).
+        # 3. Verdict overrides (palette recolor + jitter). (No blink/lids —
+        #    see header note.)
         if phase == "verdict:guilty":
             on = (self._phase_elapsed * 10.0) % 1.0 < 0.5   # ~10 Hz strobe
             self._apply_blend(_RED, 0.85 if on else 0.0)
@@ -297,9 +276,7 @@ class EyeFace:
             for i in range(1, _P_COUNT):
                 pal[i] = _rgb(cols[i])
             self._bg_pal[0] = _rgb(_BG)
-            self._lid_pal[0] = _rgb(_LID)
         else:
             for i in range(1, _P_COUNT):
                 pal[i] = _rgb(_mix(cols[i], target, f))
             self._bg_pal[0] = _rgb(_mix(_BG, target, f * 0.6))
-            self._lid_pal[0] = _rgb(_mix(_LID, target, f * 0.5))

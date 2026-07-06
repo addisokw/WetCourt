@@ -8,10 +8,10 @@ on the M4, in portrait, wired into the fleet's
 [device line protocol](../../protocol/README.md) rather than the brief's
 suggested UDP side-channel.
 
-The eye drifts its gaze, blinks, dilates its pupil with the defendant's voice
-level, narrows its lids while deliberating, strobes red on a guilty verdict
-and blooms green on an innocent one. Five judge personas (palette + motion
-speed) are switchable at runtime.
+The eye drifts its gaze, dilates its pupil with the defendant's voice level,
+darts faster while deliberating, strobes red on a guilty verdict and blooms
+green on an innocent one. Five judge personas (palette + motion speed) are
+switchable at runtime.
 
 ## Files
 
@@ -44,9 +44,11 @@ speed) are switchable at runtime.
    reboots and runs; the serial console prints FPS every 5 s and link status.
 
 With no orchestrator reachable (or `EYE_DEMO = 1`), it runs **demo mode**:
-cycles idle → listening → deliberating → verdict, rotates personas each
-cycle, and synthesizes a speech-like audio envelope — the full acceptance
-loop with zero infrastructure.
+cycles idle → listening → deliberating, rotates personas each cycle, and
+synthesizes a speech-like audio envelope — developable with zero
+infrastructure. The demo deliberately skips the verdict phases (the guilty
+strobe reads as a glitch out of context); exercise those by sending
+`FACE verdict:guilty` / `FACE verdict:innocent` from the host.
 
 ## Protocol
 
@@ -66,24 +68,29 @@ spec'd in `protocol/README.md` and ready for the host to adopt.
 
 ## Architecture (brief §4a, layered displayio)
 
-Per-frame Python work is: move one TileGrid (gaze), nudge two lid bars
-(blink), and occasionally rewrite a 19×19 pupil box (dilation) — everything
-else composites in C. The iris tile (halo + striations + limbal ring + pupil
-+ catchlight) is built per persona and cached; verdict effects recolor the
-palettes instead of touching bitmaps.
+Per-frame Python work is: move one TileGrid (gaze) and occasionally rewrite
+a 19×19 pupil box (dilation) — everything else composites in C. The iris
+tile (halo + striations + limbal ring + pupil + catchlight) is built per
+persona and cached; verdict effects recolor the palettes instead of touching
+bitmaps.
 
 **Documented deviations from the prototype** (M4 CPU budget / displayio
 limits — revisit on an S3):
 
 - **Portrait orientation** (user decision; the brief's geometry is
   parameterized, so `W=32, H=64` flows through).
+- **No blink/eyelids** (operator preference): the prototype's lid bars read
+  as the frame shrinking on the physical portrait panel. The `deliberating`
+  narrowed-lids behavior went with them; its faster gaze darts remain.
+- **Background is pure black** (operator preference) instead of the
+  prototype's (8,6,8) — off pixels stay off; the sclera halo fades to black.
 - Iris **striations are static** per persona — no slow per-frame re-texturing.
 - Guilty **glitch** = whole-face ±2 px horizontal jitter + ~10 Hz red palette
   strobe, not per-row shifts.
 - Innocent **bloom** = palette lerp toward green easing out over 2 s
   (displayio has no alpha blending).
-- `deliberating` (lids to ~0.55, faster darts) is the brief's *recommended
-  extension*, not prototype behavior.
+- `deliberating` (faster gaze darts) is the brief's *recommended extension*,
+  not prototype behavior.
 - WiFi association + `HELLO` handshake are synchronous on the AirLift and can
   stall a few seconds; attempts are rate-limited (8 s backoff) and `dt` is
   clamped so the animation never leaps.
