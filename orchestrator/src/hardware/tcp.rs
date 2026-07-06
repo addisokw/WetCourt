@@ -262,6 +262,8 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         // accepts AIM, but it's driven from the maintenance console / vision,
         // not the trial FSM, so the untargeted verb→role map points at Turret.
         HardwareCommand::Aim { .. } => RouteTarget::Role(Role::Turret),
+        // Neck-pose mirror (degrees) for the eye's catchlight parallax.
+        HardwareCommand::FaceAim { .. } => RouteTarget::Role(Role::JudgeFace),
         HardwareCommand::Gavel
         | HardwareCommand::GavelStrike { .. }
         | HardwareCommand::GavelJog(_) => RouteTarget::Role(Role::Gavel),

@@ -240,6 +240,9 @@ async fn maintenance_command(
     }
 
     // Build the wire command, applying calibration for AIM (degrees → raw).
+    // A judge-neck AIM also fans out to the judge-face in degrees: the eye's
+    // catchlight counter-moves with the neck pose (specular parallax).
+    let mut face_mirror: Option<MaintenanceCommand> = None;
     let cmd = match req.spec {
         CmdSpec::Fire { ms } => HardwareCommand::Fire(ms),
         CmdSpec::Gavel => {
@@ -296,12 +299,23 @@ async fn maintenance_command(
                         .into_response()
                 }
             };
+            if req.target == Role::JudgeNeck {
+                face_mirror = Some(MaintenanceCommand {
+                    target: Role::JudgeFace,
+                    cmd: HardwareCommand::FaceAim { pan, tilt },
+                    reply: None, // fire-and-forget; the face may be absent
+                });
+            }
             match cal.aim_to_raw(pan, tilt) {
                 Ok((p, t)) => HardwareCommand::Aim { pan: p, tilt: t },
                 Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
             }
         }
     };
+
+    if let Some(m) = face_mirror {
+        let _ = s.maint_cmd_tx.send(m).await;
+    }
 
     // Fire-and-forget (AIM stream): send without waiting for an ack.
     if req.stream {

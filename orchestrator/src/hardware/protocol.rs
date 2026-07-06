@@ -60,6 +60,10 @@ pub enum HardwareCommand {
     /// applies per-device calibration (degrees → raw) before building this.
     /// Owned by the `turret` and `judge-neck` roles (see protocol spec).
     Aim { pan: i32, tilt: i32 },
+    /// The neck pose in *degrees*, mirrored to the `judge-face` so the eye's
+    /// catchlight can counter-move (specular parallax). Same `AIM` verb on the
+    /// wire; degrees because the face has no servo calibration to invert.
+    FaceAim { pan: f32, tilt: f32 },
     Lights(LightState),
     Panel(PanelPattern),
     Ping,
@@ -82,6 +86,7 @@ impl HardwareCommand {
             ),
             HardwareCommand::GavelJog(us) => format!("GJOG {us}"),
             HardwareCommand::Aim { pan, tilt } => format!("AIM {pan} {tilt}"),
+            HardwareCommand::FaceAim { pan, tilt } => format!("AIM {pan:.1} {tilt:.1}"),
             HardwareCommand::Lights(s) => format!("LIGHTS {s}"),
             HardwareCommand::Panel(p) => format!("PANEL {p}"),
             HardwareCommand::Ping => "PING".into(),

@@ -5,8 +5,13 @@
 #   0  background   full-panel fill; pure black in normal phases (LEDs off
 #                   beyond the eye), flooded by the verdict recolor
 #   1  iris tile    one small bitmap: sclera halo + striated iris + limbal
-#                   ring + pupil + catchlight. Gaze = move the TileGrid.
-#                   Dilation = redraw only the ~19x19 pupil box.
+#                   ring + pupil. Gaze = move the TileGrid. Dilation =
+#                   redraw only the ~19x19 pupil box.
+#   2  catchlight   a 2x2 specular blob on its own TileGrid. A catchlight is
+#                   a reflection of a fixed light source, so it counter-moves
+#                   against the neck pose (the host mirrors judge-neck AIM
+#                   here, in degrees). It rides the eye's own micro-drift
+#                   rigidly — counter-moving there too read badly at 32px.
 #
 # No eyelids/blink: the prototype's lid bars read as the frame shrinking on
 # the physical portrait panel, so they're removed (operator preference).
@@ -34,7 +39,8 @@ PHASES = ("idle", "listening", "deliberating", "verdict:guilty", "verdict:innoce
 
 # Iris-tile palette layout.
 _P_PUPIL = 1                      # near-black pupil
-_P_CATCH = 2                      # white catchlight
+                                  # (2 reserved — was the baked-in catchlight,
+                                  #  now its own layer)
 _P_HALO0 = 3                      # 8 sclera-halo shades: 3..10
 _P_IRIS0 = 11                     # 12 mix steps x 4 brightness: 11..58
 _P_COUNT = 64                     # bitmap value_count (>=59, power of two)
@@ -44,8 +50,15 @@ _BG = (0, 0, 0)                   # off pixels stay truly off (was (8,6,8))
 _RED = (255, 36, 18)              # guilty strobe target
 _GREEN = (46, 220, 96)            # innocent bloom target
 
-# Catchlight: compact ~1.3 px specular blob at (-3,-3) from the eye center.
-_CATCH_OFF = ((0, 0), (1, 0), (0, 1), (1, 1))
+# Catchlight: 2x2 specular blob, resting at (-3,-3) from the eye center.
+_CATCH_BASE = -3.0
+_CATCH_COL = (255, 255, 255)
+# Neck-pose parallax: px of counter-slide per degree of neck pan/tilt.
+# ±35° of neck swing ≈ ±4 px of highlight travel. Negative pan (or a wrong
+# reading on hardware) → flip the sign here, not in the mapping below.
+# (The highlight rides the eye's own micro-drift rigidly — a drift-lag was
+# tried and looked bad at this pixel scale; only the neck moves it.)
+_GLINT_PX_PER_DEG = 0.12
 
 
 def snoise(t, seed=0.0):
@@ -93,9 +106,15 @@ class EyeFace:
         self._iris_bmp = displayio.Bitmap(self.TILE, self.TILE, _P_COUNT)
         self._iris = displayio.TileGrid(self._iris_bmp, pixel_shader=self._iris_pal)
 
+        self._catch_pal = displayio.Palette(1)
+        self._catch_pal[0] = _rgb(_CATCH_COL)
+        catch_bmp = displayio.Bitmap(2, 2, 1)
+        self._catch = displayio.TileGrid(catch_bmp, pixel_shader=self._catch_pal)
+
         self.group = displayio.Group()
         self.group.append(bg)
         self.group.append(self._iris)
+        self.group.append(self._catch)
 
         # -- state ---------------------------------------------------------
         self._t = 0.0                 # persona-speed-scaled animation clock
@@ -103,6 +122,10 @@ class EyeFace:
         self._phase_elapsed = 0.0     # real seconds since last phase change
         self._a_target = 0.0          # raw audio level from the host
         self._a = 0.0                 # smoothed
+        self._aim_pan_t = 0.0         # neck pose from the host (degrees)
+        self._aim_tilt_t = 0.0
+        self._aim_pan = 0.0           # smoothed (lags like the servos do)
+        self._aim_tilt = 0.0
         self._dil = -1                # current pupil radius (px, quantized)
         self._blend = None            # (target_rgb, f) currently on the palettes
         self._slug = None
@@ -150,6 +173,11 @@ class EyeFace:
     def set_audio(self, level):
         self._a_target = min(1.0, max(0.0, level))
 
+    def set_aim(self, pan, tilt):
+        """Neck pose in degrees (host mirrors judge-neck AIM here)."""
+        self._aim_pan_t = min(90.0, max(-90.0, pan))
+        self._aim_tilt_t = min(90.0, max(-90.0, tilt))
+
     def tick(self, dt):
         """Advance drift/dilation and update the layers. Call every frame."""
         phase = self._phase
@@ -186,7 +214,28 @@ class EyeFace:
             self._dil = dil
             self._redraw_pupil()
 
-        # 3. Verdict overrides (palette recolor + jitter). (No blink/lids —
+        # 3. Catchlight parallax: counter-move against the neck pose only
+        #    (it rides the eye's own drift rigidly). The smoothing time
+        #    constant (~0.25 s) is matched to the servo swing so the slide
+        #    tracks the physical motion instead of snapping ahead of it.
+        ks = min(1.0, dt * 4.0)
+        self._aim_pan += (self._aim_pan_t - self._aim_pan) * ks
+        self._aim_tilt += (self._aim_tilt_t - self._aim_tilt) * ks
+        ox = _CATCH_BASE - self._aim_pan * _GLINT_PX_PER_DEG
+        oy = _CATCH_BASE - self._aim_tilt * _GLINT_PX_PER_DEG
+        d = math.sqrt(ox * ox + oy * oy)
+        lim = self.IR - 3.0           # keep the blob on the iris
+        if d > lim:
+            ox *= lim / d
+            oy *= lim / d
+        hx = int(self.CX + ox + 0.5) - 1      # 2x2 blob centered on the offset
+        hy = int(self.CY + ly + oy + 0.5) - 1
+        if hx != self._catch.x:
+            self._catch.x = hx
+        if hy != self._catch.y:
+            self._catch.y = hy
+
+        # 4. Verdict overrides (palette recolor + jitter). (No blink/lids —
         #    see header note.)
         if phase == "verdict:guilty":
             on = (self._phase_elapsed * 10.0) % 1.0 < 0.5   # ~10 Hz strobe
@@ -204,7 +253,6 @@ class EyeFace:
 
         cols = [(0, 0, 0)] * _P_COUNT
         cols[_P_PUPIL] = (4, 3, 5)
-        cols[_P_CATCH] = (255, 255, 255)
         for i in range(8):            # halo: dim tone fading into background
             cols[_P_HALO0 + i] = _mix(tone["dim"], _BG, i / 7.0)
         for mq in range(12):          # iris: primary→secondary mix x brightness
@@ -252,7 +300,7 @@ class EyeFace:
                     i += 1
 
     def _redraw_pupil(self):
-        """Rewrite only the pupil bounding box + catchlight for the current dil."""
+        """Rewrite only the pupil bounding box for the current dilation."""
         bmp, base = self._iris_bmp, self._iris_base
         TR, TILE = self.TR, self.TILE
         # d² - d + 1 keeps the tiny disc round (plain d² reads as a square).
@@ -266,8 +314,6 @@ class EyeFace:
                 v = _P_PUPIL if dx * dx + dy * dy < d2 else base[row + x]
                 if bmp[x, y] != v:
                     bmp[x, y] = v
-        for ox, oy in _CATCH_OFF:      # catchlight rides the pupil's upper-left
-            bmp[TR - 3 + ox, TR - 3 + oy] = _P_CATCH
 
     def _apply_blend(self, target, f):
         """Lerp every palette toward `target` by f (f=0 restores persona colors)."""
@@ -279,7 +325,9 @@ class EyeFace:
             for i in range(1, _P_COUNT):
                 pal[i] = _rgb(cols[i])
             self._bg_pal[0] = _rgb(_BG)
+            self._catch_pal[0] = _rgb(_CATCH_COL)
         else:
             for i in range(1, _P_COUNT):
                 pal[i] = _rgb(_mix(cols[i], target, f))
             self._bg_pal[0] = _rgb(_mix(_BG, target, f * 0.6))
+            self._catch_pal[0] = _rgb(_mix(_CATCH_COL, target, f * 0.7))

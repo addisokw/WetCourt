@@ -7,6 +7,8 @@
 #   FACE <phase>       set the eye phase (idle/listening/deliberating/verdict:*)
 #   AUDIO <0.0-1.0>    live mic envelope (~20-30 Hz while listening)
 #   PERSONA <slug>     switch the judge persona
+#   AIM <pan> <tilt>   neck pose in degrees (host mirrors judge-neck AIM);
+#                      drives the catchlight parallax, moves no servos here
 #   PANEL <pattern>    legacy alias (idle/thinking/verdict), kept for the
 #                      current orchestrator: thinking→deliberating,
 #                      verdict→verdict:guilty
@@ -244,6 +246,12 @@ class OrchestratorLink:
                 self._send("OK AUDIO")
             except (TypeError, ValueError):
                 self._send("ERR AUDIO bad_level")
+        elif verb == "AIM":
+            try:
+                eye.set_aim(float(parts[1]), float(parts[2]))
+                self._send("OK AIM")
+            except (IndexError, ValueError):
+                self._send("ERR AIM bad_args")
         elif verb == "PERSONA":
             if arg is None:
                 self._send("ERR PERSONA missing_args")

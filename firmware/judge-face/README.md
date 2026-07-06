@@ -61,6 +61,7 @@ command):
 | `FACE <phase>` | `idle` · `listening` · `deliberating` · `verdict:guilty` · `verdict:innocent` |
 | `AUDIO <0.0–1.0>` | mic envelope; drives pupil dilation while `listening` (send ~20–30 Hz) |
 | `PERSONA <slug>` | `honorable` · `magistrate` · `cosmic` · `nullpointer` · `petunia` |
+| `AIM <pan> <tilt>` | neck pose in **degrees** (the host mirrors judge-neck `AIM`); counter-moves the catchlight for specular parallax — moves no hardware |
 | `PANEL <pattern>` | legacy alias: `idle`→idle, `thinking`→deliberating, `verdict`→verdict:guilty |
 | `PING` | keepalive |
 
@@ -69,11 +70,20 @@ spec'd in `protocol/README.md` and ready for the host to adopt.
 
 ## Architecture (brief §4a, layered displayio)
 
-Per-frame Python work is: move one TileGrid (gaze) and occasionally rewrite
-a 19×19 pupil box (dilation) — everything else composites in C. The iris
-tile (halo + striations + limbal ring + pupil + catchlight) is built per
-persona and cached; verdict effects recolor the palettes instead of touching
-bitmaps.
+Per-frame Python work is: move two TileGrids (gaze + catchlight) and
+occasionally rewrite a 19×19 pupil box (dilation) — everything else
+composites in C. The iris tile (halo + striations + limbal ring + pupil) is
+built per persona and cached; verdict effects recolor the palettes instead
+of touching bitmaps.
+
+The **catchlight is its own 2×2 layer**, not baked into the iris: a
+catchlight is a reflection of a fixed light source, so it counter-moves
+against the neck pose (`AIM` mirror, ~0.12 px/deg, smoothed ~0.25 s to match
+servo swing), clamped to stay on the iris. It rides the eye's own vertical
+micro-drift rigidly — counter-moving there too was tried and read badly at
+this pixel scale. The tunable is `_GLINT_PX_PER_DEG` at the top of
+`eye_face.py`; flip its sign there if the slide direction reads wrong on
+hardware.
 
 **Documented deviations from the prototype** (M4 CPU budget / displayio
 limits — revisit on an S3):

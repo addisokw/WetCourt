@@ -13,7 +13,7 @@ spec.
 |---|---|---|---|---|
 | Turret aim | M5Stack NanoC6 (esp32c6) + 8-Servos | `AIM`, `PING` | [`turret/`](turret/) | **in progress** |
 | Squirt fire | M5Stack NanoC6 (esp32c6) + relay | `FIRE`, `PING` | [`squirt/`](squirt/) | **in progress** |
-| Judge face | Adafruit Matrix Portal M4 (SAMD51 + AirLift), CircuitPython | `FACE`, `AUDIO`, `PERSONA`, `PANEL` *(legacy)*, `PING` | [`judge-face/`](judge-face/) | **in progress** |
+| Judge face | Adafruit Matrix Portal M4 (SAMD51 + AirLift), CircuitPython | `FACE`, `AUDIO`, `PERSONA`, `AIM`, `PANEL` *(legacy)*, `PING` | [`judge-face/`](judge-face/) | **in progress** |
 | Judge neck (gaze) | M5Stack NanoC6 (esp32c6) + 8-Servos | `AIM`, `PING` | [`judge-neck/`](judge-neck/) | scaffolded |
 | Gavel | M5Stack NanoC6 (esp32c6) + 8-Servos | `GAVEL`, `GJOG`, `PING` | [`gavel/`](gavel/) | **in progress** |
 | Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `swear-in/` | future |
