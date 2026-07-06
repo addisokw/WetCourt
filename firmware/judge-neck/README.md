@@ -45,7 +45,7 @@ hardware, same wire contract.
    and resets; the board boots into `main.py`. Watch it with
    `mpremote repl`.
 4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;
-   afterwards `python3 ../micropython/otapush.py <board-ip>` updates over WiFi,
+   afterwards `python3 ../micropython/otapush.py <role>.local` updates over WiFi,
    no cable (see [`../micropython/`](../micropython/README.md)).
 
 ## Protocol

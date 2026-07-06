@@ -52,7 +52,7 @@ LED: red = no WiFi · amber = dialing · green = connected) is the shared
 3. **Deploy**: `./deploy.sh` — copies `main.py`, `secrets.py`, and the shared
    `wetline.py`, then resets. Watch it with `mpremote repl`.
 4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;
-   afterwards `python3 ../micropython/otapush.py <board-ip>` updates over WiFi,
+   afterwards `python3 ../micropython/otapush.py <role>.local` updates over WiFi,
    no cable (see [`../micropython/`](../micropython/README.md)).
 
 > The MicroPython port is not yet verified on hardware (the Arduino version

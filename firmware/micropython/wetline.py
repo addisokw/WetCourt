@@ -157,6 +157,10 @@ def run(role, version, handlers):
     The OTA listener is polled at every idle point WiFi allows, so firmware
     can be pushed even while the orchestrator is down.
     """
+    try:
+        network.hostname(role)     # mDNS: the board answers <role>.local
+    except (AttributeError, ValueError):
+        pass                       # port without hostname(); IP still works
     wlan = network.WLAN(network.STA_IF)
     ota = _make_ota()
     while True:
