@@ -8,10 +8,11 @@ on the M4, in portrait, wired into the fleet's
 [device line protocol](../../protocol/README.md) rather than the brief's
 suggested UDP side-channel.
 
-The eye drifts its gaze, dilates its pupil with the defendant's voice level,
-darts faster while deliberating, strobes red on a guilty verdict and blooms
-green on an innocent one. Five judge personas (palette + motion speed) are
-switchable at runtime.
+The eye drifts its gaze vertically (the `judge-neck` pan/tilt mech that the
+panel is mounted on owns horizontal gaze), dilates its pupil with the
+defendant's voice level, darts faster while deliberating, strobes red on a
+guilty verdict and blooms green on an innocent one. Five judge personas
+(palette + motion speed) are switchable at runtime.
 
 ## Files
 
@@ -84,6 +85,11 @@ limits — revisit on an S3):
   narrowed-lids behavior went with them; its faster gaze darts remain.
 - **Background is pure black** (operator preference) instead of the
   prototype's (8,6,8) — off pixels stay off; the sclera halo fades to black.
+- **Eye sized to fit the narrow axis**: iris ratio 0.34 + 4 px halo (brief:
+  0.38 + 6 px), so the full disc + glow fits the 32 px width instead of
+  clipping flat at the edges.
+- **Gaze drifts vertically only**: the panel rides the `judge-neck` pan/tilt
+  mech, which owns horizontal gaze; portrait width leaves no sideways room.
 - Iris **striations are static** per persona — no slow per-frame re-texturing.
 - Guilty **glitch** = whole-face ±2 px horizontal jitter + ~10 Hz red palette
   strobe, not per-row shifts.

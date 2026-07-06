@@ -74,8 +74,11 @@ class EyeFace:
         self.H = display.height
         self.CX = self.W / 2
         self.CY = self.H / 2
-        self.IR = min(self.W, self.H) * 0.38     # iris radius (~12.2 on 32px)
-        self.HALO = 6.0                          # sclera glow falloff (px)
+        # Sized so iris + halo fit *inside* the narrow axis: the brief's 0.38
+        # ratio + 6 px halo overhung a 32 px-wide portrait panel and clipped
+        # flat at the edges. 0.34 + 4 px → 31 px tile on a 32 px panel.
+        self.IR = min(self.W, self.H) * 0.34     # iris radius (~10.9 on 32px)
+        self.HALO = 4.0                          # sclera glow falloff (px)
         self.TR = int(self.IR + self.HALO) + 1   # tile "radius"
         self.TILE = 2 * self.TR + 1              # iris tile is TILE x TILE
 
@@ -162,15 +165,15 @@ class EyeFace:
             self._a = self._a_target
         a = self._a if phase == "listening" else 0.0
 
-        # 1. Gaze drift (brief §3.1); listening darts a little more,
-        #    deliberating adds a fast jitter term.
+        # 1. Gaze drift (brief §3.1) — vertical only: the panel is mounted on
+        #    the judge-neck pan/tilt mech, which owns horizontal gaze, and the
+        #    portrait width has no room to wander sideways anyway. Listening
+        #    darts a little more; deliberating adds a fast jitter term.
         amp = 1.3 if phase == "listening" else 1.0
-        lx = (snoise(t * 0.25, self._seed * 0.13) - 0.5) * (self.W * 0.11) * amp
         ly = (snoise(t * 0.25, self._seed * 0.29 + 4.2) - 0.5) * (self.H * 0.11) * amp
         if deliberating:
-            lx += (snoise(t * 1.7, 2.6) - 0.5) * 2.5
             ly += (snoise(t * 1.7, 5.1) - 0.5) * 2.5
-        gx = int(self.CX + lx + 0.5) - self.TR
+        gx = int(self.CX + 0.5) - self.TR
         gy = int(self.CY + ly + 0.5) - self.TR
         if gx != self._iris.x:
             self._iris.x = gx
