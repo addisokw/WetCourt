@@ -2,8 +2,8 @@
 
 The wire contract between the **orchestrator** (host) and each **device**
 (microcontroller firmware). Language-neutral on purpose: the orchestrator is
-Rust, but devices span esp-rs, CircuitPython, and Arduino — they all implement
-*this* doc.
+Rust, but devices span Arduino, CircuitPython, and MicroPython — they all
+implement *this* doc.
 
 Spec version: **2** — the multi-device protocol (`HELLO` identity handshake +
 per-role routing). v1 was the original single all-in-one MCU with no handshake;
