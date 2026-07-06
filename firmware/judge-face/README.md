@@ -24,25 +24,28 @@ guilty verdict and blooms green on an innocent one. Five judge personas
 | `inputs.py` | `OrchestratorLink` (TCP line protocol) + `DemoSource` (fake inputs) |
 | `config.py` | display constants + settings.toml accessors |
 | `settings.toml.example` | template for WiFi/orchestrator config (copy → `settings.toml`) |
+| `lib/` | vendored CircuitPython libraries (exact `.mpy` files the board runs) |
+| `deploy.sh` | copy firmware + libs + settings onto a mounted `CIRCUITPY` drive |
 
 ## Setup
 
-1. **CircuitPython**: install the latest stable CircuitPython for
-   *Matrix Portal M4* (double-tap RESET → drag the `.uf2` onto `MATRIXBOOT`).
-   This retires the previous Arduino sketch (git history has it) — flashing
-   CP replaces it on the board.
-2. **Libraries** (from the Adafruit CircuitPython Bundle matching your CP
-   version, into `CIRCUITPY/lib/`):
-   - `adafruit_esp32spi/` (AirLift WiFi)
-   - `adafruit_connection_manager.mpy` (socket pool for the AirLift)
-   - `adafruit_ticks.mpy` (wrap-safe timing)
-   `displayio`, `rgbmatrix`, `framebufferio`, `bitmaptools` are built into the
-   M4 firmware. No `adafruit_matrixportal` wrapper needed — `code.py` wires
-   the HUB75 pins directly via the board's `MTX_*` names.
-3. **Config**: copy `settings.toml.example` → `settings.toml`, fill in WiFi +
-   orchestrator host (same values as the old gitignored `secrets.h`).
-4. Copy the five `.py` files + `settings.toml` to the `CIRCUITPY` drive. It
-   reboots and runs; the serial console prints FPS every 5 s and link status.
+1. **CircuitPython 10.2.1** (what this was built and tested on): double-tap
+   RESET → drag the `.uf2` onto `MATRIXBOOT`. Download:
+   <https://downloads.circuitpython.org/bin/matrixportal_m4/en_US/adafruit-circuitpython-matrixportal_m4-en_US-10.2.1.uf2>
+   (A newer stable should also work — the deps are vendored, but re-verify.)
+2. **Config**: copy `settings.toml.example` → `settings.toml`, fill in WiFi +
+   orchestrator host.
+3. **Deploy**: `./deploy.sh` (with the `CIRCUITPY` drive mounted). It copies
+   the five `.py` files, `settings.toml`, and `lib/`, then the board
+   auto-reloads; the serial console prints FPS every 5 s and link status.
+
+`lib/` vendors the exact `.mpy` dependencies the board runs —
+`adafruit_esp32spi` (AirLift WiFi), `adafruit_connection_manager`, and
+`adafruit_ticks`, byte-identical to Adafruit bundle `20260704` (10.x-mpy
+series; `.mpy` files are CP-major-specific). `displayio`, `rgbmatrix`,
+`framebufferio`, and `bitmaptools` are built into the M4 firmware. No
+`adafruit_matrixportal` wrapper needed — `code.py` wires the HUB75 pins
+directly via the board's `MTX_*` names.
 
 With no orchestrator reachable (or `EYE_DEMO = 1`), it runs **demo mode**:
 cycles idle → listening → deliberating, rotates personas each cycle, and
