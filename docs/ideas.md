@@ -45,6 +45,46 @@ Bailiff voice. TTS voice handling “All rise” / “Order in the court” / �
 After the defense, the judge asks one pointed follow-up question based on what they actually said, defendant gets 10 seconds to answer. This is where the LLM really earns its keep — it can engage specifically with the weakest part of the argument. Adds maybe 15 seconds and dramatically lifts perceived intelligence.
 *(Inserts a question→answer loop between the plea and the verdict; the answer is folded into the deliberation prompt. Operator-toggleable in the console (and `[cross_examination]` in config); skipped automatically when the defendant offered no plea. Any timeout falls through to the verdict so it can't stall a trial.)*
 
+## Call-your-lawyer phone
+A real analog phone in the booth. Lift the handset and you're connected to your
+court-appointed lawyer — same STT/LLM/TTS stack, played as spectacularly
+incompetent. Physical big brother of the public defender idea above.
+
+Hardware: a Grandstream HT801 FXS ATA (~$35) makes any garage-sale phone a SIP
+endpoint — it supplies loop voltage, real ring voltage, off-hook detection, and
+DTMF, so the phone stays stock. Needs ethernet + power at the phone's spot.
+Far cleaner than gutting the handset onto a USB sound card (hook switch on
+GPIO, no way to ring).
+
+Software: nothing in the stack speaks SIP, so add two containers on the Spark —
+Asterisk as registrar/media anchor, with **AudioSocket** forking call audio to
+a TCP socket as raw 8 kHz PCM, and a small "lawyer-agent" sidecar (~200 lines
+of Python) running the loop: VAD-endpointed record → `/v1/audio/transcriptions`
+→ `/v1/chat/completions` (lawyer persona) → `/v1/audio/speech` → resample
+24k→8k → play, until on-hook. Same LiteLLM endpoints, zero new inference infra;
+the orchestrator is untouched and the bit degrades independently. VAD
+endpointing is the only genuinely new component (booth mic is push-to-talk).
+
+Details that make it sing:
+- **Hotline mode**: HT801 "Offhook Auto Dial" — lift handset, lawyer answers.
+  No keypad needed.
+- **The phone can ring**: Asterisk can originate a call *to* the phone, so
+  "your lawyer is calling YOU" can fire mid-trial. Possibly the best gag here.
+- **Latency is in character**: ~4 s per turn is dead air on a phone, but hold
+  music / keyboard clatter / "pulling up your file, system's slow today"
+  covers it diegetically.
+- **The phone line is the audio filter**: 8 kHz narrowband + handset speaker
+  gives the "voice on a phone" aesthetic free — use a clean Kokoro voice,
+  distinct from the judge's robot-processed one. Parakeet already resamples
+  incoming audio, so 8 kHz caller audio needs no changes.
+- **DTMF works**: terrible IVR on the table. "Press 1 if guilty. Press 2 if
+  very guilty."
+- **Trial context**: sidecar reads the current charge from the orchestrator
+  (read-only) so the lawyer gives specifically bad advice about *your* crime.
+
+Honest cost: the ATA is the easy part; the work is ~a day of Asterisk config
+grief (AudioSocket keeps the surface tiny) plus the sidecar loop.
+
 ## Post processing glitchiness filters on audio TTS — ✅ implemented
 A robot-aesthetic Web Audio chain applied to all TTS playback (`frontend/src/robot.ts`):
 every PCM chunk routes through a persistent graph — bandpass/peak EQ → soft-clip
