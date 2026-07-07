@@ -884,7 +884,7 @@ button.plea.recording:hover { background: #8b2326; }
 .operator-host { height: 100%; }
 .operator-host .app { height: 100%; }
 
-.maint-tab { padding: 1rem; max-width: 720px; margin: 0 auto; }
+.maint-tab { padding: 1rem 1.5rem; }
 
 .maint-gate {
   display: flex;
@@ -898,11 +898,18 @@ button.plea.recording:hover { background: #8b2326; }
 .maint-gate .muted { color: #6e7681; }
 .maint-gate button { min-height: 44px; padding: 0.6rem 1.4rem; }
 
+/* Tile the panel's sections across the available width instead of stacking
+   them into one tall, narrow column. `auto-fill` + a per-column min keeps each
+   section a readable width (and folds to a single column on phones); the min()
+   lets a column shrink below the floor rather than overflow on a tiny screen. */
 .panel-card {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   gap: 1rem;
+  align-items: start;
 }
+/* The header (title + device badges) always spans the full row. */
+.panel-card-head { grid-column: 1 / -1; }
 .panel-card-head {
   display: flex;
   align-items: center;
@@ -1028,8 +1035,18 @@ button.plea.recording:hover { background: #8b2326; }
 .tab-lock { margin-left: 0.4rem; font-size: 0.8rem; opacity: 0.8; }
 
 /* ---- Judge Mind (config) tab ---- */
-.config-tab { display: flex; flex-direction: column; gap: 0.75rem; }
-.config-tab > .muted { margin: 0; }
+/* Same tiling as the hardware panels, but a wider column floor since the
+   persona/crimes editors are form-heavy. Intro copy + the behavior section
+   span the full row; persona and crimes tile beside each other when there's
+   room. */
+.config-tab {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+.config-tab > .muted { margin: 0; grid-column: 1 / -1; }
+.config-tab > .judge-section { grid-column: 1 / -1; }
 .judge-section {
   border: 1px solid #21262d;
   border-radius: 8px;
