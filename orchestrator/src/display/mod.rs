@@ -223,6 +223,7 @@ enum CmdSpec {
         raise_dwell_ms: u32,
         strike_dwell_ms: u32,
         settle_dwell_ms: u32,
+        strikes: u32,
     },
     /// Jog the gavel servo to a raw pulse-width (µs) for live position preview.
     GavelJog { us: i32 },
@@ -257,6 +258,7 @@ async fn maintenance_command(
                     raise_dwell_ms: g.raise_dwell_ms,
                     strike_dwell_ms: g.strike_dwell_ms,
                     settle_dwell_ms: g.settle_dwell_ms,
+                    strikes: g.strikes,
                 },
                 None => HardwareCommand::Gavel,
             }
@@ -268,6 +270,7 @@ async fn maintenance_command(
             raise_dwell_ms,
             strike_dwell_ms,
             settle_dwell_ms,
+            strikes,
         } => HardwareCommand::GavelStrike {
             rest,
             raise,
@@ -275,6 +278,7 @@ async fn maintenance_command(
             raise_dwell_ms,
             strike_dwell_ms,
             settle_dwell_ms,
+            strikes,
         },
         CmdSpec::GavelJog { us } => HardwareCommand::GavelJog(us),
         CmdSpec::Ping => HardwareCommand::Ping,

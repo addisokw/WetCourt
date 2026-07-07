@@ -42,9 +42,10 @@ pub enum HardwareCommand {
     /// the host adapter rewrites it to `GavelStrike` from `gavel.toml` when a
     /// `[gavel]` calibration exists, so real strikes honour the tuned values.
     Gavel,
-    /// Strike with host-supplied geometry — all six values are sent on the wire
-    /// (servo µs positions + dwell ms) so the firmware stays stateless, like the
-    /// turret's `AIM`. Built from `gavel.toml` (trials) or the console form.
+    /// Strike with host-supplied geometry — all seven values are sent on the wire
+    /// (servo µs positions + dwell ms + rap count) so the firmware stays
+    /// stateless, like the turret's `AIM`. Built from `gavel.toml` (trials) or
+    /// the console form.
     GavelStrike {
         rest: i32,
         raise: i32,
@@ -52,6 +53,7 @@ pub enum HardwareCommand {
         raise_dwell_ms: u32,
         strike_dwell_ms: u32,
         settle_dwell_ms: u32,
+        strikes: u32,
     },
     /// Move the gavel servo to a raw pulse-width (µs) and hold — the console's
     /// live position preview while tuning.
@@ -81,8 +83,9 @@ impl HardwareCommand {
                 raise_dwell_ms,
                 strike_dwell_ms,
                 settle_dwell_ms,
+                strikes,
             } => format!(
-                "GAVEL {rest} {raise} {strike} {raise_dwell_ms} {strike_dwell_ms} {settle_dwell_ms}"
+                "GAVEL {rest} {raise} {strike} {raise_dwell_ms} {strike_dwell_ms} {settle_dwell_ms} {strikes}"
             ),
             HardwareCommand::GavelJog(us) => format!("GJOG {us}"),
             HardwareCommand::Aim { pan, tilt } => format!("AIM {pan} {tilt}"),
@@ -99,7 +102,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gavel_strike_serialises_all_six() {
+    fn gavel_strike_serialises_all_seven() {
         let line = HardwareCommand::GavelStrike {
             rest: 1500,
             raise: 2000,
@@ -107,9 +110,10 @@ mod tests {
             raise_dwell_ms: 180,
             strike_dwell_ms: 120,
             settle_dwell_ms: 160,
+            strikes: 3,
         }
         .to_line();
-        assert_eq!(line, "GAVEL 1500 2000 1100 180 120 160");
+        assert_eq!(line, "GAVEL 1500 2000 1100 180 120 160 3");
     }
 
     #[test]

@@ -208,6 +208,7 @@ async fn main() -> Result<()> {
                                 raise_dwell_ms: g.raise_dwell_ms,
                                 strike_dwell_ms: g.strike_dwell_ms,
                                 settle_dwell_ms: g.settle_dwell_ms,
+                                strikes: g.strikes,
                             },
                             None => HardwareCommand::Gavel,
                         }

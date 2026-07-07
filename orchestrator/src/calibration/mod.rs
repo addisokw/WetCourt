@@ -65,10 +65,11 @@ impl ServoCal {
     }
 }
 
-/// The gavel's strike geometry. The host sends all six values on every `GAVEL`
+/// The gavel's strike geometry. The host sends all seven values on every `GAVEL`
 /// so the firmware stays stateless: three servo positions (pulse-width µs) for
-/// the rap — `rest` → `raise` → `strike` → `rest` — plus the per-move dwell (ms)
-/// that lets each move physically arrive before the next.
+/// the rap plus the per-move dwell (ms) that lets each move physically arrive
+/// before the next, and how many raps to deliver. The sequence is
+/// `rest` → `raise`, then (`strike` → `raise`) × `strikes`, then → `rest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GavelCal {
     /// Idle position (servo µs).
@@ -77,12 +78,21 @@ pub struct GavelCal {
     pub raise: i32,
     /// Strike position — where the head bangs the block (servo µs).
     pub strike: i32,
-    /// Dwell after the wind-up (ms).
+    /// Dwell after each wind-up (ms).
     pub raise_dwell_ms: u32,
-    /// Dwell after the strike — the bang (ms).
+    /// Dwell after each strike — the bang (ms).
     pub strike_dwell_ms: u32,
     /// Dwell on the return to rest before acking (ms).
     pub settle_dwell_ms: u32,
+    /// Number of raps in one strike sequence (≥ 1).
+    #[serde(default = "default_strikes")]
+    pub strikes: u32,
+}
+
+/// Backfills `strikes` for older `gavel.toml` files written before the field
+/// existed — a single rap, the historical behaviour.
+fn default_strikes() -> u32 {
+    1
 }
 
 impl GavelCal {
@@ -92,6 +102,9 @@ impl GavelCal {
     const US_MAX: i32 = 2600;
     /// No single dwell should exceed this (ms) — a slow servo is ~1s of travel.
     const DWELL_MAX_MS: u32 = 5000;
+    /// Cap on raps per sequence — each rap blocks the firmware loop for its
+    /// dwells, so keep the whole synchronous swing bounded.
+    const MAX_STRIKES: u32 = 10;
 
     fn validate(&self) -> Result<()> {
         for (name, us) in [("rest", self.rest), ("raise", self.raise), ("strike", self.strike)] {
@@ -111,6 +124,13 @@ impl GavelCal {
             if ms > Self::DWELL_MAX_MS {
                 bail!("gavel.{name} ({ms}) must be ≤ {} ms", Self::DWELL_MAX_MS);
             }
+        }
+        if self.strikes < 1 || self.strikes > Self::MAX_STRIKES {
+            bail!(
+                "gavel.strikes ({}) must be within [1, {}]",
+                self.strikes,
+                Self::MAX_STRIKES
+            );
         }
         Ok(())
     }
@@ -280,6 +300,7 @@ mod tests {
             raise_dwell_ms: 180,
             strike_dwell_ms: 120,
             settle_dwell_ms: 160,
+            strikes: 3,
         }
     }
 
@@ -352,6 +373,32 @@ mod tests {
         let mut g = gavel_cal();
         g.raise_dwell_ms = 60_000;
         assert!(g.validate().is_err());
+    }
+
+    #[test]
+    fn gavel_cal_rejects_bad_strikes() {
+        let mut g = gavel_cal();
+        g.strikes = 0;
+        assert!(g.validate().is_err());
+        g.strikes = 99;
+        assert!(g.validate().is_err());
+    }
+
+    #[test]
+    fn gavel_cal_backfills_missing_strikes() {
+        // A pre-`strikes` gavel.toml deserialises to a single rap.
+        let text = "\
+role = \"gavel\"
+[gavel]
+rest = 1500
+raise = 2000
+strike = 1100
+raise_dwell_ms = 180
+strike_dwell_ms = 120
+settle_dwell_ms = 160
+";
+        let cal: Calibration = toml::from_str(text).unwrap();
+        assert_eq!(cal.gavel.unwrap().strikes, 1);
     }
 
     #[test]

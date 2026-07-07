@@ -19,6 +19,7 @@ const DEFAULT_GAVEL: GavelCal = {
   raise_dwell_ms: 180,
   strike_dwell_ms: 120,
   settle_dwell_ms: 160,
+  strikes: 1,
 };
 
 // Servo-position fields get a live "Jog" button; dwell fields are plain inputs.
@@ -110,7 +111,8 @@ export default function GavelPanel() {
       <section class="panel-section">
         <h3>Strike geometry</h3>
         <p class="muted small">
-          Jog a position to eyeball it, Test strike to feel the full rap, then Save.
+          Jog a position to eyeball it, Test strike to feel the full sequence
+          (rest → raise, then strike → raise per rap, then rest), then Save.
           Saved values drive real verdict strikes too.
         </p>
         <div class="cal-grid">
@@ -143,6 +145,16 @@ export default function GavelPanel() {
               </label>
             )}
           </For>
+          <label class="cal-field">
+            <span>strikes (raps)</span>
+            <input
+              type="number"
+              step={1}
+              min={1}
+              value={cur().strikes}
+              onInput={(e) => patch('strikes', parseInt(e.currentTarget.value, 10))}
+            />
+          </label>
         </div>
         <div class="btn-row">
           <button onClick={testStrike}>Test strike</button>

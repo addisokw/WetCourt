@@ -73,7 +73,7 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | `FIRE <ms>` | squirt | Fire the squirt gun for `<ms>` milliseconds. |
 | `AIM <pan> <tilt>` | turret, judge-neck | Point the pan/tilt mech (raw device units; the host applies calibration). |
 | `AIM <pan> <tilt>` | judge-face | The neck pose in *degrees* — the host mirrors every judge-neck `AIM` to the face, which counter-moves the eye's catchlight (specular parallax). Moves no hardware. |
-| `GAVEL [<rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms>]` | gavel | One gavel strike. The host normally sends all six tunables (servo µs positions + dwell ms, from `gavel.toml`) so the firmware stays stateless; a bare `GAVEL` uses the firmware's compiled defaults. |
+| `GAVEL [<rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms> <strikes>]` | gavel | One gavel strike sequence — REST → RAISE, then STRIKE → RAISE per rap (`strikes`), then → REST. The host normally sends all seven tunables (servo µs positions + dwell ms + rap count, from `gavel.toml`) so the firmware stays stateless; a bare `GAVEL` uses the firmware's compiled defaults. |
 | `GJOG <us>` | gavel | Move the gavel servo to a raw pulse-width (µs) and hold — live position preview for console tuning. |
 | `FACE <phase>` | judge-face | Set the eye/face phase (see vocab). Supersedes `PANEL`. |
 | `AUDIO <level>` | judge-face | Live mic envelope, `0.0`–`1.0`; stream at ~20–30 Hz while `listening` (drives pupil dilation). Acked like any command. |

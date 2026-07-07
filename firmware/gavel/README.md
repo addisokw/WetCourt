@@ -11,13 +11,14 @@ for verdicts and "order in the court."
 | **Role** | `gavel` (sent in the `HELLO` handshake) |
 | **Protocol** | [`../../protocol/README.md`](../../protocol/README.md) (v2) |
 
-One `GAVEL` is one rap: the firmware swings the arm **REST → RAISE → STRIKE →
-REST** and acks `OK GAVEL` after the swing completes.
+One `GAVEL` is one strike sequence: the firmware swings the arm **REST → RAISE**,
+then **STRIKE → RAISE** once per rap (`strikes`), then **→ REST**, and acks
+`OK GAVEL` after the swing completes.
 
 Like the turret, the firmware is **stateless**: the host sends the full strike
 geometry on every command —
-`GAVEL <rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms>`
-(servo µs positions + dwell ms). These live in
+`GAVEL <rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms> <strikes>`
+(servo µs positions + dwell ms + rap count). These live in
 `orchestrator/calibration/gavel.toml` and are tuned live from the **Gavel
 maintenance tab** (see below). A **bare** `GAVEL` (no args) is still accepted and
 falls back to the compiled defaults in `main.py`, so the board is usable
@@ -77,19 +78,18 @@ strike (`STRIKE < REST < RAISE`); flip if mirrored. Dwells are clamped to
 2. In the operator console, enter **maintenance** and confirm the `gavel`
    presence badge lights (`GET /maintenance/devices` lists it).
 3. Open the **Gavel** tab and tune the geometry live: **Jog** each position
-   (rest/raise/strike) to eyeball it, **Test strike** to feel the full rap with
-   the current values, adjust the `*_dwell_ms` if the servo arrives late (slow
-   servo) or you want a snappier bang, then **Save to disk** to persist them to
-   `gavel.toml`. Saved values are used by real verdict strikes too.
+   (rest/raise/strike) to eyeball it, set **strikes** for how many raps the
+   sequence delivers, **Test strike** to feel the full sequence with the current
+   values, adjust the `*_dwell_ms` if the servo arrives late (slow servo) or you
+   want a snappier bang, then **Save to disk** to persist them to `gavel.toml`.
+   Saved values are used by real verdict strikes too.
 
 ## Known limitations / TODO
 
-- **Blocking strike:** the rap holds the serve loop for ~0.5 s. Fine for a
-  one-shot actuator that acks after the swing, but it won't service a second line
-  mid-rap. Make it non-blocking only if the gavel ever needs to overlap commands.
-- **One rap per `GAVEL`** to match the spec's "one gavel strike." If "order in the
-  court" should be a flurry, that's a protocol change (a `GAVEL <n>` arg), to be
-  agreed in `protocol/README.md` first — not a silent firmware divergence.
+- **Blocking strike:** the sequence holds the serve loop for the full swing
+  (~0.5 s per rap × `strikes`, capped at `STRIKES_MAX`). Fine for a one-shot
+  actuator that acks after the swing, but it won't service a second line mid-rap.
+  Make it non-blocking only if the gavel ever needs to overlap commands.
 - **No servo presence detection**: direct PWM can't tell whether a servo is
   attached or powered (the old 8-Servos board could be probed on I2C), so
   `GAVEL`/`GJOG` always ack `OK` — watch the mech, not just the ack.

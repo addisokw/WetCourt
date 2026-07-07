@@ -985,7 +985,7 @@ button.plea.recording:hover { background: #8b2326; }
 }
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.5rem;
 }
 .cal-field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: #8b949e; }
@@ -997,7 +997,20 @@ button.plea.recording:hover { background: #8b2326; }
   font: inherit;
   border-radius: 3px;
   min-height: 38px;
+  width: 100%;
+  min-width: 0;
 }
+/* The position fields nest an input + "Jog" button in a .btn-row. Undo the
+   generic .btn-row `margin-left: auto` (which shoves the row sideways inside
+   the column-flex field) and let the input shrink so it never overflows its
+   grid cell and clips digits. */
+.cal-field .btn-row {
+  margin-left: 0;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+}
+.cal-field .btn-row input[type='number'] { flex: 1 1 auto; }
+.cal-field .btn-row button { flex: 0 0 auto; }
 .cal-field.cal-check { flex-direction: row; align-items: center; gap: 0.4rem; }
 .cal-field.cal-check input { width: 18px; height: 18px; }
 .maint-tab .status-line { border-top: none; padding-top: 0; }
