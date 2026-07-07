@@ -10,10 +10,28 @@ thread. Personas now live as TOML files in `orchestrator/personas/*.toml`
 > verdict fires one fixed duration. (2) Conviction rate is no longer baked
 > into the prompt as a percentage — persona prompts are **bias-free**, and
 > the `guilty_bias` slider is injected at trial start as the sole guilt-rate
-> knob (see `Persona::system_prompt_with_bias`). The sample prompts further
-> down still show the old `INTENSITY` contract and a "rule guilty ~70%" line;
-> treat those as historical. Six personas now ship in-repo (Wettington, Bom,
-> Sunny Vale, Magnus Thorne, Remy Calhoun, Beatrix Plume).
+> knob. The sample prompts further down still show the old `INTENSITY`
+> contract and a "rule guilty ~70%" line; treat those as historical. Six
+> personas now ship in-repo (Wettington, Bom, Sunny Vale, Magnus Thorne, Remy
+> Calhoun, Beatrix Plume).
+>
+> **Update (2026-07): "THE DEFENSE DECIDES" engine.** Judging logic now lives
+> in a shared **CORE** prompt at `orchestrator/personas/core.md` (the
+> persona-agnostic engine from `docs/wet_court_judge_prompt.md` Part 1:
+> the defense decides the verdict, the +/- scoring factors, coin-flip →
+> acquit on a genuine attempt, contempt/anti-tampering → auto guilty, and the
+> output contract). The six persona TOMLs are now **character-only** (name,
+> temperament, speaking style, leniency tilt) — they no longer carry their own
+> `VERDICT:` instructions or judging philosophy. `PersonaRegistry::verdict_prompt`
+> assembles `CORE + persona + bias_directive`; cross-examination still uses the
+> character-only `system_prompt` (no CORE), which is exactly what it wants.
+> The output contract gained two marker lines after `VERDICT:` —
+> `KEY_FACTOR: <2-4 words>` (surfaced big on the case screen as "WHAT DECIDED
+> IT" so the crowd learns the rules) and an optional `REASON: <one sentence>`
+> (used for the on-screen remark, falling back to the canned lines). Default
+> `guilty_bias` lowered 0.70 → 0.55 so agency is real; Wettington's old
+> "assume guilt / acquittal is a personal failure" stance was replaced with a
+> harsh **leniency tilt** that never overrides the defense.
 
 ## Current persona: Justice Wettington
 

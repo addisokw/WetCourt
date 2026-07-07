@@ -60,7 +60,10 @@ no_repeat_window = 15
 plea_window_secs = 20
 charge_display_secs = 5
 cooldown_secs = 4
-guilty_bias = 0.7
+# Fallback/mock conviction rate. The live path uses the active persona's own
+# guilty_bias; this governs the random verdict used when inference fails and the
+# mock inference path. Kept near the "defense decides" ~0.55 baseline.
+guilty_bias = 0.55
 
 [cross_examination]
 # After the defense, the judge asks one pointed follow-up question and the

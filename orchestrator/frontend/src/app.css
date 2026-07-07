@@ -480,6 +480,30 @@ button.plea.recording:hover { background: #8b2326; }
   max-width: 80%;
   line-height: 1.35;
 }
+/* "What decided it" — the deciding factor named by the judge, shown big so the
+   crowd learns what wins and what soaks. Inherits the verdict panel's colour. */
+.verdict-key-factor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+.key-factor-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(0.6rem, min(1.1vw, 1.4vh), 0.9rem);
+  letter-spacing: 0.28em;
+  opacity: 0.75;
+}
+.key-factor-value {
+  font-size: clamp(1.2rem, min(3.2vw, 4vh), 2.6rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  text-align: center;
+}
+.case-embed .verdict-key-factor { gap: 0.2rem; }
+.case-embed .key-factor-value { font-size: clamp(1rem, 2vw, 1.6rem); }
 .face-stack {
   position: relative;
   display: inline-block;

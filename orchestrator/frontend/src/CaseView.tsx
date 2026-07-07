@@ -11,6 +11,7 @@ import {
   pleaTranscript,
   theaterActive,
   verdictRemarks,
+  verdictKeyFactor,
 } from './ws';
 
 function stripMarkers(text: string): string {
@@ -18,7 +19,12 @@ function stripMarkers(text: string): string {
     .split('\n')
     .filter((line) => {
       const t = line.trimStart();
-      return !t.startsWith('VERDICT:') && !t.startsWith('INTENSITY:');
+      return (
+        !t.startsWith('VERDICT:') &&
+        !t.startsWith('INTENSITY:') &&
+        !t.startsWith('KEY_FACTOR:') &&
+        !t.startsWith('REASON:')
+      );
     })
     .join('\n')
     .trim();
@@ -92,6 +98,12 @@ function VerdictPanel() {
     <Show when={guilty() !== null}>
       <div class={`verdict-panel ${guilty() ? 'guilty' : 'not-guilty'}`}>
         <div class="verdict-word">{guilty() ? 'GUILTY' : 'NOT GUILTY'}</div>
+        <Show when={verdictKeyFactor().length > 0}>
+          <div class="verdict-key-factor">
+            <span class="key-factor-label">WHAT DECIDED IT</span>
+            <span class="key-factor-value">{verdictKeyFactor()}</span>
+          </div>
+        </Show>
         <Show when={verdictRemarks().length > 0}>
           <div class="verdict-remarks">{verdictRemarks()}</div>
         </Show>

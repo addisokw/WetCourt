@@ -24,6 +24,7 @@ export interface PersonasResponse {
 export interface TestResult {
   deliberation: string;
   guilty: boolean;
+  key_factor?: string | null;
 }
 
 export const ID_RE = /^[a-z0-9_]+$/;

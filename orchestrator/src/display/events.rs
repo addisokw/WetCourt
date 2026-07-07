@@ -34,7 +34,7 @@ pub enum DisplayEvent {
     CrossQuestion { text: String },
     DeliberationToken { text: String },
     DeliberationComplete,
-    Verdict { guilty: bool, remarks: String },
+    Verdict { guilty: bool, remarks: String, #[serde(skip_serializing_if = "Option::is_none")] key_factor: Option<String> },
     ExecuteSentence { guilty: bool },
     PlayCue { name: String },
     /// A device announced itself (`HELLO <role>`) and was accepted; surfaced to

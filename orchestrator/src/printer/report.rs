@@ -156,6 +156,13 @@ fn verdict(b: &mut Builder, rec: &TrialRecord) {
         .font(Font::B)
         .line(&format!("\"{}\"", asciify(&rec.remarks)))
         .font(Font::A);
+    // The deciding factor the judge named — the keepsake's "why".
+    if let Some(kf) = rec.key_factor.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        b.feed(1)
+            .font(Font::B)
+            .line(&format!("WHAT DECIDED IT: {}", asciify(kf)))
+            .font(Font::A);
+    }
 }
 
 /// Reserved photo slot (guilty only). M1 draws a framed reticle placeholder so

@@ -898,6 +898,8 @@ struct TestReq {
 struct TestResp {
     deliberation: String,
     guilty: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_factor: Option<String>,
 }
 
 async fn test_persona(
@@ -910,7 +912,7 @@ async fn test_persona(
     let system_prompt = {
         let reg = s.personas.read().await;
         match reg.get(&id) {
-            Some(p) => p.system_prompt_with_bias(),
+            Some(p) => reg.verdict_prompt(p),
             None => return (StatusCode::NOT_FOUND, format!("unknown persona '{id}'")).into_response(),
         }
     };
@@ -935,8 +937,8 @@ async fn test_persona(
 
     let parsed = verdict_parse::parse(&full);
     let resp = match parsed {
-        Some(p) => TestResp { deliberation: p.deliberation, guilty: p.guilty },
-        None => TestResp { deliberation: full.trim().to_string(), guilty: false },
+        Some(p) => TestResp { deliberation: p.deliberation, guilty: p.guilty, key_factor: p.key_factor },
+        None => TestResp { deliberation: full.trim().to_string(), guilty: false, key_factor: None },
     };
     (StatusCode::OK, Json(resp)).into_response()
 }

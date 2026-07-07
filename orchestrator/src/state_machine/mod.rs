@@ -215,6 +215,7 @@ impl Runtime {
             guilty: verdict.guilty,
             deliberation: verdict.deliberation,
             remarks: verdict.remarks,
+            key_factor: verdict.key_factor,
         };
         match self.casebook.record(&record) {
             Ok(()) => info!(case_no = record.case_no, guilty = record.guilty, "trial recorded"),
@@ -286,6 +287,8 @@ mod tests {
             "id = \"judge\"\ndisplay_name = \"Judge Testwater\"\nsystem_prompt = \"be a judge\"\nguilty_bias = 0.5\ntts_voice = \"bm_george\"\n",
         )
         .unwrap();
+        // The registry now requires the shared judge core alongside personas.
+        std::fs::write(dir.join("core.md"), "TEST CORE\n\n=== YOUR PERSONA ===\n").unwrap();
     }
 
     /// Drive a full trial through the Runtime with explicit events (bypassing
@@ -334,6 +337,7 @@ mod tests {
             guilty: true,
             deliberation: "the DELIB".into(),
             remarks: "the REMARKS".into(),
+            key_factor: Some("the FACTOR".into()),
             pre_announced: false,
         }))
         .await; // → PronouncingVerdict
@@ -348,6 +352,7 @@ mod tests {
         assert!(rec.guilty);
         assert_eq!(rec.deliberation, "the DELIB");
         assert_eq!(rec.remarks, "the REMARKS");
+        assert_eq!(rec.key_factor.as_deref(), Some("the FACTOR"));
 
         // Appended to the casebook, and the counter advanced.
         let txt = std::fs::read_to_string(&book).unwrap();

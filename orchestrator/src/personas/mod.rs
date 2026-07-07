@@ -89,18 +89,19 @@ fn id_re() -> &'static Regex {
 }
 
 impl Persona {
-    /// The system prompt actually sent to the LLM: the persona's bias-free base
-    /// prompt plus a guilt-rate directive synthesised from the `guilty_bias`
-    /// slider. Personas carry no conviction percentages of their own, so this
-    /// slider is the single knob that tunes how readily a judge convicts.
-    pub fn system_prompt_with_bias(&self) -> String {
+    /// The persona's standing-disposition directive, synthesised from the
+    /// `guilty_bias` slider. Personas carry no conviction percentages of their
+    /// own (that lives in the shared CORE as "the defense decides"), so this
+    /// slider is the single knob that tunes how readily a judge convicts on the
+    /// genuinely close calls. Appended after the persona block by
+    /// `PersonaRegistry::verdict_prompt`.
+    pub fn bias_directive(&self) -> String {
         let pct = (self.guilty_bias * 100.0).round() as u32;
         format!(
-            "{}\n\nGUILT RATE: Across many cases you return GUILTY roughly {pct}% of the \
+            "GUILT RATE: Across many cases you return GUILTY roughly {pct}% of the \
 time. Treat this as your standing disposition toward conviction; when a plea \
 leaves the question genuinely balanced, let this rate settle it. Never state \
-this number or admit that it guides you.",
-            self.system_prompt.trim_end()
+this number or admit that it guides you."
         )
     }
 
@@ -137,6 +138,9 @@ this number or admit that it guides you.",
 
 pub struct PersonaRegistry {
     dir: PathBuf,
+    /// Shared, persona-agnostic judging engine (`core.md`) prepended to every
+    /// judge's character block to form the verdict system prompt.
+    core: String,
     personas: BTreeMap<String, Persona>,
     active_id: String,
 }
@@ -146,6 +150,12 @@ impl PersonaRegistry {
         let dir = dir.as_ref().to_path_buf();
         if !dir.is_dir() {
             bail!("persona dir missing: {}", dir.display());
+        }
+        let core_path = dir.join("core.md");
+        let core = fs::read_to_string(&core_path)
+            .with_context(|| format!("reading shared judge core {}", core_path.display()))?;
+        if core.trim().is_empty() {
+            bail!("shared judge core is empty: {}", core_path.display());
         }
         let mut personas = BTreeMap::new();
         for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
@@ -182,9 +192,23 @@ impl PersonaRegistry {
         }
         Ok(Self {
             dir,
+            core,
             personas,
             active_id: default_id.to_string(),
         })
+    }
+
+    /// The full verdict system prompt for a persona: the shared CORE engine,
+    /// then the persona's character block, then its bias directive. The CORE
+    /// ends with a "=== YOUR PERSONA ===" header, so the character block slots
+    /// directly beneath it.
+    pub fn verdict_prompt(&self, persona: &Persona) -> String {
+        format!(
+            "{}\n{}\n\n{}",
+            self.core.trim_end(),
+            persona.system_prompt.trim(),
+            persona.bias_directive()
+        )
     }
 
     pub fn list(&self) -> Vec<&Persona> {
@@ -417,6 +441,9 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&p).unwrap();
+        // Every registry load now requires the shared judge core alongside the
+        // persona TOMLs.
+        fs::write(p.join("core.md"), "TEST CORE\n\n=== YOUR PERSONA ===\n").unwrap();
         p
     }
 }

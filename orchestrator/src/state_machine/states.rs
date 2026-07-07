@@ -19,6 +19,12 @@ pub struct Verdict {
     pub guilty: bool,
     pub deliberation: String,
     pub remarks: String,
+    /// The 2–4 word factor the judge named as deciding the case ("sincere
+    /// apology", "bragged about it"). Parsed from the `KEY_FACTOR:` marker line;
+    /// surfaced on the case screen so the crowd learns the rules by watching.
+    /// `None` on fallback verdicts or when the model omitted the marker.
+    #[serde(default)]
+    pub key_factor: Option<String>,
     /// True when the verdict service has already streamed TTS audio to the
     /// frontend during deliberation (pipelined LLM→TTS path). The state
     /// machine then skips the redundant `Speak` command in PronouncingVerdict.

@@ -34,6 +34,11 @@ pub struct TrialRecord {
     pub deliberation: String,
     /// Short verdict tagline, e.g. "Justice, as ever, is wet."
     pub remarks: String,
+    /// The 2–4 word deciding factor the judge named ("sincere apology"). `None`
+    /// on fallback verdicts or when the model omitted it. `#[serde(default)]`
+    /// keeps older casebook lines (written before this field existed) loadable.
+    #[serde(default)]
+    pub key_factor: Option<String>,
 }
 
 impl TrialRecord {
@@ -114,6 +119,7 @@ impl TrialRecord {
                            The paperwork's convenient dissolution persuades no one."
                 .into(),
             remarks: "Justice, as ever, is wet.".into(),
+            key_factor: Some("blamed the fountain".into()),
         }
     }
 
@@ -132,6 +138,7 @@ impl TrialRecord {
                            this venue. The charge does not hold water."
                 .into(),
             remarks: "Acquitted. Do not let it happen again.".into(),
+            key_factor: Some("disarming honesty".into()),
         }
     }
 }

@@ -63,7 +63,7 @@ pub async fn real(
     let (system_prompt, voice, guilty_bias) = {
         let reg = personas.read().await;
         let p = reg.active();
-        (p.system_prompt_with_bias(), p.tts_voice.clone(), p.guilty_bias as f64)
+        (reg.verdict_prompt(p), p.tts_voice.clone(), p.guilty_bias as f64)
     };
 
     let client = LlmClient::new(&cfg.inference);
@@ -122,6 +122,7 @@ pub async fn real(
     v.pre_announced = true;
     let guilty = v.guilty;
     let remarks = v.remarks.clone();
+    let key_factor = v.key_factor.clone();
     let verdict_word: &str = if guilty { "Guilty." } else { "Not guilty." };
 
     // Move the state machine out of Deliberating ASAP — its 30s Tick timeout
@@ -168,6 +169,7 @@ pub async fn real(
         .send(Command::Display(DisplayEvent::Verdict {
             guilty,
             remarks,
+            key_factor,
         }))
         .await;
 
@@ -233,19 +235,37 @@ async fn play_through(start: Instant, bytes: usize) {
 }
 
 static VERDICT_RE: OnceLock<Regex> = OnceLock::new();
+static KEY_FACTOR_RE: OnceLock<Regex> = OnceLock::new();
+static REASON_RE: OnceLock<Regex> = OnceLock::new();
+
+/// Pull a single-line marker value (e.g. `KEY_FACTOR: bragged about it`),
+/// trimmed and normalised to `None` when empty.
+fn marker_value(re: &Regex, text: &str) -> Option<String> {
+    let v = re.captures(text)?.get(1)?.as_str().trim().to_string();
+    if v.is_empty() { None } else { Some(v) }
+}
 
 fn parse_verdict(text: &str) -> Option<Verdict> {
     let vre = VERDICT_RE.get_or_init(|| Regex::new(r"(?i)VERDICT:\s*(GUILTY|ACQUITTED)").unwrap());
+    let kre = KEY_FACTOR_RE.get_or_init(|| Regex::new(r"(?im)^\s*KEY_FACTOR:\s*(.+)$").unwrap());
+    let rre = REASON_RE.get_or_init(|| Regex::new(r"(?im)^\s*REASON:\s*(.+)$").unwrap());
 
     let m = vre.captures(text)?;
     let guilty = m.get(1)?.as_str().eq_ignore_ascii_case("GUILTY");
 
     let deliberation = strip_markers(text);
+    let key_factor = marker_value(kre, text);
+    // Prefer the model's one-line REASON for the on-screen remark; fall back to
+    // the canned lines when it's absent.
+    let remarks = marker_value(rre, text).unwrap_or_else(|| {
+        if guilty { "Justice, as ever, is wet.".into() } else { "Acquitted. Do not let it happen again.".into() }
+    });
 
     Some(Verdict {
         guilty,
         deliberation,
-        remarks: if guilty { "Justice, as ever, is wet.".into() } else { "Acquitted. Do not let it happen again.".into() },
+        remarks,
+        key_factor,
         pre_announced: false,
     })
 }
@@ -281,5 +301,34 @@ mod tests {
     #[test]
     fn unparseable_returns_none() {
         assert!(parse_verdict("just a paragraph with no marker").is_none());
+    }
+
+    #[test]
+    fn parses_key_factor_and_reason() {
+        let raw = "You owned it, friend.\nVERDICT: ACQUITTED\nKEY_FACTOR: sincere apology\nREASON: The apology was specific and real.";
+        let v = parse_verdict(raw).unwrap();
+        assert!(!v.guilty);
+        assert_eq!(v.key_factor.as_deref(), Some("sincere apology"));
+        assert_eq!(v.remarks, "The apology was specific and real.");
+        // markers never leak into the spoken/displayed body
+        assert!(!v.deliberation.contains("KEY_FACTOR"));
+        assert!(!v.deliberation.contains("REASON"));
+        assert!(v.deliberation.contains("owned it"));
+    }
+
+    #[test]
+    fn key_factor_absent_is_none_and_remarks_fall_back() {
+        let raw = "Empty and smug.\nVERDICT: GUILTY";
+        let v = parse_verdict(raw).unwrap();
+        assert!(v.guilty);
+        assert!(v.key_factor.is_none());
+        assert_eq!(v.remarks, "Justice, as ever, is wet.");
+    }
+
+    #[test]
+    fn empty_key_factor_value_is_none() {
+        let raw = "Weak.\nVERDICT: GUILTY\nKEY_FACTOR:   ";
+        let v = parse_verdict(raw).unwrap();
+        assert!(v.key_factor.is_none());
     }
 }

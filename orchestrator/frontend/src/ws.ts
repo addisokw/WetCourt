@@ -31,6 +31,9 @@ export const [lastVerdictGuilty, setLastVerdictGuilty] = createSignal<boolean | 
 export const [charge, setCharge] = createSignal<string>('');
 export const [pleaTranscript, setPleaTranscript] = createSignal<string>('');
 export const [verdictRemarks, setVerdictRemarks] = createSignal<string>('');
+// The 2–4 word factor the judge named as deciding the case ("sincere apology").
+// Shown on the case view at the reveal so the crowd learns what wins and loses.
+export const [verdictKeyFactor, setVerdictKeyFactor] = createSignal<string>('');
 export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolean>(false);
 // The judge's cross-examination follow-up question (empty when no cross-exam
 // this trial). Set on the `cross_question` event, cleared at idle/reset.
@@ -159,6 +162,7 @@ function handleEvent(ev: DisplayEvent) {
       setCharge('');
       setPleaTranscript('');
       setVerdictRemarks('');
+      setVerdictKeyFactor('');
       setCrossQuestion('');
       setPleaRecordingActive(false);
       setPhaseDeadlineAt(0);
@@ -198,6 +202,7 @@ function handleEvent(ev: DisplayEvent) {
     case 'verdict':
       setLastVerdictGuilty(Boolean(ev.guilty));
       setVerdictRemarks(String(ev.remarks ?? ''));
+      setVerdictKeyFactor(String(ev.key_factor ?? ''));
       break;
     case 'start_plea_recording':
       setPleaWindowOpen(true);

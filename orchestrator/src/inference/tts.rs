@@ -108,7 +108,10 @@ pub fn strip_markers(text: &str) -> String {
     text.lines()
         .filter(|l| {
             let t = l.trim_start();
-            !t.starts_with("VERDICT:") && !t.starts_with("INTENSITY:")
+            !t.starts_with("VERDICT:")
+                && !t.starts_with("INTENSITY:")
+                && !t.starts_with("KEY_FACTOR:")
+                && !t.starts_with("REASON:")
         })
         .collect::<Vec<_>>()
         .join("\n")

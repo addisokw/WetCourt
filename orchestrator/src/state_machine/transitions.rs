@@ -425,6 +425,7 @@ fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
         cmds.push(Command::Display(DisplayEvent::Verdict {
             guilty: v.guilty,
             remarks: v.remarks.clone(),
+            key_factor: v.key_factor.clone(),
         }));
         cmds.push(Command::Speak(v.deliberation.clone()));
     }

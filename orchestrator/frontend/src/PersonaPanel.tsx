@@ -358,6 +358,9 @@ export default function PersonaPanel() {
                     <span class={`verdict ${r().guilty ? 'guilty' : 'not-guilty'}`}>
                       {r().guilty ? 'GUILTY' : 'NOT GUILTY'}
                     </span>
+                    <Show when={r().key_factor}>
+                      <span class="test-key-factor">key factor: {r().key_factor}</span>
+                    </Show>
                   </div>
                   <div class="test-deliberation">{r().deliberation}</div>
                 </div>
