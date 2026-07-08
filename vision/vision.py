@@ -77,6 +77,7 @@ app = Flask(__name__)
 # Shared latest frame + detection, written by the capture thread.
 _lock = threading.Lock()
 _latest_jpeg: bytes | None = None
+_latest_clean_jpeg: bytes | None = None  # raw frame, no overlays (for captures)
 _latest_state: dict = {"ts": 0.0, "person": False}
 
 # Targeting state, set by the operator via the control endpoints and read by the
@@ -111,7 +112,7 @@ def _px(lm, w, h):
 
 def detect_loop(cfg):
     """Capture → detect → annotate → publish, forever."""
-    global _latest_jpeg, _latest_state
+    global _latest_jpeg, _latest_clean_jpeg, _latest_state
 
     cap = cv2.VideoCapture(cfg.camera, cv2.CAP_ANY)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
@@ -157,6 +158,14 @@ def detect_loop(cfg):
             time.sleep(0.05)
         h, w = frame.shape[:2]
         state = {"ts": time.time(), "frame": {"w": w, "h": h}, "person": False}
+
+        # Encode a clean copy of the raw frame BEFORE any overlays are drawn, so
+        # /clean can serve an un-annotated still (for the keepsake blast photo and
+        # shareable content). Cheap: one extra JPEG encode per frame.
+        ok_clean, clean_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, cfg.quality])
+        if ok_clean:
+            with _lock:
+                _latest_clean_jpeg = clean_buf.tobytes()
 
         if landmarker is not None:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -358,6 +367,18 @@ def snapshot():
     proxied stream). Cheap: hands back the frame the detect loop already encoded."""
     with _lock:
         jpeg = _latest_jpeg
+    if not jpeg:
+        return ("no frame yet", 503)
+    return Response(jpeg, mimetype="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.route("/clean")
+def clean():
+    """The latest frame WITHOUT the targeting overlay — the un-annotated blast
+    photo the orchestrator captures for the keepsake receipt and stored content."""
+    with _lock:
+        jpeg = _latest_clean_jpeg
     if not jpeg:
         return ("no frame yet", 503)
     return Response(jpeg, mimetype="image/jpeg",

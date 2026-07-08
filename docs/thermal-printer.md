@@ -14,7 +14,7 @@ start with [`architecture.md`](architecture.md).
 |---|---|---|
 | **M1** | Report renderer — `TrialRecord` → ESC/POS (seal, transcript, verdict, QR, reserved photo slot) | ✅ done |
 | **M2** | Live wiring — capture each trial, persist the casebook log + case counter, print at verdict | ✅ done |
-| **M3** | Guilty "moment of justice" blast photo from the vision still | ⬜ TODO (see below) |
+| **M3** | Guilty "moment of justice" blast photo from the vision still | ✅ done |
 
 ## ⚠️ Before pushing
 
@@ -141,10 +141,22 @@ git fetch thermal-src
 
 See the ⚠️ note above re: pushing vendored private code to the public remote.
 
-## M3 — the "moment of justice" blast photo (next)
+## M3 — the "moment of justice" blast photo (done)
+
+> **Shipped:** implemented as a **burst** rather than a single still, so the
+> frames also serve shareable content. On a guilty verdict `Runtime::finalize_trial`
+> hands the record to `capture::CaptureController` (`orchestrator/src/capture.rs`),
+> which — after `[capture] fire_delay_ms` — grabs `[capture] frames` clean frames
+> from the vision service's **`GET /clean`** (un-annotated; the annotated
+> `/snapshot` is the operator feed), saves them to `[capture] dir/<case_label>/
+> frame_NN.jpg`, attaches the middle frame to the `TrialRecord`
+> (`still_jpeg`, kept out of the casebook JSON), and *then* queues the print.
+> `report::moment_of_justice` dithers it via `raster::from_bytes`, falling back to
+> the reticle placeholder when a capture is missing. The casebook logs the
+> `capture_dir`; the burst is gitignored. The design below is the original plan.
 
 The guilty receipt reserves a framed slot (`report::moment_of_justice`,
-currently a placeholder reticle). Fill it with the firing-still from the vision
+originally a placeholder reticle). Fill it with the firing-still from the vision
 service:
 
 1. **Vision endpoint** — add `GET /still.jpg` to [`vision/vision.py`] returning

@@ -77,6 +77,14 @@ pub fn from_path<P: AsRef<Path>>(path: P, target_width: u32, opts: Options) -> R
     Ok(from_image(&img, target_width, opts))
 }
 
+/// Same as [`from_path`] but from encoded image bytes in memory (e.g. a JPEG
+/// frame captured from the vision service).
+#[cfg(feature = "image")]
+pub fn from_bytes(bytes: &[u8], target_width: u32, opts: Options) -> Result<Raster> {
+    let img = image::load_from_memory(bytes).context("decoding captured image bytes")?;
+    Ok(from_image(&img, target_width, opts))
+}
+
 /// Same as [`from_path`] but from an already-decoded image.
 #[cfg(feature = "image")]
 pub fn from_image(img: &image::DynamicImage, target_width: u32, opts: Options) -> Raster {

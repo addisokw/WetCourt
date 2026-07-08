@@ -24,6 +24,8 @@ pub struct Config {
     pub printer: PrinterConfig,
     #[serde(default)]
     pub vision: VisionConfig,
+    #[serde(default)]
+    pub capture: CaptureConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -56,6 +58,47 @@ fn d_vision_base_url() -> String {
 fn d_trial_targeting() -> bool {
     true
 }
+
+/// The guilty "moment of justice" capture: on a guilty verdict the orchestrator
+/// grabs a short burst of un-annotated frames from the vision service (`/clean`)
+/// around the blast, saves them under `dir/<case>/`, and dithers one onto the
+/// keepsake receipt. Off = the receipt keeps its placeholder still.
+#[derive(Debug, Deserialize, Clone)]
+pub struct CaptureConfig {
+    #[serde(default = "d_capture_enabled")]
+    pub enabled: bool,
+    /// Base directory for saved bursts; one `<case_label>/` subdir per trial.
+    #[serde(default = "d_capture_dir")]
+    pub dir: String,
+    /// Delay after entering the sentence before the first grab (ms) — lets the
+    /// FIRE go out and the water reach the defendant.
+    #[serde(default = "d_capture_delay_ms")]
+    pub fire_delay_ms: u64,
+    /// How many frames to grab.
+    #[serde(default = "d_capture_frames")]
+    pub frames: u32,
+    /// Spacing between grabs (ms). frames × interval spans the burst window.
+    #[serde(default = "d_capture_interval_ms")]
+    pub interval_ms: u64,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            enabled: d_capture_enabled(),
+            dir: d_capture_dir(),
+            fire_delay_ms: d_capture_delay_ms(),
+            frames: d_capture_frames(),
+            interval_ms: d_capture_interval_ms(),
+        }
+    }
+}
+
+fn d_capture_enabled() -> bool { true }
+fn d_capture_dir() -> String { "captures".into() }
+fn d_capture_delay_ms() -> u64 { 250 }
+fn d_capture_frames() -> u32 { 8 }
+fn d_capture_interval_ms() -> u64 { 110 }
 
 fn d_default_persona_id() -> String { "wettington".into() }
 

@@ -102,3 +102,14 @@ mode = "mock"
 width_dots = 576
 qr_url = "https://wetcourt.lol"
 booth_location = "Find the Wet Court near you"
+
+# Guilty "moment of justice" capture: on a guilty verdict, grab a short burst of
+# un-annotated frames from the vision service (/clean) around the blast, save
+# them under dir/<case>/, and dither one onto the keepsake receipt. Off = the
+# receipt keeps its reticle placeholder.
+[capture]
+enabled = true
+dir = "captures"        # one <case_label>/ subdir per guilty trial
+fire_delay_ms = 250     # wait after FIRE so the water is on the defendant
+frames = 8
+interval_ms = 110       # frames × interval spans the burst (~0.8s)

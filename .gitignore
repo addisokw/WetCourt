@@ -19,6 +19,10 @@ __pycache__/
 # ...except the test fixture the benchmark depends on
 !dgx-ai-stack/sample_plea.wav
 
+# Moment-of-justice capture bursts (default [capture] dir)
+captures/
+orchestrator/captures/
+
 # OS / editor noise
 .DS_Store
 .idea/

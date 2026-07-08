@@ -488,6 +488,7 @@ mod tests {
             crimes: CrimesConfig::default(),
             printer: PrinterConfig::default(),
             vision: VisionConfig::default(),
+            capture: CaptureConfig::default(),
         }
     }
 

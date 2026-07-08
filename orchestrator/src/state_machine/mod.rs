@@ -50,6 +50,9 @@ pub struct Runtime {
     /// freeze-then-fire on guilty, idle between trials). `None` disables it (and
     /// in tests, which don't wire up vision/hardware).
     targeting: Option<Arc<crate::targeting::TargetingController>>,
+    /// Captures the guilty "moment of justice" burst for the keepsake. `None`
+    /// disables it (and in tests).
+    capture: Option<Arc<crate::capture::CaptureController>>,
 }
 
 /// Mutable scratchpad that gathers one trial's pieces as they flow past the
@@ -80,6 +83,7 @@ impl Runtime {
         casebook: Arc<Casebook>,
         print_tx: mpsc::Sender<TrialRecord>,
         targeting: Option<Arc<crate::targeting::TargetingController>>,
+        capture: Option<Arc<crate::capture::CaptureController>>,
     ) -> Self {
         let next_case_no = AtomicU64::new(casebook.next_case_no());
         Self {
@@ -98,6 +102,7 @@ impl Runtime {
             print_tx,
             draft: None,
             targeting,
+            capture,
         }
     }
 
@@ -225,7 +230,7 @@ impl Runtime {
             return;
         };
         let case_no = self.next_case_no.fetch_add(1, Ordering::SeqCst);
-        let record = TrialRecord {
+        let mut record = TrialRecord {
             case_no,
             ts: draft.ts,
             charge: draft.charge,
@@ -236,14 +241,32 @@ impl Runtime {
             deliberation: verdict.deliberation,
             remarks: verdict.remarks,
             key_factor: verdict.key_factor,
+            capture_dir: None,
+            still_jpeg: None,
         };
+
+        // Guilty verdicts get a "moment of justice" burst: record the capture dir
+        // in the casebook now, then hand the record to the capture task, which
+        // grabs the frames, attaches the receipt still, and queues the print.
+        // (Not-guilty / capture-off prints immediately.)
+        let cap = match (record.guilty && self.cfg.capture.enabled).then_some(()) {
+            Some(()) => self.capture.clone(),
+            None => None,
+        };
+        if let Some(c) = &cap {
+            record.capture_dir = Some(c.case_dir(&record.case_label()).display().to_string());
+        }
+
         match self.casebook.record(&record) {
             Ok(()) => info!(case_no = record.case_no, guilty = record.guilty, "trial recorded"),
             Err(e) => tracing::error!("casebook append failed: {e:#}"),
         }
-        // Non-blocking: a backed-up printer drops the receipt rather than
-        // stalling the trial loop. The casebook line is already durable.
-        if let Err(e) = self.print_tx.try_send(record) {
+
+        if let Some(c) = &cap {
+            c.spawn(record, self.print_tx.clone());
+        } else if let Err(e) = self.print_tx.try_send(record) {
+            // Non-blocking: a backed-up printer drops the receipt rather than
+            // stalling the trial loop. The casebook line is already durable.
             tracing::warn!("keepsake not queued for print: {e}");
         }
     }
@@ -303,6 +326,7 @@ mod tests {
             crimes: CrimesConfig::default(),
             printer: PrinterConfig::default(),
             vision: VisionConfig::default(),
+            capture: CaptureConfig::default(),
         }
     }
 
@@ -352,6 +376,7 @@ mod tests {
             casebook.clone(),
             print_tx,
             None, // no targeting controller in the unit test
+            None, // no capture controller in the unit test
         );
 
         rt.handle(Event::OperatorStart).await;

@@ -39,6 +39,16 @@ pub struct TrialRecord {
     /// keeps older casebook lines (written before this field existed) loadable.
     #[serde(default)]
     pub key_factor: Option<String>,
+    /// Directory where this trial's "moment of justice" burst was saved (guilty
+    /// only). Logged to the casebook so the frames can be found later; the image
+    /// bytes themselves stay out of the JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_dir: Option<String>,
+    /// The single frame chosen for the printed receipt (raw JPEG bytes). Attached
+    /// by the capture task after the burst; dithered at render time. Never
+    /// serialized (kept out of the casebook).
+    #[serde(default, skip)]
+    pub still_jpeg: Option<Vec<u8>>,
 }
 
 impl TrialRecord {
@@ -120,6 +130,8 @@ impl TrialRecord {
                 .into(),
             remarks: "Justice, as ever, is wet.".into(),
             key_factor: Some("blamed the fountain".into()),
+            capture_dir: None,
+            still_jpeg: None,
         }
     }
 
@@ -139,6 +151,8 @@ impl TrialRecord {
                 .into(),
             remarks: "Acquitted. Do not let it happen again.".into(),
             key_factor: Some("disarming honesty".into()),
+            capture_dir: None,
+            still_jpeg: None,
         }
     }
 }

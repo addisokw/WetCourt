@@ -14,7 +14,7 @@
 
 use thermal_printer::canvas::Canvas;
 use thermal_printer::escpos::{Align, Builder, Font, QrEcc, WIDTH_DOTS_80MM};
-use thermal_printer::raster::Raster;
+use thermal_printer::raster::{self, Raster};
 use thermal_printer::text::{cols_for, wrap};
 
 use super::record::TrialRecord;
@@ -73,7 +73,7 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
     heavy_rule(&mut b, cols);
 
     if rec.guilty {
-        moment_of_justice(&mut b, w);
+        moment_of_justice(&mut b, w, rec.still_jpeg.as_deref());
     }
 
     footer(&mut b, rec, opts);
@@ -168,14 +168,25 @@ fn verdict(b: &mut Builder, rec: &TrialRecord) {
 /// Reserved photo slot (guilty only). M1 draws a framed reticle placeholder so
 /// the layout and paper feed match the final receipt; M3 replaces the frame
 /// with the dithered firing-still from the vision service.
-fn moment_of_justice(b: &mut Builder, w: u32) {
+fn moment_of_justice(b: &mut Builder, w: u32, still: Option<&[u8]>) {
     b.align(Align::Center).bold(true).line("-- MOMENT OF JUSTICE --").bold(false);
-    let r = placeholder_frame(w);
-    b.align(Align::Center)
-        .raster_banded(&r.bits, r.width_bytes, r.height, 64)
-        .font(Font::B)
-        .line("[ evidentiary still - vision capture pending ]")
-        .font(Font::A);
+    // Dither the captured blast frame to 1-bit at printer width; fall back to the
+    // reticle placeholder when there's no still (capture off / failed).
+    let captured = still.and_then(|bytes| raster::from_bytes(bytes, w, raster::Options::default()).ok());
+    match captured {
+        Some(r) => {
+            b.align(Align::Center)
+                .raster_banded(&r.bits, r.width_bytes, r.height, 64);
+        }
+        None => {
+            let r = placeholder_frame(w);
+            b.align(Align::Center)
+                .raster_banded(&r.bits, r.width_bytes, r.height, 64)
+                .font(Font::B)
+                .line("[ evidentiary still - vision capture pending ]")
+                .font(Font::A);
+        }
+    }
 }
 
 fn footer(b: &mut Builder, rec: &TrialRecord, opts: &ReportOpts) {

@@ -7,6 +7,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod calibration;
+mod capture;
 mod config;
 mod crimes;
 mod display;
@@ -262,6 +263,13 @@ async fn main() -> Result<()> {
         maint_cmd_tx.clone(),
     ));
 
+    // Guilty "moment of justice" burst capture (feeds the keepsake receipt).
+    let capture = Arc::new(capture::CaptureController::new(
+        vision_http.clone(),
+        cfg.vision.base_url.clone(),
+        cfg.capture.clone(),
+    ));
+
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -292,7 +300,7 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx, Some(targeting));
+    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx, Some(targeting), Some(capture));
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {
