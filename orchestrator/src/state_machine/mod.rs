@@ -15,7 +15,7 @@ pub mod events;
 pub mod states;
 pub mod transitions;
 
-pub use commands::Command;
+pub use commands::{Command, TargetingCue};
 pub use events::Event;
 pub use states::State;
 
@@ -46,6 +46,10 @@ pub struct Runtime {
     print_tx: mpsc::Sender<TrialRecord>,
     /// Accumulates the in-flight trial's pieces; `None` between trials.
     draft: Option<TrialDraft>,
+    /// Drives the turret aiming sequence during trials (arm on deliberation,
+    /// freeze-then-fire on guilty, idle between trials). `None` disables it (and
+    /// in tests, which don't wire up vision/hardware).
+    targeting: Option<Arc<crate::targeting::TargetingController>>,
 }
 
 /// Mutable scratchpad that gathers one trial's pieces as they flow past the
@@ -75,6 +79,7 @@ impl Runtime {
         personas: Arc<RwLock<PersonaRegistry>>,
         casebook: Arc<Casebook>,
         print_tx: mpsc::Sender<TrialRecord>,
+        targeting: Option<Arc<crate::targeting::TargetingController>>,
     ) -> Self {
         let next_case_no = AtomicU64::new(casebook.next_case_no());
         Self {
@@ -92,6 +97,7 @@ impl Runtime {
             next_case_no,
             print_tx,
             draft: None,
+            targeting,
         }
     }
 
@@ -139,6 +145,20 @@ impl Runtime {
 
         if entering_sentence {
             self.finalize_trial();
+        }
+
+        // Trial-targeting: a trial always begins and ends with the gun idle. On
+        // start we disarm any manual arm and center; on any return to Idle
+        // (normal finish, abort, or e-stop) we disarm and center for the next
+        // defendant. Acquire/Freeze are emitted as commands by the transitions;
+        // these two entry edges cover every path to a static idle gun.
+        let entering_idle = prev_name != "idle" && self.state.name() == "idle";
+        if self.cfg.vision.trial_targeting {
+            if let Some(t) = &self.targeting {
+                if is_start || entering_idle {
+                    t.execute(TargetingCue::Idle).await;
+                }
+            }
         }
 
         for cmd in cmds {
@@ -240,6 +260,11 @@ impl Runtime {
                     tracing::error!("hardware channel closed");
                 }
             }
+            Command::Targeting(cue) => {
+                if let Some(t) = &self.targeting {
+                    t.execute(cue).await;
+                }
+            }
             Command::Display(_) | Command::DisplayBinary(_) => {
                 if self.display_tx.send(cmd).await.is_err() {
                     tracing::warn!("display channel closed (no client?)");
@@ -326,6 +351,7 @@ mod tests {
             personas,
             casebook.clone(),
             print_tx,
+            None, // no targeting controller in the unit test
         );
 
         rt.handle(Event::OperatorStart).await;

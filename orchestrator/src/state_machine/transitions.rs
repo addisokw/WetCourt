@@ -5,7 +5,7 @@ use crate::display::events::DisplayEvent;
 use crate::fallbacks;
 use crate::hardware::protocol::{HardwareCommand, LightState, PanelPattern};
 
-use super::commands::Command;
+use super::commands::{Command, TargetingCue};
 use super::events::Event;
 use super::states::{CrossExam, State, Verdict, NO_DEFENSE};
 
@@ -322,17 +322,25 @@ fn begin_deliberating(
     cross: Option<CrossExam>,
     cfg: &Config,
 ) -> (State, Vec<Command>) {
-    (
-        State::Deliberating { charge: charge.clone(), plea: plea.clone(), started_at: Instant::now() },
-        vec![
-            Command::Display(DisplayEvent::TranscriptReady { text: plea.clone() }),
-            Command::Display(DisplayEvent::PhaseDeadline {
-                phase: "deliberating".into(),
-                deadline_ms: cfg.inference.verdict_total_timeout_secs * 1000,
-            }),
-            Command::Deliberate { charge, plea, cross },
-        ],
-    )
+    let state = State::Deliberating {
+        charge: charge.clone(),
+        plea: plea.clone(),
+        started_at: Instant::now(),
+    };
+    let mut cmds = vec![
+        Command::Display(DisplayEvent::TranscriptReady { text: plea.clone() }),
+        Command::Display(DisplayEvent::PhaseDeadline {
+            phase: "deliberating".into(),
+            deadline_ms: cfg.inference.verdict_total_timeout_secs * 1000,
+        }),
+    ];
+    // Begin the turret's pre-verdict lock-on: arm as the judge deliberates so the
+    // gun visibly acquires the defendant before the reveal.
+    if cfg.vision.trial_targeting {
+        cmds.push(Command::Targeting(TargetingCue::Acquire));
+    }
+    cmds.push(Command::Deliberate { charge, plea, cross });
+    (state, cmds)
 }
 
 /// First plea is in. Branch into cross-examination when it's enabled and the
@@ -437,6 +445,12 @@ fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {
     let mut cmds = vec![Command::Display(DisplayEvent::ExecuteSentence { guilty: v.guilty })];
     if v.guilty {
         cmds.push(Command::Hardware(HardwareCommand::Lights(LightState::Guilty)));
+        // Freeze the aim before firing (when trial-targeting): the turret holds
+        // where vision locked it and the fire gate goes transparent, so the shot
+        // lands on the defendant. Ordered before Fire — dispatched sequentially.
+        if cfg.vision.trial_targeting {
+            cmds.push(Command::Targeting(TargetingCue::Freeze));
+        }
         cmds.push(Command::Hardware(HardwareCommand::Fire(cfg.squirt.duration_ms)));
         cmds.push(Command::Display(DisplayEvent::PlayCue { name: "organ_guilty".into() }));
     } else {
@@ -475,6 +489,67 @@ mod tests {
             printer: PrinterConfig::default(),
             vision: VisionConfig::default(),
         }
+    }
+
+    fn guilty_verdict(guilty: bool) -> Verdict {
+        Verdict {
+            guilty,
+            deliberation: "d".into(),
+            remarks: "r".into(),
+            key_factor: None,
+            pre_announced: false,
+        }
+    }
+
+    #[test]
+    fn deliberating_arms_targeting_when_enabled() {
+        let mut cfg = test_cfg();
+        cfg.vision.trial_targeting = true;
+        let (_s, cmds) = begin_deliberating("c".into(), "p".into(), None, &cfg);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Targeting(TargetingCue::Acquire))));
+
+        cfg.vision.trial_targeting = false;
+        let (_s, cmds) = begin_deliberating("c".into(), "p".into(), None, &cfg);
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Targeting(_))));
+    }
+
+    #[test]
+    fn guilty_sentence_freezes_immediately_before_fire() {
+        let cfg = test_cfg(); // trial_targeting defaults on
+        let cmds = sentence_commands(&guilty_verdict(true), &cfg);
+        let freeze = cmds
+            .iter()
+            .position(|c| matches!(c, Command::Targeting(TargetingCue::Freeze)))
+            .expect("freeze present");
+        let fire = cmds
+            .iter()
+            .position(|c| matches!(c, Command::Hardware(HardwareCommand::Fire(_))))
+            .expect("fire present");
+        assert!(freeze < fire, "freeze must precede fire so the gate is transparent");
+    }
+
+    #[test]
+    fn guilty_sentence_no_targeting_when_disabled() {
+        let mut cfg = test_cfg();
+        cfg.vision.trial_targeting = false;
+        let cmds = sentence_commands(&guilty_verdict(true), &cfg);
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Targeting(_))));
+        // Still fires — old behaviour, ungated.
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Fire(_)))));
+    }
+
+    #[test]
+    fn not_guilty_sentence_never_freezes_or_fires() {
+        let cfg = test_cfg();
+        let cmds = sentence_commands(&guilty_verdict(false), &cfg);
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Targeting(_))));
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Fire(_)))));
     }
 
     #[test]

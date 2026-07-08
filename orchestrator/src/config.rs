@@ -34,16 +34,27 @@ pub struct VisionConfig {
     /// booth PC's localhost; prod: the vision container on the Spark.
     #[serde(default = "d_vision_base_url")]
     pub base_url: String,
+    /// Drive the turret during trials: on deliberation, arm targeting so the gun
+    /// visibly acquires a lock on the defendant (suspense) before the verdict;
+    /// on guilty it freezes on the target and fires; every trial starts and ends
+    /// with the gun at idle. Off = the FSM never touches targeting (the gun stays
+    /// static and a guilty verdict fires straight, ungated — the older behaviour).
+    #[serde(default = "d_trial_targeting")]
+    pub trial_targeting: bool,
 }
 
 impl Default for VisionConfig {
     fn default() -> Self {
-        Self { base_url: d_vision_base_url() }
+        Self { base_url: d_vision_base_url(), trial_targeting: d_trial_targeting() }
     }
 }
 
 fn d_vision_base_url() -> String {
     "http://localhost:8091".into()
+}
+
+fn d_trial_targeting() -> bool {
+    true
 }
 
 fn d_default_persona_id() -> String { "wettington".into() }

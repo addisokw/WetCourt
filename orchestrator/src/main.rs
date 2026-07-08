@@ -18,6 +18,7 @@ mod personas;
 // the printer service. Driven from the state machine at each completed verdict.
 mod printer;
 mod state_machine;
+mod targeting;
 
 use display::{AppState, DisplayMessage};
 use state_machine::Runtime;
@@ -251,6 +252,16 @@ async fn main() -> Result<()> {
         .build()
         .expect("building vision http client");
 
+    // Trial turret choreography — shares the same arm flag / vision / calibration
+    // / command sink as the operator `/vision/*` endpoints.
+    let targeting = Arc::new(targeting::TargetingController::new(
+        targeting_armed.clone(),
+        vision_http.clone(),
+        cfg.vision.base_url.clone(),
+        calibration.clone(),
+        maint_cmd_tx.clone(),
+    ));
+
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -281,7 +292,7 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx);
+    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx, Some(targeting));
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {

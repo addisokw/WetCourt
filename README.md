@@ -40,11 +40,17 @@ Idle attractor ─▶ operator starts ─▶ charge drawn & read aloud ─▶ pl
 6. **Cross-examination** *(optional, operator-toggleable)* — the judge asks one
    pointed follow-up and records a short answer.
 7. **Deliberation** — the LLM judge weighs the plea in persona, streaming its
-   reasoning to the screen and speaking it as it goes.
-8. **Verdict** — guilty / not guilty + a closing remark.
-9. **Sentence** — gavel bangs; if guilty, the turret aims and the squirt fires;
-   if acquitted, a celebration cue. A keepsake receipt prints.
-10. **Cooldown** → back to Idle.
+   reasoning to the screen and speaking it as it goes. As it deliberates, the
+   turret **arms and visibly locks onto the defendant** — the gun starts each
+   trial static at idle and acquires its target before the verdict, for suspense
+   (`[vision] trial_targeting`, on by default).
+8. **Verdict** — guilty / not guilty + a closing remark. The screen also names
+   the deciding factor ("what decided it").
+9. **Sentence** — gavel bangs; if guilty, the turret **freezes on its lock and
+   the squirt fires**; if acquitted, a celebration cue and the gun returns to
+   idle. A keepsake receipt prints.
+10. **Cooldown** → back to Idle (gun idle, disarmed, ready for the next
+    defendant).
 
 ---
 

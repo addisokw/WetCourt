@@ -82,6 +82,11 @@ listen_addr = "0.0.0.0:8080"
 # it at /vision/* so the console stays same-origin. Dev: the booth PC's localhost
 # (run `cd vision && uv run vision.py`). Prod: the vision container on the Spark.
 base_url = "http://localhost:8091"
+# Drive the turret during trials: arm on deliberation so the gun visibly locks
+# onto the defendant before the verdict, freeze-and-fire on guilty, and idle the
+# gun between trials. Off = the FSM never touches targeting (static gun; a guilty
+# verdict fires straight, ungated). Default true.
+trial_targeting = true
 
 [logging]
 level = "info,booth=debug"

@@ -18,4 +18,21 @@ pub enum Command {
     /// Raw binary frame to push down the WebSocket — typically a TTS audio
     /// chunk, preceded by a `DisplayEvent::TtsAudio` JSON header.
     DisplayBinary(Bytes),
+    /// Drive the trial's vision-targeting sequence (arm/freeze/idle). Executed by
+    /// the `TargetingController` in the Runtime; a no-op when unconfigured.
+    Targeting(TargetingCue),
+}
+
+/// One step of the trial's turret-aiming choreography.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetingCue {
+    /// Reset the aim to center and arm, so vision sweeps the gun onto the
+    /// defendant and locks (the pre-verdict suspense).
+    Acquire,
+    /// Disarm in place — the turret holds its current aim (on the target) and the
+    /// fire gate goes transparent, so the guilty shot lands where it locked.
+    Freeze,
+    /// Disarm and return the turret to its idle (center) position, resetting the
+    /// vision integrator for the next trial.
+    Idle,
 }

@@ -23,10 +23,18 @@ This document captures architectural decisions and is intended to inform an impl
 >   test plane) and an optional cross-examination branch were added, and
 >   `Cooldown` is folded into `ExecutingSentence`. See
 >   `orchestrator/src/state_machine/`.
-> - **Newer subsystems not covered here:** vision-guided turret targeting with
->   an eye-safety fire gate ([`turret-vision-roadmap.md`](turret-vision-roadmap.md))
->   and the thermal-printer keepsake + casebook
->   ([`thermal-printer.md`](thermal-printer.md)).
+> - **Newer subsystems not covered here:** vision-guided turret targeting
+>   ([`turret-vision-roadmap.md`](turret-vision-roadmap.md)) and the
+>   thermal-printer keepsake + casebook ([`thermal-printer.md`](thermal-printer.md)).
+> - **Trial turret sequence:** with `[vision] trial_targeting` (default on) the
+>   FSM drives the gun through each trial via `Command::Targeting` cues
+>   (`orchestrator/src/targeting.rs`): the gun starts static at idle, **arms on
+>   `Deliberating`** so it visibly locks onto the defendant before the verdict,
+>   and on a guilty `ExecutingSentence` **freezes on the lock then fires** (the
+>   freeze disarms in place so the fire gate is transparent and the shot lands on
+>   target); every return to `Idle` disarms and recenters. The eye-exclusion
+>   safety zone that once gated firing was retired when a softer nozzle made the
+>   stream safe — the fire gate now just means "armed + a fresh lock".
 > - **Display server (§6.4):** the operator `/ws` is single-client
 >   (last-connection-wins); a read-only `/ws/view` fans out to audience monitors.
 > The top-level [`README.md`](../README.md) reflects the current system.
@@ -189,11 +197,11 @@ enum Event {
 | DisplayingCharge | timeout reached | AwaitingPlea | Open mic, start 20s timer |
 | AwaitingPlea | PleaAudioReceived | Transcribing | User pressed PTT and finished |
 | AwaitingPlea | PleaTimeout | Transcribing | Use whatever was captured |
-| Transcribing | TranscriptReady | Deliberating | Begin verdict LLM call |
+| Transcribing | TranscriptReady | Deliberating | Begin verdict LLM call; arm turret (locks onto defendant) |
 | Transcribing | TranscriptFailed / timeout (5s) | Deliberating | Plea = "[no defense offered]" |
 | Deliberating | VerdictReady | PronouncingVerdict | TTS verdict, gavel cue |
 | Deliberating | VerdictFailed / timeout (15s) | PronouncingVerdict | Use coin-flip canned verdict |
-| PronouncingVerdict | TtsFinished | ExecutingSentence | Fire hardware |
+| PronouncingVerdict | TtsFinished | ExecutingSentence | Guilty: freeze aim on lock, then fire |
 | ExecutingSentence | HardwareAck | Cooldown | 3s pause |
 | ExecutingSentence | HardwareError / timeout (3s) | Cooldown | Show went on |
 | Cooldown | timeout reached | Idle | Ready for next |
