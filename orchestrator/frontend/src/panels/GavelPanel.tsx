@@ -57,7 +57,7 @@ export default function GavelPanel() {
     const base = storedCal();
     return base
       ? { ...base, gavel: cur() }
-      : { role: 'gavel', fire_presets_ms: [], gavel: cur() };
+      : { role: 'gavel', gavel: cur() };
   }
 
   // Strike with the saved geometry (also the gamepad A action).

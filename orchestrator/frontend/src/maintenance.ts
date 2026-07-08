@@ -28,7 +28,9 @@ export interface Calibration {
   role: string;
   pan?: ServoCal | null;
   tilt?: ServoCal | null;
-  fire_presets_ms: number[];
+  // The squirt board's relay-open duration (ms) — the single console test-fire
+  // time. Absent on roles that don't fire.
+  fire_ms?: number | null;
   gavel?: GavelCal | null;
 }
 

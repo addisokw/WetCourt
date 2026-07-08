@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::{multipart, Client};
@@ -155,8 +155,8 @@ impl LlmClient {
         let req = self.build(reqwest::Method::POST, "/chat/completions").json(&body);
         let resp = tokio::time::timeout(Duration::from_secs(10), req.send())
             .await
-            .map_err(|_| anyhow!("chat_stream connect timeout"))??
-            .error_for_status()?;
+            .map_err(|_| anyhow!("chat_stream connect timeout"))??;
+        let resp = ensure_ok(resp).await?;
 
         let started = tokio::time::Instant::now();
         let mut bytes = resp.bytes_stream();
@@ -209,8 +209,8 @@ impl LlmClient {
         let resp = self.build(reqwest::Method::POST, path)
             .json(body)
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let resp = ensure_ok(resp).await?;
         Ok(resp.json().await?)
     }
 
@@ -221,6 +221,22 @@ impl LlmClient {
         }
         req
     }
+}
+
+/// Turn a non-2xx response into an error that includes the response body — the
+/// inference gateway (LiteLLM/vLLM) puts the actual reason there (bad param,
+/// context-length overflow, unknown model), which `error_for_status` discards.
+async fn ensure_ok(resp: reqwest::Response) -> Result<reqwest::Response> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let body = resp.text().await.unwrap_or_default();
+    let snippet: String = body.trim().chars().take(1000).collect();
+    if snippet.is_empty() {
+        bail!("inference API returned HTTP {status}");
+    }
+    bail!("inference API returned HTTP {status}: {snippet}")
 }
 
 /// Match the reqwest/hyper error patterns that indicate the pooled keep-alive

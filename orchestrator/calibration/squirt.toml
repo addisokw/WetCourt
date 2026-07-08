@@ -1,11 +1,2 @@
 role = "squirt"
-fire_presets_ms = [
-    60,
-    100,
-    150,
-    200,
-    280,
-]
-
-# The squirt board fires the relay — no pan/tilt. `fire_presets_ms` are the
-# quick-fire button durations (ms) shown in the Turret panel's Fire section.
+fire_ms = 30

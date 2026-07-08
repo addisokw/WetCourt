@@ -137,8 +137,8 @@ impl GavelCal {
 }
 
 /// All calibration for one device role. Axes are optional (the gavel has none),
-/// `fire_presets_ms` is the turret's quick-fire button durations, `gavel` is the
-/// gavel's strike geometry.
+/// `fire_ms` is the squirt board's relay-open duration (ms) — the single
+/// test-fire time set from the console, `gavel` is the gavel's strike geometry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Calibration {
     pub role: String,
@@ -146,8 +146,8 @@ pub struct Calibration {
     pub pan: Option<ServoCal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tilt: Option<ServoCal>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fire_presets_ms: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fire_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gavel: Option<GavelCal>,
 }
@@ -169,8 +169,12 @@ impl Calibration {
         if let Some(t) = &self.tilt {
             t.validate("tilt")?;
         }
-        if self.fire_presets_ms.iter().any(|&ms| ms == 0) {
-            bail!("fire_presets_ms must all be > 0");
+        if let Some(ms) = self.fire_ms {
+            // The firmware hard-caps the relay pulse at 1000 ms; reject anything
+            // above that so a saved value can't silently clamp.
+            if ms == 0 || ms > 1000 {
+                bail!("fire_ms ({ms}) must be within [1, 1000]");
+            }
         }
         if let Some(g) = &self.gavel {
             g.validate()?;
@@ -287,7 +291,7 @@ mod tests {
             role: "turret".into(),
             pan: Some(pan_cal()),
             tilt: Some(pan_cal()),
-            fire_presets_ms: vec![60, 150, 280],
+            fire_ms: None, // turret aims; the squirt board owns fire_ms
             gavel: None,
         }
     }
@@ -340,7 +344,7 @@ mod tests {
             role: "gavel".into(),
             pan: None,
             tilt: None,
-            fire_presets_ms: vec![],
+            fire_ms: None,
             gavel: Some(gavel_cal()),
         };
         assert!(gavel.aim_to_raw(0.0, 0.0).is_err());
@@ -352,7 +356,7 @@ mod tests {
             role: "gavel".into(),
             pan: None,
             tilt: None,
-            fire_presets_ms: vec![],
+            fire_ms: None,
             gavel: Some(gavel_cal()),
         };
         let text = toml::to_string_pretty(&cal).unwrap();
@@ -409,10 +413,14 @@ settle_dwell_ms = 160
     }
 
     #[test]
-    fn validate_rejects_zero_preset() {
+    fn validate_rejects_bad_fire_ms() {
         let mut cal = turret();
-        cal.fire_presets_ms = vec![0];
+        cal.fire_ms = Some(0);
         assert!(cal.validate().is_err());
+        cal.fire_ms = Some(1001); // above the firmware cap
+        assert!(cal.validate().is_err());
+        cal.fire_ms = Some(150);
+        assert!(cal.validate().is_ok());
     }
 
     #[test]
@@ -430,9 +438,9 @@ settle_dwell_ms = 160
         assert!(reg.get("turret").is_some());
 
         let mut updated = turret();
-        updated.fire_presets_ms = vec![99];
+        updated.fire_ms = Some(99);
         reg.update("turret", updated).unwrap();
-        assert_eq!(reg.get("turret").unwrap().fire_presets_ms, vec![99]);
+        assert_eq!(reg.get("turret").unwrap().fire_ms, Some(99));
 
         // path/body mismatch rejected
         assert!(reg.update("gavel", turret()).is_err());

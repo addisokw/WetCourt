@@ -152,23 +152,6 @@ export function CalibrationEditor(props: { role: Role }) {
       <Show when={current()} fallback={<div class="muted small">no calibration loaded</div>}>
         {axisEditor('pan')}
         {axisEditor('tilt')}
-        <Show when={(current()?.fire_presets_ms?.length ?? 0) > 0}>
-          <label class="cal-field">
-            <span>fire presets (ms, comma-separated)</span>
-            <input
-              type="text"
-              value={(current()?.fire_presets_ms ?? []).join(', ')}
-              onInput={(e) =>
-                edit((c) => {
-                  c.fire_presets_ms = e.currentTarget.value
-                    .split(',')
-                    .map((s) => parseInt(s.trim(), 10))
-                    .filter((n) => Number.isFinite(n) && n > 0);
-                })
-              }
-            />
-          </label>
-        </Show>
         <div class="btn-row">
           <button onClick={doApply}>Apply</button>
           <button onClick={doSave}>Save to disk</button>
