@@ -36,6 +36,7 @@ try:
     import mediapipe as mp
     from mediapipe.tasks.python import vision as _mp_vision
     from mediapipe.tasks.python.core.base_options import BaseOptions
+
     PoseLandmarker = _mp_vision.PoseLandmarker
     PoseLandmarkerOptions = _mp_vision.PoseLandmarkerOptions
     RunningMode = _mp_vision.RunningMode
@@ -49,8 +50,9 @@ _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
     "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 )
-_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "models", "pose_landmarker_lite.task")
+_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "models", "pose_landmarker_lite.task"
+)
 
 
 def ensure_model(path):
@@ -58,10 +60,12 @@ def ensure_model(path):
     if os.path.exists(path):
         return path
     import urllib.request
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
     print(f"[vision] downloading pose model -> {path}")
     urllib.request.urlretrieve(_MODEL_URL, path)
     return path
+
 
 # MediaPipe Pose landmark indices we use.
 NOSE, L_EYE, R_EYE = 0, 2, 5
@@ -80,7 +84,7 @@ _latest_state: dict = {"ts": 0.0, "person": False}
 # the camera moves with the gun); `_aim` is the commanded turret aim (degrees)
 # the loop integrates toward putting the target on the boresight.
 _tlock = threading.Lock()
-_target_part = "none"          # "none" | "chest" | "head"
+_target_part = "none"  # "none" | "chest" | "head"
 _boresight: list | None = None  # [x, y]; defaults to frame center
 _aim = {"pan": 0.0, "tilt": 0.0}
 # Operator must explicitly confirm head shots; chest never needs it.
@@ -88,7 +92,7 @@ _head_confirm = False
 # Live-tunable servo gains (deg of aim per pixel of error; sign matters) and the
 # lock tolerance (px). Seeded from the CLI flags in main(), then editable from
 # the operator console via POST /gains.
-_tune = {"gain_pan": 0.025, "gain_tilt": 0.025, "tolerance": 12}
+_tune = {"gain_pan": 0.01, "gain_tilt": 0.01, "tolerance": 12}
 
 # Cap the per-frame aim change so a too-high gain can't fling the gun across its
 # whole range in one step — softens overshoot while tuning.
@@ -219,7 +223,9 @@ def detect_loop(cfg):
         # shows it; it does not fire anything yet). The impact point is the
         # boresight; it must clear the eye zone (+ uncertainty) to be safe. ---
         zone = _eye_zone(state.get("eyes"), cfg.eye_pad)
-        eye_clear = zone is None or not _circle_hits_box(bs[0], bs[1], cfg.impact_radius, zone)
+        eye_clear = zone is None or not _circle_hits_box(
+            bs[0], bs[1], cfg.impact_radius, zone
+        )
         if part == "chest":
             fire_ok = locked  # torso is inherently clear of the eyes
         elif part == "head":
@@ -240,28 +246,62 @@ def detect_loop(cfg):
             send_aim(aim_pan, aim_tilt, fire_ok, locked)
 
         # Boresight marker (where the gun points) + the aim vector to the target.
-        cv2.drawMarker(frame, (int(bs[0]), int(bs[1])), (0, 255, 255),
-                       cv2.MARKER_TILTED_CROSS, 20, 2)
+        cv2.drawMarker(
+            frame,
+            (int(bs[0]), int(bs[1])),
+            (0, 255, 255),
+            cv2.MARKER_TILTED_CROSS,
+            20,
+            2,
+        )
         if tp:
             col = (0, 255, 0) if locked else (0, 165, 255)
-            cv2.arrowedLine(frame, (int(bs[0]), int(bs[1])),
-                            (int(tp[0]), int(tp[1])), col, 2, tipLength=0.2)
+            cv2.arrowedLine(
+                frame,
+                (int(bs[0]), int(bs[1])),
+                (int(tp[0]), int(tp[1])),
+                col,
+                2,
+                tipLength=0.2,
+            )
             if locked:
-                cv2.putText(frame, "LOCKED", (int(bs[0]) - 42, int(bs[1]) - 24),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    "LOCKED",
+                    (int(bs[0]) - 42, int(bs[1]) - 24),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
 
         # Eye-exclusion zone (red when the impact would hit it) + fire status.
         if zone is not None:
             zc = (40, 40, 255) if not eye_clear else (60, 90, 160)
-            cv2.rectangle(frame, (int(zone[0]), int(zone[1])),
-                          (int(zone[2]), int(zone[3])), zc, 2)
-            cv2.putText(frame, "eyes", (int(zone[0]), int(zone[1]) - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, zc, 1)
+            cv2.rectangle(
+                frame, (int(zone[0]), int(zone[1])), (int(zone[2]), int(zone[3])), zc, 2
+            )
+            cv2.putText(
+                frame,
+                "eyes",
+                (int(zone[0]), int(zone[1]) - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                zc,
+                1,
+            )
         if part != "none":
             txt = "FIRE OK" if fire_ok else "NO FIRE"
             fc = (0, 255, 0) if fire_ok else (40, 40, 255)
-            cv2.putText(frame, txt, (int(bs[0]) - 40, int(bs[1]) + 32),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, fc, 2)
+            cv2.putText(
+                frame,
+                txt,
+                (int(bs[0]) - 40, int(bs[1]) + 32),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                fc,
+                2,
+            )
 
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, cfg.quality])
         if ok:
@@ -272,6 +312,7 @@ def detect_loop(cfg):
 
 def _annotate(frame, lm, w, h, state):
     """Compute target points from pose landmarks and draw them."""
+
     def vis(i):
         return lm[i].visibility > 0.5
 
@@ -308,21 +349,28 @@ def _annotate(frame, lm, w, h, state):
 
     # --- overlay ---
     ci = (round(chest[0]), round(chest[1]))
-    cv2.circle(frame, ci, 10, (0, 200, 0), 2)            # chest target (green)
+    cv2.circle(frame, ci, 10, (0, 200, 0), 2)  # chest target (green)
     cv2.drawMarker(frame, ci, (0, 200, 0), cv2.MARKER_CROSS, 22, 1)
     cv2.line(frame, ls, rs, (0, 160, 0), 1)
     if head:
-        cv2.circle(frame, head, 8, (0, 180, 220), 2)     # head (amber) — gated later
+        cv2.circle(frame, head, 8, (0, 180, 220), 2)  # head (amber) — gated later
     for e in eyes:
-        cv2.circle(frame, e, 5, (60, 60, 255), -1)       # eyes (red) — exclusion zone later
+        cv2.circle(frame, e, 5, (60, 60, 255), -1)  # eyes (red) — exclusion zone later
 
 
 def _test_pattern(w, h):
     import numpy as np
 
     img = np.zeros((h, w, 3), dtype="uint8")
-    cv2.putText(img, "no camera", (w // 2 - 90, h // 2), cv2.FONT_HERSHEY_SIMPLEX,
-                1.0, (60, 60, 200), 2)
+    cv2.putText(
+        img,
+        "no camera",
+        (w // 2 - 90, h // 2),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (60, 60, 200),
+        2,
+    )
     return img
 
 
@@ -350,6 +398,20 @@ def feed():
             time.sleep(1 / 30)
 
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/snapshot")
+def snapshot():
+    """The latest single frame as a plain JPEG. Polled by clients that can't
+    consume the endless `multipart/x-mixed-replace` /feed stream — notably an
+    <img> proxied through the orchestrator (Safari errors on the keep-alive
+    proxied stream). Cheap: hands back the frame the detect loop already encoded."""
+    with _lock:
+        jpeg = _latest_jpeg
+    if not jpeg:
+        return ("no frame yet", 503)
+    return Response(jpeg, mimetype="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.route("/state")
@@ -438,30 +500,71 @@ def health():
 
 def main():
     p = argparse.ArgumentParser(description="Wet Court turret vision")
-    p.add_argument("--camera", type=int, default=int(os.environ.get("BOOTH_VISION_CAMERA", 0)))
+    p.add_argument(
+        "--camera", type=int, default=int(os.environ.get("BOOTH_VISION_CAMERA", 0))
+    )
     p.add_argument("--host", default=os.environ.get("BOOTH_VISION_HOST", "0.0.0.0"))
-    p.add_argument("--port", type=int, default=int(os.environ.get("BOOTH_VISION_PORT", 8091)))
-    p.add_argument("--width", type=int, default=int(os.environ.get("BOOTH_VISION_WIDTH", 640)))
-    p.add_argument("--height", type=int, default=int(os.environ.get("BOOTH_VISION_HEIGHT", 480)))
-    p.add_argument("--quality", type=int, default=int(os.environ.get("BOOTH_VISION_QUALITY", 80)))
-    p.add_argument("--model", default=os.environ.get("BOOTH_VISION_MODEL", _MODEL_PATH),
-                   help="pose .task model path (auto-downloaded if missing)")
+    p.add_argument(
+        "--port", type=int, default=int(os.environ.get("BOOTH_VISION_PORT", 8091))
+    )
+    p.add_argument(
+        "--width", type=int, default=int(os.environ.get("BOOTH_VISION_WIDTH", 640))
+    )
+    p.add_argument(
+        "--height", type=int, default=int(os.environ.get("BOOTH_VISION_HEIGHT", 480))
+    )
+    p.add_argument(
+        "--quality", type=int, default=int(os.environ.get("BOOTH_VISION_QUALITY", 80))
+    )
+    p.add_argument(
+        "--model",
+        default=os.environ.get("BOOTH_VISION_MODEL", _MODEL_PATH),
+        help="pose .task model path (auto-downloaded if missing)",
+    )
     # --- Targeting servo ---
-    p.add_argument("--orchestrator", default=os.environ.get("BOOTH_VISION_ORCH", "http://localhost:8080"),
-                   help="orchestrator base URL to stream aim to (/vision/aim)")
-    p.add_argument("--gain-pan", type=float, default=float(os.environ.get("BOOTH_VISION_GAIN_PAN", 0.025)),
-                   help="deg of pan per pixel of error (sign is hardware-dependent; tune live)")
-    p.add_argument("--gain-tilt", type=float, default=float(os.environ.get("BOOTH_VISION_GAIN_TILT", 0.025)))
-    p.add_argument("--tolerance", type=int, default=int(os.environ.get("BOOTH_VISION_TOL", 12)),
-                   help="pixel error within which the target counts as LOCKED")
+    p.add_argument(
+        "--orchestrator",
+        default=os.environ.get("BOOTH_VISION_ORCH", "http://localhost:8080"),
+        help="orchestrator base URL to stream aim to (/vision/aim)",
+    )
+    p.add_argument(
+        "--gain-pan",
+        type=float,
+        default=float(os.environ.get("BOOTH_VISION_GAIN_PAN", 0.025)),
+        help="deg of pan per pixel of error (sign is hardware-dependent; tune live)",
+    )
+    p.add_argument(
+        "--gain-tilt",
+        type=float,
+        default=float(os.environ.get("BOOTH_VISION_GAIN_TILT", 0.025)),
+    )
+    p.add_argument(
+        "--tolerance",
+        type=int,
+        default=int(os.environ.get("BOOTH_VISION_TOL", 12)),
+        help="pixel error within which the target counts as LOCKED",
+    )
     p.add_argument("--pan-limit", type=float, default=90.0)
     p.add_argument("--tilt-limit", type=float, default=45.0)
-    p.add_argument("--send-interval", type=float, default=0.066, help="min seconds between aim posts (~15 Hz)")
+    p.add_argument(
+        "--send-interval",
+        type=float,
+        default=0.066,
+        help="min seconds between aim posts (~15 Hz)",
+    )
     # --- Eye-safety ---
-    p.add_argument("--eye-pad", type=float, default=float(os.environ.get("BOOTH_VISION_EYE_PAD", 0.8)),
-                   help="eye-exclusion padding as a fraction of inter-eye distance (bigger = safer)")
-    p.add_argument("--impact-radius", type=int, default=int(os.environ.get("BOOTH_VISION_IMPACT_R", 25)),
-                   help="impact uncertainty radius (px) added around the boresight for the no-fire test")
+    p.add_argument(
+        "--eye-pad",
+        type=float,
+        default=float(os.environ.get("BOOTH_VISION_EYE_PAD", 0.8)),
+        help="eye-exclusion padding as a fraction of inter-eye distance (bigger = safer)",
+    )
+    p.add_argument(
+        "--impact-radius",
+        type=int,
+        default=int(os.environ.get("BOOTH_VISION_IMPACT_R", 25)),
+        help="impact uncertainty radius (px) added around the boresight for the no-fire test",
+    )
     cfg = p.parse_args()
 
     # Seed the live-tunable gains from the CLI flags.

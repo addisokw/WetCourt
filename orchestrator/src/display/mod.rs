@@ -123,6 +123,7 @@ pub fn router(state: AppState) -> Router {
         .route("/maintenance/calibration/{role}/save", post(save_calibration))
         // ---- Vision proxy (reverse-proxies the vision process) ----
         .route("/vision/feed", get(vision_feed))
+        .route("/vision/snapshot", get(vision_snapshot))
         .route("/vision/state", get(vision_state))
         // ---- Vision targeting ----
         .route("/vision/aim", post(vision_aim))
@@ -371,6 +372,44 @@ async fn vision_feed(AxumState(s): AxumState<AppState>) -> Response {
 }
 
 /// Proxy the vision process's `/state` JSON (short, with a guard timeout).
+/// Single-frame JPEG proxy. Unlike `/vision/feed` (an endless
+/// `multipart/x-mixed-replace` stream that Safari's <img> refuses to render
+/// through the proxy's keep-alive connection), this returns one finite
+/// `image/jpeg` the console polls — universally renderable in every browser.
+async fn vision_snapshot(AxumState(s): AxumState<AppState>) -> Response {
+    let url = format!("{}/snapshot", s.vision_base_url.trim_end_matches('/'));
+    match s
+        .vision_http
+        .get(&url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+            let ct = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("image/jpeg")
+                .to_string();
+            match resp.bytes().await {
+                Ok(body) => (
+                    status,
+                    [
+                        (axum::http::header::CONTENT_TYPE, ct),
+                        (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+                    ],
+                    body,
+                )
+                    .into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("vision read error: {e}")).into_response(),
+            }
+        }
+        Err(_) => (StatusCode::BAD_GATEWAY, "vision offline").into_response(),
+    }
+}
+
 async fn vision_state(AxumState(s): AxumState<AppState>) -> Response {
     let url = format!("{}/state", s.vision_base_url.trim_end_matches('/'));
     match s

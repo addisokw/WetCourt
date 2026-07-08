@@ -37,7 +37,11 @@ async function post(url: string, body: unknown) {
 export default function VisionPanel() {
   const [online, setOnline] = createSignal(false);
   const [state, setState] = createSignal<VisionState | null>(null);
-  const [feedSrc, setFeedSrc] = createSignal('/vision/feed');
+  // Snapshot polling instead of the MJPEG /feed stream: Safari's <img> renders
+  // single JPEGs everywhere but errors on the endless multipart/x-mixed-replace
+  // stream when it's proxied through the orchestrator's keep-alive connection.
+  // We chain requests on each frame's load, so it self-paces to ~15–25 fps.
+  const [snapUrl, setSnapUrl] = createSignal('/vision/snapshot?t=0');
   const [armed, setArmed] = createSignal(false);
   const [boresightMode, setBoresightMode] = createSignal(false);
   // Local gain edits, or null to show the live value from the vision process.
@@ -52,15 +56,32 @@ export default function VisionPanel() {
   const tolVal = () => tol() ?? state()?.gains?.tolerance;
 
   let timer: number | undefined;
+  let snapTimer: number | undefined;
+  let stopped = false;
+  let seq = 0;
+
+  // Self-driving snapshot loop: request the next frame as soon as the current
+  // one paints (onLoad), so it runs as fast as the network/decoder allow without
+  // ever queueing requests. A transient error just retries slower; whether the
+  // process is offline is decided by /state polling, not a dropped frame.
+  function nextSnapshot() {
+    if (stopped) return;
+    seq += 1;
+    setSnapUrl(`/vision/snapshot?t=${Date.now()}.${seq}`);
+  }
+  function onSnapLoad() {
+    if (!stopped) snapTimer = window.setTimeout(nextSnapshot, 40);
+  }
+  function onSnapError() {
+    if (!stopped) snapTimer = window.setTimeout(nextSnapshot, 500);
+  }
 
   async function poll() {
-    const wasOnline = online();
     try {
       const res = await fetch('/vision/state');
       if (!res.ok) throw new Error(String(res.status));
       setState((await res.json()) as VisionState);
       setOnline(true);
-      if (!wasOnline) setFeedSrc(`/vision/feed?t=${Date.now()}`);
     } catch {
       setOnline(false);
       setState(null);
@@ -77,7 +98,11 @@ export default function VisionPanel() {
     void poll();
     timer = window.setInterval(poll, 700);
   });
-  onCleanup(() => timer && clearInterval(timer));
+  onCleanup(() => {
+    stopped = true;
+    if (timer) clearInterval(timer);
+    if (snapTimer) clearTimeout(snapTimer);
+  });
 
   async function arm(on: boolean) {
     await post('/vision/arm', { armed: on });
@@ -151,7 +176,7 @@ export default function VisionPanel() {
 
       <section class="panel-section">
         <div class={`vision-feed ${boresightMode() ? 'crosshair' : ''}`}>
-          <img src={feedSrc()} alt="turret camera" onClick={onFeedClick} onError={() => setOnline(false)} />
+          <img src={snapUrl()} alt="turret camera" onClick={onFeedClick} onLoad={onSnapLoad} onError={onSnapError} />
           <Show when={!online()}>
             <div class="vision-offline">
               <p>vision process offline</p>
