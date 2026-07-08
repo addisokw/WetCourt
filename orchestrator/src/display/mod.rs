@@ -28,8 +28,10 @@ use crate::personas::{verdict_parse, Persona, PersonaRegistry};
 use crate::state_machine::{Command, Event};
 
 pub mod assets;
+pub mod autofire;
 pub mod events;
 
+use autofire::AutoFire;
 use events::{ClientEvent, DisplayEvent};
 
 /// Application close code sent to an operator `/ws` session that a newer client
@@ -87,6 +89,9 @@ pub struct AppState {
     /// this is set. Disarmed = the gun never moves from vision, even though
     /// vision keeps tracking. Operator-toggled via `/vision/arm`.
     pub targeting_armed: Arc<AtomicBool>,
+    /// Targeting-panel auto-fire: fires the squirt once vision holds a lock for a
+    /// dwell time (while armed + enabled). Fed by every `/vision/aim` frame.
+    pub auto_fire: Arc<AutoFire>,
     /// Eye-safety fire gate (m4b). Vision reports `fire_ok` on each aim POST;
     /// this stores the latest verdict so the trial `FIRE` path can require a
     /// fresh `fire_ok` while targeting is armed. Shared with the hardware
@@ -128,11 +133,11 @@ pub fn router(state: AppState) -> Router {
         // ---- Vision targeting ----
         .route("/vision/aim", post(vision_aim))
         .route("/vision/arm", get(get_targeting_arm).post(set_targeting_arm))
+        .route("/vision/autofire", get(get_auto_fire).post(set_auto_fire))
         .route("/vision/target", post(vision_target))
         .route("/vision/boresight", post(vision_boresight))
         .route("/vision/gains", post(vision_gains))
         .route("/vision/center", post(vision_center))
-        .route("/vision/confirm_head", post(vision_confirm_head))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -458,7 +463,31 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
     // trial FIRE gate has a fresh value the instant the operator arms.
     s.vision_gate.record(aim.fire_ok);
 
-    if !s.targeting_armed.load(Ordering::Relaxed) {
+    let armed = s.targeting_armed.load(Ordering::Relaxed);
+
+    // Auto-fire: once the lock has held for the operator-set dwell (armed +
+    // enabled), fire the squirt for its console-configured duration. The dwell
+    // timing lives in `AutoFire` (frame-rate, server-side); we just act on the
+    // one-shot trip here.
+    if s.auto_fire.on_frame(armed, aim.fire_ok) {
+        let fire_ms = {
+            let reg = s.calibration.read().await;
+            reg.get(Role::Squirt.as_str())
+                .and_then(|c| c.fire_ms)
+                .unwrap_or(150)
+        };
+        info!(fire_ms, "auto-fire: lock held for dwell, firing squirt");
+        let _ = s
+            .maint_cmd_tx
+            .send(MaintenanceCommand {
+                target: Role::Squirt,
+                cmd: HardwareCommand::Fire(fire_ms),
+                reply: None,
+            })
+            .await;
+    }
+
+    if !armed {
         return StatusCode::NO_CONTENT; // disarmed: don't move the gun
     }
     // Apply the turret calibration (degrees → raw µs, clamped to limits).
@@ -498,6 +527,47 @@ async fn set_targeting_arm(
     StatusCode::NO_CONTENT
 }
 
+#[derive(Serialize)]
+struct AutoFireStatus {
+    enabled: bool,
+    dwell_ms: u64,
+    /// How long the current lock has held (ms); 0 when not locked.
+    locked_ms: u64,
+    /// Mirror of targeting arm — auto-fire only acts while armed.
+    armed: bool,
+}
+
+#[derive(Deserialize)]
+struct AutoFirePatch {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    dwell_ms: Option<u64>,
+}
+
+async fn get_auto_fire(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let (enabled, dwell_ms, locked_ms) = s.auto_fire.status();
+    Json(AutoFireStatus {
+        enabled,
+        dwell_ms,
+        locked_ms,
+        armed: s.targeting_armed.load(Ordering::Relaxed),
+    })
+}
+
+async fn set_auto_fire(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<AutoFirePatch>,
+) -> impl IntoResponse {
+    s.auto_fire.set(body.enabled, body.dwell_ms);
+    info!(
+        enabled = s.auto_fire.enabled(),
+        dwell_ms = s.auto_fire.dwell_ms(),
+        "vision auto-fire updated"
+    );
+    StatusCode::NO_CONTENT
+}
+
 /// Forward the operator's targeting-control POSTs (target part, boresight pixel)
 /// to the vision process, keeping the console same-origin.
 async fn vision_forward_post(s: &AppState, sub: &str, body: Bytes) -> Response {
@@ -529,10 +599,6 @@ async fn vision_boresight(AxumState(s): AxumState<AppState>, body: Bytes) -> Res
 
 async fn vision_gains(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
     vision_forward_post(&s, "gains", body).await
-}
-
-async fn vision_confirm_head(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
-    vision_forward_post(&s, "confirm_head", body).await
 }
 
 /// One-click recovery from an overshoot: disarm targeting, reset vision's aim

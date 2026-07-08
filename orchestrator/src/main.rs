@@ -147,6 +147,8 @@ async fn main() -> Result<()> {
     let vision_gate = Arc::new(hardware::gate::VisionFireGate::new(
         hardware::gate::FIRE_OK_STALE_MS,
     ));
+    // Targeting-panel auto-fire, off by default with a 2 s default dwell.
+    let auto_fire = Arc::new(display::autofire::AutoFire::new(2000));
 
     // Hardware driver (mock or tcp registry). Owns both command sources — the
     // trial state machine (via the Command::Hardware adapter) and the
@@ -159,7 +161,7 @@ async fn main() -> Result<()> {
         let (hw_cmd_tx, hw_cmd_rx) = mpsc::channel::<hardware::HardwareCommand>(32);
         // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver.
         // Two policy edges live here, both keeping policy out of the FSM:
-        //  - the vision eye-safety gate on the trial FIRE, and
+        //  - the vision fire gate (armed + fresh lock) on the trial FIRE, and
         //  - the gavel calibration edge — the FSM emits a bare `Gavel` and we
         //    resolve its geometry from `gavel.toml` into a `GavelStrike` so real
         //    verdict strikes honour the console-tuned values (mirroring how the
@@ -267,6 +269,7 @@ async fn main() -> Result<()> {
         vision_http,
         targeting_armed,
         vision_gate,
+        auto_fire,
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;

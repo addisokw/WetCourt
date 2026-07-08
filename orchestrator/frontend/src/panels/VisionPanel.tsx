@@ -1,4 +1,6 @@
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { calibrations, fetchCalibrations, sendCommand } from '../maintenance';
+import { AckChip, useAck } from './common';
 
 // The turret camera, reverse-proxied by the orchestrator at /vision/* (so it
 // stays same-origin and works through the tunnel for remote operators). Plus the
@@ -17,8 +19,6 @@ interface VisionState {
   locked?: boolean;
   gains?: { pan: number; tilt: number; tolerance: number };
   fire_ok?: boolean;
-  eye_clear?: boolean;
-  head_confirm?: boolean;
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -44,6 +44,15 @@ export default function VisionPanel() {
   const [snapUrl, setSnapUrl] = createSignal('/vision/snapshot?t=0');
   const [armed, setArmed] = createSignal(false);
   const [boresightMode, setBoresightMode] = createSignal(false);
+  // Auto-fire: the gun fires once vision holds a lock for `dwell`. `dwellLocal`
+  // holds an in-progress edit; `afStatus` mirrors the server (dwell + how long
+  // the current lock has held). `fireAck` tracks the manual Fire-now button.
+  const [autoFire, setAutoFire] = createSignal(false);
+  const [dwellLocal, setDwellLocal] = createSignal<number | null>(null);
+  const [afStatus, setAfStatus] = createSignal<{ dwell_ms: number; locked_ms: number }>({ dwell_ms: 2000, locked_ms: 0 });
+  const [fireAck, runFire] = useAck();
+  const dwellMs = () => dwellLocal() ?? afStatus().dwell_ms;
+  const fireMs = () => calibrations().squirt?.fire_ms ?? 150;
   // Local gain edits, or null to show the live value from the vision process.
   // (Falling back to state avoids the inputs going blank when the panel remounts
   // after a tab switch — the values reload from /state instead of needing reseed.)
@@ -92,10 +101,21 @@ export default function VisionPanel() {
     } catch {
       /* ignore */
     }
+    try {
+      const f = await fetch('/vision/autofire');
+      if (f.ok) {
+        const j = (await f.json()) as { enabled: boolean; dwell_ms: number; locked_ms: number };
+        setAutoFire(j.enabled);
+        setAfStatus({ dwell_ms: j.dwell_ms, locked_ms: j.locked_ms });
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   onMount(() => {
     void poll();
+    void fetchCalibrations().catch(() => {}); // for the squirt fire duration
     timer = window.setInterval(poll, 700);
   });
   onCleanup(() => {
@@ -107,6 +127,21 @@ export default function VisionPanel() {
   async function arm(on: boolean) {
     await post('/vision/arm', { armed: on });
     setArmed(on);
+  }
+
+  async function enableAutoFire(on: boolean) {
+    await post('/vision/autofire', { enabled: on });
+    setAutoFire(on);
+  }
+  async function setDwellSeconds(sec: number) {
+    if (Number.isNaN(sec)) return;
+    const ms = Math.max(0, Math.round(sec * 1000));
+    setDwellLocal(ms);
+    await post('/vision/autofire', { dwell_ms: ms });
+  }
+  // Manual immediate shot for the squirt's configured duration.
+  function fireNow() {
+    void runFire(sendCommand('squirt', { cmd: 'fire', ms: fireMs() }));
   }
 
   function onFeedClick(e: MouseEvent & { currentTarget: HTMLImageElement }) {
@@ -125,18 +160,12 @@ export default function VisionPanel() {
     setArmed(false);
   }
 
-  async function setHeadConfirm(on: boolean) {
-    await post('/vision/confirm_head', { enabled: on });
-  }
-
-  // Why the system would/wouldn't fire right now (display only this milestone).
+  // Why the system would/wouldn't fire right now (display only).
   function fireStatus(): { ok: boolean; text: string } {
     const s = state();
     if (!s || (s.target_part ?? 'none') === 'none') return { ok: false, text: 'no target' };
     if (s.fire_ok) return { ok: true, text: 'FIRE OK' };
     if (!s.locked) return { ok: false, text: 'NO FIRE — not locked' };
-    if (s.target_part === 'head' && !s.head_confirm) return { ok: false, text: 'NO FIRE — confirm head shot' };
-    if (s.target_part === 'head' && s.eye_clear === false) return { ok: false, text: 'NO FIRE — eyes at risk' };
     return { ok: false, text: 'NO FIRE' };
   }
 
@@ -203,17 +232,6 @@ export default function VisionPanel() {
           </div>
         </div>
 
-        <Show when={part() === 'head'}>
-          <div class="vision-row">
-            <label>head shot</label>
-            <button class={`mini ${state()?.head_confirm ? 'active' : ''}`}
-              onClick={() => void setHeadConfirm(!state()?.head_confirm)}>
-              {state()?.head_confirm ? 'confirmed' : 'confirm head shot'}
-            </button>
-            <span class="muted small">head never fires unless confirmed + eyes clear</span>
-          </div>
-        </Show>
-
         <div class="vision-row">
           <label>boresight</label>
           <button class={`mini ${boresightMode() ? 'active' : ''}`} onClick={() => setBoresightMode(!boresightMode())}>
@@ -237,6 +255,52 @@ export default function VisionPanel() {
             {armed() ? 'vision is driving the turret' : 'gun will not move until armed'}
           </span>
         </div>
+
+        <div class="vision-row">
+          <label>fire</label>
+          <button class="mini" onClick={fireNow}>Fire now ({fireMs()} ms)</button>
+          <AckChip ack={fireAck()} />
+          <span class="muted small">manual shot for the squirt's set duration</span>
+        </div>
+
+        <div class="vision-row">
+          <label>auto-fire</label>
+          <Show
+            when={autoFire()}
+            fallback={<button class="mini" onClick={() => void enableAutoFire(true)}>Enable</button>}
+          >
+            <button class="mini active" onClick={() => void enableAutoFire(false)}>Disable</button>
+          </Show>
+          <label class="af-dwell">
+            after
+            <input
+              class="gain-input"
+              type="number"
+              step="0.5"
+              min="0"
+              value={(dwellMs() / 1000).toFixed(1)}
+              onChange={(e) => void setDwellSeconds(parseFloat(e.currentTarget.value))}
+            />
+            s locked
+          </label>
+          <span class="muted small">fires once each time the lock holds this long</span>
+        </div>
+
+        <Show when={autoFire()}>
+          <div class="vision-row">
+            <label />
+            <Show
+              when={armed()}
+              fallback={<span class="af-warn">⚠ arm targeting for auto-fire to act</span>}
+            >
+              <span class={`af-progress ${afStatus().locked_ms >= dwellMs() && afStatus().locked_ms > 0 ? 'ready' : ''}`}>
+                {afStatus().locked_ms > 0
+                  ? `locked ${(afStatus().locked_ms / 1000).toFixed(1)}s / ${(dwellMs() / 1000).toFixed(1)}s`
+                  : 'waiting for lock…'}
+              </span>
+            </Show>
+          </div>
+        </Show>
 
         <div class="vision-row">
           <label>gain pan</label>

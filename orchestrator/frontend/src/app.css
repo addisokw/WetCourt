@@ -845,6 +845,13 @@ button.plea.recording:hover { background: #8b2326; }
   font: inherit; font-variant-numeric: tabular-nums;
 }
 
+/* Auto-fire controls */
+.af-dwell { display: inline-flex; align-items: center; gap: 0.4rem; color: #c9d1d9; }
+.af-dwell .gain-input { width: 4rem; }
+.af-warn { color: #e3b341; font-size: 0.85rem; }
+.af-progress { color: #8b949e; font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+.af-progress.ready { color: #56d364; font-weight: 600; }
+
 /* ============ Maintenance / hardware test console ============ */
 .shell {
   display: flex;

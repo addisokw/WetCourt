@@ -1,12 +1,15 @@
-//! Eye-safety gate for trial firing (milestone 4b).
+//! Vision fire gate for trial firing.
 //!
-//! Vision computes a per-frame `fire_ok` (the impact point is locked and clear
-//! of the eye-exclusion zone — see `vision/vision.py`) and streams it to the
-//! orchestrator on the aim POST. This gate stores the latest verdict and, when
-//! vision targeting is **armed**, lets a trial `FIRE` reach the squirt only on a
-//! *fresh* `fire_ok`. The freshness check is what makes "no target / no person /
-//! vision crashed" fail safe: vision only posts while it is actively tracking, so
-//! a stale timestamp means we have no current evidence it is safe to fire.
+//! Vision computes a per-frame `fire_ok` (the aim is locked on the selected
+//! target — see `vision/vision.py`) and streams it to the orchestrator on the
+//! aim POST. This gate stores the latest verdict and, when vision targeting is
+//! **armed**, lets a trial `FIRE` reach the squirt only on a *fresh* `fire_ok`.
+//! The freshness check is what makes "no target / no person / vision crashed"
+//! fail safe: vision only posts while it is actively tracking, so a stale
+//! timestamp means we have no current evidence it is locked on a target.
+//!
+//! (The eye-exclusion safety zone that once also fed `fire_ok` was retired when
+//! the softer nozzle made the stream safe; the lock + arm gating here remains.)
 //!
 //! When not armed the gate is transparent — the operator owns the aim manually
 //! (legacy behaviour), so trial fire passes through unchanged.
@@ -28,7 +31,7 @@ pub fn now_ms() -> u64 {
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
-/// Shared eye-safety state: the latest `fire_ok` from vision and when it landed.
+/// Shared vision fire-gate state: the latest `fire_ok` from vision and when it landed.
 pub struct VisionFireGate {
     fire_ok: AtomicBool,
     updated_ms: AtomicU64,
