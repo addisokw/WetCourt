@@ -141,9 +141,20 @@ class Call:
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old)
 
+    def hangup_sip(self):
+        """Best-effort BYE so the lawyer stops talking (dial-out path)."""
+        if getattr(self.c, "to_tag", None) and getattr(self.c, "invite_call_id", None):
+            try:
+                self.c.bye()
+            except Exception:
+                pass
+
     def run(self):
+        # Not daemon: we join these on exit so the PortAudio streams close on
+        # their own threads. Letting daemon threads die during interpreter
+        # shutdown while a stream is mid-callback segfaults.
         threads = [
-            threading.Thread(target=f, daemon=True)
+            threading.Thread(target=f)
             for f in (self.mic_loop, self.rtp_recv_loop, self.speaker_loop,
                       self.sip_recv_loop)
         ]
@@ -153,7 +164,15 @@ class Call:
         try:
             self.key_loop()
         except KeyboardInterrupt:
+            pass
+        finally:
             self.done.set()
+            # Let each loop see `done` and exit its `with` block (streams close
+            # cleanly here, on the thread that opened them).
+            for t in threads:
+                t.join(timeout=2.0)
+            self.hangup_sip()
+            self.rtp.close()
 
 
 def reply_to_request(c, req_text, addr, code, name):
