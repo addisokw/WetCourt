@@ -1,0 +1,41 @@
+# Event/production config: counsel runs on the Spark with host networking,
+# next to LiteLLM and the orchestrator. Override any field with COUNSEL__ env
+# vars (e.g. COUNSEL__SIP__ADVERTISE_IP).
+
+[sip]
+bind = "0.0.0.0:5060"
+# Booth LAN IP of the Spark; leave empty to auto-detect the outbound address.
+advertise_ip = ""
+ata_user = "defendant"
+lawyer_user = "1"
+
+[rtp]
+port_min = 40000
+port_max = 40099
+
+[audio]
+vad_rms_threshold = 100.0
+vad_hangover_ms = 700
+silence_reprompt_secs = 12
+max_call_secs = 180
+
+[inference]
+mode = "real"
+base_url = "http://127.0.0.1:4000"
+chat_model = "qwen3.6-35b-a3b"
+stt_model = "whisper-1"
+tts_model = "kokoro-tts"
+
+[persona]
+file = "personas/lawyer.toml"
+assets_dir = "assets"
+
+[trial_context]
+enabled = true
+orchestrator_base_url = "http://127.0.0.1:8080"
+
+[control]
+bind = "0.0.0.0:8092"
+
+[logging]
+level = "counsel=debug,info"

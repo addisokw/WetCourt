@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/crimes-core", "crates/crimes-editor", "crates/thermal-printer"]
+members = ["crates/crimes-core", "crates/crimes-editor", "crates/thermal-printer", "crates/counsel"]
 
 [package]
 name = "booth"

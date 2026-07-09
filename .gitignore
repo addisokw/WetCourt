@@ -18,6 +18,9 @@ __pycache__/
 *.opus
 # ...except the test fixture the benchmark depends on
 !dgx-ai-stack/sample_plea.wav
+# ...and the lawyer phone's runtime assets + call-test fixture
+!orchestrator/crates/counsel/assets/*.wav
+!orchestrator/crates/counsel/scripts/caller.wav
 
 # Moment-of-justice capture bursts (default [capture] dir)
 captures/

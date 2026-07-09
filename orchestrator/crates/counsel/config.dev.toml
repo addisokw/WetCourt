@@ -1,0 +1,30 @@
+# Dev config: counsel runs on the dev machine (same LAN as the HT801 at
+# 192.168.50.216); inference crosses Tailscale to the Spark. SIP/RTP never
+# leave the LAN.
+
+[sip]
+bind = "0.0.0.0:5060"
+advertise_ip = "" # auto-detect; set to this machine's 192.168.50.x if multi-homed
+
+[audio]
+debug_rms = false # flip on when calibrating VAD against the real handset
+vad_rms_threshold = 100
+max_call_secs = 180
+
+[inference]
+mode = "real"
+# Point base_url at your Spark's reachable address (Tailscale IP / MagicDNS name,
+# or LAN IP). Keep real infra out of this committed file: set it at runtime via
+# COUNSEL__INFERENCE__BASE_URL in a `.env` (repo root or dgx-ai-stack/.env),
+# which main.rs loads — same convention as the orchestrator's BOOTH__ vars.
+base_url = "http://your-spark:4000"
+chat_model = "qwen3.6-35b-a3b"
+stt_model = "whisper-1"
+tts_model = "kokoro-tts"
+
+[trial_context]
+enabled = true
+orchestrator_base_url = "http://localhost:8080"
+
+[logging]
+level = "counsel=debug,info"
