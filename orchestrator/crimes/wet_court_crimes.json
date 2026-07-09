@@ -245,19 +245,19 @@
     {
       "id": 42,
       "category": "absurd",
-      "charge": "The defendant stands accused of walking suspiciously.",
+      "charge": "The defendant stands accused of walking suspiciously, and when instructed to walk normally, walking even more suspiciously.",
       "enabled": true
     },
     {
       "id": 43,
       "category": "absurd",
-      "charge": "The defendant stands accused of existing in a manner unbecoming.",
+      "charge": "The defendant stands accused of existing loudly, nearby, and without a permit.",
       "enabled": true
     },
     {
       "id": 44,
       "category": "absurd",
-      "charge": "The defendant stands accused of thinking about crime.",
+      "charge": "The defendant stands accused of having thought about crime, which in this court is the same as crime.",
       "enabled": true
     },
     {
@@ -358,8 +358,8 @@
     },
     {
       "id": 61,
-      "category": "creator",
-      "charge": "not giving me that merch shirt I didn't pay for even though I'm a really big fan.",
+      "category": "social",
+      "charge": "The defendant stands accused of demanding a free merch shirt as fair compensation for being, and the court quotes, 'a really big fan.'",
       "enabled": true
     },
     {
