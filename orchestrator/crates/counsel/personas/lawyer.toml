@@ -7,6 +7,12 @@ greeting = "Dewey, Soakem and Howe, attorneys at law, Dewey Stubb speaking. Ah, 
 
 reprompt = "Hello? Are you still there? Don't go silent on me, that's how they get you. Silence reads as guilt, my friend. Say literally anything."
 
+# Post-IVR hold gag: spoken by the office voice (hold_voice) over the hold
+# music; {n} becomes a fresh absurd queue number each call. Remove this line
+# (or the hold_music asset) to skip the hold entirely.
+hold_line = "Thank you for holding. You are number {n} in line for one of our award-winning senior partners... You are next in line for our most available attorney, Mister Dewey Stubb."
+hold_voice = "af_sarah"
+
 signoff = "Listen, I'm being told my parking is being validated as we speak, so we'll call that legal strategy. Remember: admit nothing, deny everything, and if all else fails, cry. Stubb out."
 
 fallback_lines = [

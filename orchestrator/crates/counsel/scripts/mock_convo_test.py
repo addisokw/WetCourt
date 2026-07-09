@@ -1,78 +1,105 @@
 #!/usr/bin/env python3
-"""M2 integration test: full voice loop against counsel in mock-inference mode.
+"""M2/M3 integration test: full voice loop against counsel in mock mode.
 
-Behaves like a phone: continuous 20 ms RTP frames (silence when quiet).
-Timeline:
-  phase A (0-3 s):   expect the greeting (mock TTS = 440 Hz tone burst)
-  phase B (3-4.5 s): we "speak" (loud frames)
-  phase C (4.5-9 s): silence; VAD endpoints, mock turn runs, expect reply tone
-Assert: sound received in A, sound received in C after our speech ended.
+Adaptive, phone-shaped flow (continuous 20 ms RTP; silence when quiet):
+  1. press '1' shortly after answer (cuts the IVR prompt)
+  2. audio runs continuously: hold music -> queue announcement -> music beat
+     -> greeting tone; wait for the first sustained quiet = lawyer listening
+  3. "speak" (loud frames), go quiet; VAD endpoints, mock turn runs
+  4. expect the reply tone
 """
 
+import struct
 import sys
 import time
 import socket
 
-sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(__file__)))
-from sip_echo_test import SipClient, rtp_packet, ulaw_encode  # reuse the M1 client
+SP = __import__("os").path.dirname(__import__("os").path.abspath(__file__))
+sys.path.insert(0, SP)
+from sip_echo_test import SipClient, rtp_packet, ulaw_encode
 
 FRAME = 0.02
+SILENCE = bytes([0xFF] * 160)
+SPEECH = bytes(ulaw_encode(3000 if i % 2 == 0 else -3000) for i in range(160))
 
 
-def energetic(payload):
-    # µ-law silence is 0xFF; tone bytes scatter. Count non-quiet bytes.
-    loud = sum(1 for b in payload if abs((b ^ 0xFF)) > 4 and b not in (0xFF, 0x7F))
-    return loud > len(payload) * 0.3
+def energetic(p):
+    return sum(1 for b in p if b not in (0xFF, 0x7F, 0xFE, 0x7E)) > len(p) * 0.3
+
+
+class Pump:
+    def __init__(self, sock, remote):
+        self.sock, self.remote = sock, remote
+        self.seq = self.ts = 0
+        self.t0 = time.time()
+        self.last_sound = None
+        self.heard_any = False
+
+    def t(self):
+        return time.time() - self.t0
+
+    def dtmf(self, digit):
+        pl = struct.pack("!BBH", digit, 0x8A, 800)
+        for _ in range(3):
+            self.sock.sendto(rtp_packet(self.seq, self.ts, 9, pl, pt=101), self.remote)
+            self.seq += 1
+
+    def run(self, seconds, payload=SILENCE):
+        n = 0
+        base = time.time()
+        while time.time() - base < seconds:
+            self.sock.sendto(rtp_packet(self.seq, self.ts, 9, payload), self.remote)
+            self.seq += 1
+            self.ts += 160
+            while True:
+                try:
+                    data, _ = self.sock.recvfrom(2048)
+                except BlockingIOError:
+                    break
+                if len(data) > 12 and (data[1] & 0x7F) == 0 and energetic(data[12:]):
+                    self.last_sound = time.time()
+                    self.heard_any = True
+            n += 1
+            d = base + n * FRAME - time.time()
+            if d > 0:
+                time.sleep(d)
+
+    def until(self, cond, timeout, label):
+        end = time.time() + timeout
+        while time.time() < end:
+            self.run(0.1)
+            if cond():
+                print(f"  [{self.t():5.1f}s] {label}")
+                return True
+        raise AssertionError(f"timeout waiting for: {label}")
 
 
 def main():
     c = SipClient()
     print(f"client on {c.ip}:{c.port}")
     c.register()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", 0))
+    sock.setblocking(False)
+    remote = c.invite(sock.getsockname()[1])
 
-    rtp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    rtp_sock.bind(("0.0.0.0", 0))
-    rtp_sock.setblocking(False)
-    remote = c.invite(rtp_sock.getsockname()[1])
+    p = Pump(sock, remote)
+    p.until(lambda: p.heard_any, 10, "IVR prompt started")
+    p.run(1.0)
+    p.dtmf(1)
+    print(f"  [{p.t():5.1f}s] pressed 1 (guilty)")
 
-    speech_frame = bytes(
-        ulaw_encode(3000 if i % 2 == 0 else -3000) for i in range(160)
+    # Hold music -> announcement -> greeting; first sustained quiet = listening.
+    p.until(
+        lambda: p.last_sound and time.time() - p.last_sound > 1.3,
+        60,
+        "hold + greeting finished, line quiet",
     )
-    silence_frame = bytes([0xFF] * 160)
 
-    ssrc, seq, ts = 12345, 1, 0
-    timeline = []  # (t, energetic) for received frames
-    start = time.time()
-    total_ticks = int(9.0 / FRAME)
-
-    for tick in range(total_ticks):
-        t = tick * FRAME
-        speaking = 3.0 <= t < 4.5
-        payload = speech_frame if speaking else silence_frame
-        rtp_sock.sendto(rtp_packet(seq, ts, ssrc, payload), remote)
-        seq += 1
-        ts += 160
-        while True:
-            try:
-                data, _ = rtp_sock.recvfrom(2048)
-            except BlockingIOError:
-                break
-            if len(data) > 12 and (data[1] & 0x7F) == 0:
-                timeline.append((time.time() - start, energetic(data[12:])))
-        # pace
-        next_at = start + (tick + 1) * FRAME
-        delay = next_at - time.time()
-        if delay > 0:
-            time.sleep(delay)
-
-    def sound_between(t0, t1):
-        return sum(1 for (t, e) in timeline if e and t0 <= t < t1)
-
-    greeting = sound_between(0.0, 3.0)
-    during_c = sound_between(5.0, 9.0)
-    print(f"energetic frames — greeting window: {greeting}, reply window: {during_c}")
-    assert greeting >= 30, f"no greeting audio heard ({greeting} frames)"
-    assert during_c >= 30, f"no reply audio after speech ({during_c} frames)"
+    p.run(1.4, payload=SPEECH)
+    print(f"  [{p.t():5.1f}s] spoke for 1.4s")
+    p.heard_any = False
+    p.until(lambda: p.heard_any, 15, "lawyer reply heard")
 
     c.bye()
     print("MOCK CONVERSATION PASSED")

@@ -116,7 +116,13 @@ at startup, missing files degrade to silence:
   `crates/counsel/README.md`
 - `keyboard_clatter_8k.wav` — played while STT/LLM/TTS run ("pulling up your
   file"), so inference latency reads as office ambience
-- `hold_music_8k.wav` — reserved for hold gags
+- `hold_music_8k.wav` — plays under the IVR keypress window, then the post-IVR
+  hold: music broken by the office voice announcing your queue position ("you
+  are number twenty-three million… in line for one of our award-winning senior
+  partners… you are next in line for our most available attorney"). The line
+  template and office voice live in the persona (`hold_line` / `hold_voice`,
+  `{n}` = fresh random number per call); delete `hold_line` or the asset to
+  skip the hold entirely.
 
 Replace any of them with real recordings at will:
 `ffmpeg -i in.wav -ar 8000 -ac 1 -sample_fmt s16 out_8k.wav`.

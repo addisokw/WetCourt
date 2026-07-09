@@ -99,9 +99,14 @@ impl MixerHandle {
     }
 
     /// Set or clear the latency-cover loop (µ-law, played when no speech).
+    /// Re-setting the same asset keeps the loop cursor, so back-to-back
+    /// phases (IVR grace → hold) don't audibly restart the music.
     pub fn set_cover(&self, ulaw: Option<Arc<Vec<u8>>>) {
-        *self.inner.cover.lock().unwrap() =
-            ulaw.map(|u| CoverState { ulaw: u, cursor: 0 });
+        let mut cover = self.inner.cover.lock().unwrap();
+        match (ulaw, cover.as_ref()) {
+            (Some(new), Some(cur)) if Arc::ptr_eq(&new, &cur.ulaw) => {}
+            (new, _) => *cover = new.map(|u| CoverState { ulaw: u, cursor: 0 }),
+        }
     }
 }
 

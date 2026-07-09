@@ -28,13 +28,17 @@ pub async fn run(
     let mut vad = EnergyVad::new(cfg);
     let mut fallbacks = 0usize;
 
-    // Inbound calls get the intake-menu gag; it doubles as cover while the
-    // trial context is fetched. Ring-out calls skip straight to the opener.
+    // Inbound calls get the intake-menu gag (doubles as cover while the
+    // trial context is fetched), then a brief hold — music broken by the
+    // office voice announcing their absurd queue position. Ring-out calls
+    // skip straight to the opener.
     let (snapshot, ivr_outcome) = if opening_note.is_none() {
-        tokio::join!(
+        let r = tokio::join!(
             context::fetch(&shared.cfg.trial_context),
             ivr::menu(shared, &mixer, &mut events, &token)
-        )
+        );
+        ivr::hold_gag(shared, &mixer, &token).await;
+        r
     } else {
         (context::fetch(&shared.cfg.trial_context).await, ivr::IvrOutcome::Skipped)
     };
@@ -174,16 +178,37 @@ async fn chat_reply(shared: &Shared, history: &[ChatMessage]) -> Result<String> 
 /// Synthesize `text` and play it out, blocking until the line drains.
 /// Clears any cover loop first so speech starts clean.
 pub async fn speak(shared: &Shared, mixer: &MixerHandle, text: &str) -> Result<()> {
-    let icfg = &shared.cfg.inference;
     mixer.set_cover(None);
+    synth_to_queue(
+        shared,
+        mixer,
+        text,
+        &shared.persona.tts_voice,
+        shared.persona.tts_speed,
+    )
+    .await?;
+    mixer.wait_drained().await;
+    Ok(())
+}
 
+/// Synthesize into the speech queue without touching the cover loop or
+/// waiting for drain — speech preempts any cover the moment bytes land, so
+/// callers can keep hold music running while synthesis is in flight.
+pub(super) async fn synth_to_queue(
+    shared: &Shared,
+    mixer: &MixerHandle,
+    text: &str,
+    voice: &str,
+    speed: Option<f32>,
+) -> Result<()> {
+    let icfg = &shared.cfg.inference;
     match &shared.backend {
         Backend::Real(client) => {
             let stream = client
                 .synth_pcm_stream(
                     text,
-                    &shared.persona.tts_voice,
-                    shared.persona.tts_speed,
+                    voice,
+                    speed,
                     Duration::from_secs(icfg.tts_timeout_secs),
                 )
                 .await
@@ -203,7 +228,7 @@ pub async fn speak(shared: &Shared, mixer: &MixerHandle, text: &str) -> Result<(
                     anyhow::bail!("tts stream exceeded total timeout");
                 }
                 let chunk = chunk?;
-                queue_pcm24(&mixer, &mut decimator, &mut leftover, &chunk);
+                queue_pcm24(mixer, &mut decimator, &mut leftover, &chunk);
             }
         }
         Backend::Mock { .. } => {
@@ -213,8 +238,6 @@ pub async fn speak(shared: &Shared, mixer: &MixerHandle, text: &str) -> Result<(
             queue_pcm24(mixer, &mut decimator, &mut leftover, &pcm);
         }
     }
-
-    mixer.wait_drained().await;
     Ok(())
 }
 

@@ -2,13 +2,15 @@
 """Full-stack call test against real inference (Spark over Tailscale).
 
 Plays a Kokoro-synthesized 'caller' clip into the line, adaptively:
-  1. wait for the greeting to start, then to finish (1.5 s of quiet)
-  2. play the caller clip ("soup in the fountain" confession)
-  3. wait up to 45 s for the lawyer's reply burst
-Asserts both bursts happened. The counsel log shows the actual transcript
+  1. wait for the IVR prompt, press '1' to cut it
+  2. sit through the hold gag + greeting until sustained quiet (= listening)
+  3. play the caller clip ("soup in the fountain" confession)
+  4. wait for the lawyer's reply burst
+Asserts the bursts happened. The counsel log shows the actual transcript
 and reply text.
 """
 
+import struct
 import sys
 import time
 import socket
@@ -86,6 +88,12 @@ class Line:
                 time.sleep(d)
         return False
 
+    def dtmf(self, digit):
+        pl = struct.pack("!BBH", digit, 0x8A, 800)
+        for _ in range(3):
+            self.sock.sendto(rtp_packet(self.seq, self.ts, 99, pl, pt=101), self.remote)
+            self.seq += 1
+
 
 def main():
     c = SipClient()
@@ -100,13 +108,18 @@ def main():
     caller_frames = load_caller_frames()
 
     assert line.run_until(
-        lambda: line.heard_any, 30, "greeting started"
-    ), "no greeting audio within 30s"
+        lambda: line.heard_any, 30, "IVR prompt started"
+    ), "no IVR audio within 30s"
+    line.run_until(lambda: False, 1.0, "")  # let the prompt establish
+    line.dtmf(1)
+    print("  pressed 1 (guilty)")
+    # Hold music -> queue announcement -> greeting; music fills every gap,
+    # so the first sustained quiet means the lawyer is listening.
     assert line.run_until(
         lambda: line.last_sound and time.time() - line.last_sound > 1.5,
-        60,
-        "greeting finished",
-    ), "greeting never went quiet"
+        120,
+        "hold + greeting finished",
+    ), "line never went quiet after hold/greeting"
 
     print(">> playing caller clip")
     line.queue = list(caller_frames)

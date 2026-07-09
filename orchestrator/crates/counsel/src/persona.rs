@@ -18,6 +18,14 @@ pub struct LawyerPersona {
     pub tts_speed: Option<f32>,
     /// Spoken when the lawyer picks up.
     pub greeting: String,
+    /// Post-IVR hold announcement, read by `hold_voice` over the hold music;
+    /// `{n}` is replaced with a random queue number. `None` (or a missing
+    /// hold_music asset) skips the hold gag.
+    #[serde(default)]
+    pub hold_line: Option<String>,
+    /// The office/IVR voice — distinct from the lawyer's.
+    #[serde(default = "d_hold_voice")]
+    pub hold_voice: String,
     /// Spoken after a long client silence.
     pub reprompt: String,
     /// Spoken before the lawyer hangs up (max call length / dead line).
@@ -25,6 +33,10 @@ pub struct LawyerPersona {
     /// In-character lines for inference failures, cycled.
     pub fallback_lines: Vec<String>,
     pub system_prompt: String,
+}
+
+fn d_hold_voice() -> String {
+    "af_sarah".into()
 }
 
 impl LawyerPersona {
