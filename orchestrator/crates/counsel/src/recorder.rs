@@ -1,6 +1,6 @@
 //! Per-call recording: both legs of the conversation plus an annotated
 //! event log, written on hangup as a shareable pair —
-//!   <dir>/<timestamp>-<kind>.wav   stereo 8 kHz: caller left, lawyer right
+//!   <dir>/<timestamp>-<kind>.wav   stereo 8 kHz, caller + lawyer overlaid
 //!   <dir>/<timestamp>-<kind>.json  IVR outcome, transcripts, replies, timings
 //! The RTP tasks feed audio; the agent annotates. Everything is in-memory
 //! until finalize (a 5-minute call is ~10 MB), so a crash loses the call —
@@ -60,13 +60,20 @@ impl CallRecorder {
             .with_context(|| format!("creating recording dir {}", dir.display()))?;
         let stem = format!("{}-{}", self.started_wall, self.kind);
 
+        // Overlay both legs: sum caller + lawyer per sample (clamped), then
+        // duplicate that mix to both channels so it plays like a normal call
+        // recording — both voices in both ears. They rarely overlap (no
+        // barge-in), so clipping on the sum is a non-issue in practice.
         let caller = self.caller.lock().unwrap();
         let lawyer = self.lawyer.lock().unwrap();
         let frames = caller.len().max(lawyer.len());
         let mut interleaved = Vec::with_capacity(frames * 2);
         for i in 0..frames {
-            interleaved.push(caller.get(i).copied().unwrap_or(0));
-            interleaved.push(lawyer.get(i).copied().unwrap_or(0));
+            let mixed = (caller.get(i).copied().unwrap_or(0) as i32
+                + lawyer.get(i).copied().unwrap_or(0) as i32)
+                .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            interleaved.push(mixed); // left
+            interleaved.push(mixed); // right
         }
 
         let wav_path = dir.join(format!("{stem}.wav"));
@@ -78,7 +85,7 @@ impl CallRecorder {
             "remote": self.remote,
             "started": self.started_wall,
             "duration_secs": (self.started.elapsed().as_secs_f32() * 10.0).round() / 10.0,
-            "channels": { "left": "caller", "right": "lawyer" },
+            "mix": "caller + lawyer overlaid (both channels)",
             "events": *self.events.lock().unwrap(),
         });
         let json_path = dir.join(format!("{stem}.json"));
@@ -121,21 +128,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn finalize_writes_pair_and_pads_shorter_leg() {
+    fn finalize_writes_overlaid_stereo_and_pads_shorter_leg() {
         let dir = std::env::temp_dir().join("counsel-rec-test");
         let rec = CallRecorder::new("inbound", "test".into());
         rec.push_caller(&[100; 800]); // 0.1 s
-        rec.push_lawyer(&[200; 1600]); // 0.2 s — caller leg padded
+        rec.push_lawyer(&[200; 1600]); // 0.2 s — caller leg padded with 0s
         rec.note("caller", "hello");
         let wav = rec.finalize(&dir).unwrap();
         let bytes = std::fs::read(&wav).unwrap();
         // 1600 frames * 2ch * 2B + 44 header
         assert_eq!(bytes.len(), 44 + 1600 * 4);
         assert_eq!(u16::from_le_bytes([bytes[22], bytes[23]]), 2);
+        // First sample: both legs present → 100 + 200 = 300, duplicated L/R.
+        let l = i16::from_le_bytes([bytes[44], bytes[45]]);
+        let r = i16::from_le_bytes([bytes[46], bytes[47]]);
+        assert_eq!((l, r), (300, 300));
+        // Past the caller leg: only lawyer → 0 + 200 = 200, still both channels.
+        let off = 44 + 900 * 4;
+        assert_eq!(i16::from_le_bytes([bytes[off], bytes[off + 1]]), 200);
         let sidecar = wav.with_extension("json");
         let j: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
         assert_eq!(j["events"][0]["kind"], "caller");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn overlay_clamps_instead_of_wrapping() {
+        let dir = std::env::temp_dir().join("counsel-rec-clamp");
+        let rec = CallRecorder::new("inbound", "test".into());
+        rec.push_caller(&[30000; 10]);
+        rec.push_lawyer(&[30000; 10]); // sum 60000 must clamp, not wrap
+        let wav = rec.finalize(&dir).unwrap();
+        let bytes = std::fs::read(&wav).unwrap();
+        assert_eq!(i16::from_le_bytes([bytes[44], bytes[45]]), i16::MAX);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

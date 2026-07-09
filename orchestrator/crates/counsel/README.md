@@ -101,9 +101,9 @@ Talk into your mic; `0-9 * #` send DTMF ("press 1 if guilty…"), `q` hangs up.
 Every call is recorded (unless `[recording] enabled = false`) under
 `recordings/` as a shareable pair — send colleagues the two files:
 
-- `<timestamp>-<inbound|outbound>.wav` — stereo 8 kHz: **caller on the left,
-  lawyer on the right** (plays in anything; the split makes turn-taking and
-  interruptions obvious)
+- `<timestamp>-<inbound|outbound>.wav` — stereo 8 kHz, **caller and lawyer
+  overlaid** into both channels (plays in anything, like a normal call
+  recording)
 - `<timestamp>-<...>.json` — annotated timeline: charge/case file, IVR key,
   every transcript and reply with timestamps
 
