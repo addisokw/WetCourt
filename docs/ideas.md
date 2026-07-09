@@ -45,10 +45,17 @@ Bailiff voice. TTS voice handling “All rise” / “Order in the court” / �
 After the defense, the judge asks one pointed follow-up question based on what they actually said, defendant gets 10 seconds to answer. This is where the LLM really earns its keep — it can engage specifically with the weakest part of the argument. Adds maybe 15 seconds and dramatically lifts perceived intelligence.
 *(Inserts a question→answer loop between the plea and the verdict; the answer is folded into the deliberation prompt. Operator-toggleable in the console (and `[cross_examination]` in config); skipped automatically when the defendant offered no plea. Any timeout falls through to the verdict so it can't stall a trial.)*
 
-## Call-your-lawyer phone
+## Call-your-lawyer phone — ✅ implemented
 A real analog phone in the booth. Lift the handset and you're connected to your
 court-appointed lawyer — same STT/LLM/TTS stack, played as spectacularly
 incompetent. Physical big brother of the public defender idea above.
+
+*(Built as the `counsel` service (`orchestrator/crates/counsel/`) — pure Rust
+on rsipstack instead of Asterisk, with a hand-rolled RTP/G.711 layer. Includes
+the hotline mode, ring-out ("your lawyer is calling YOU", console → Lawyer
+tab), the DTMF intake gag, latency-cover office audio, and live trial context
+via `GET /trial/state`. See `docs/lawyer-phone.md` for the HT801 checklist and
+bring-up. The Asterisk notes below kept for the record.)*
 
 Hardware: a Grandstream HT801 FXS ATA (~$35) makes any garage-sale phone a SIP
 endpoint — it supplies loop voltage, real ring voltage, off-hook detection, and

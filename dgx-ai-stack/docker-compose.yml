@@ -128,3 +128,27 @@ services:
       - ../orchestrator/personas:/app/personas
       - ../orchestrator/crimes:/app/crimes
       - booth-logs:/var/log/booth
+
+  # Call-your-lawyer phone (SIP endpoint for the booth's HT801 + analog
+  # phone). Host networking on purpose: SIP advertises real IPs inside
+  # SDP/Contact and RTP uses a UDP port range — bridge mode would need every
+  # port mapped plus advertise-IP overrides. It reaches litellm and the
+  # orchestrator via their host-published ports (127.0.0.1:4000 / :8080).
+  counsel:
+    image: local/booth-counsel:latest
+    build:
+      context: ../orchestrator
+      dockerfile: Dockerfile.counsel
+    container_name: counsel
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - litellm
+    environment:
+      COUNSEL__INFERENCE__API_KEY: ${LITELLM_MASTER_KEY}
+      COUNSEL__INFERENCE__BASE_URL: http://127.0.0.1:${LITELLM_PORT}
+      RUST_LOG: info
+    volumes:
+      - ../orchestrator/crates/counsel/config.toml:/app/config.toml:ro
+      - ../orchestrator/crates/counsel/personas:/app/personas:ro
+      - ../orchestrator/crates/counsel/assets:/app/assets:ro

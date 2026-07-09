@@ -1,0 +1,29 @@
+# Call-your-lawyer phone service (counsel). Build from orchestrator/:
+#   docker build -f Dockerfile.counsel -t local/booth-counsel .
+
+# --- Rust build ---
+FROM rust:1-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml ./
+COPY Cargo.lock* ./
+COPY src ./src
+COPY crates ./crates
+# The workspace root package (booth) embeds frontend/dist; counsel doesn't
+# need it, but the workspace manifest wants the path to exist.
+RUN mkdir -p frontend/dist && touch frontend/dist/.keep \
+    && cargo build --release -p counsel
+
+# --- Runtime ---
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/counsel /usr/local/bin/counsel
+COPY crates/counsel/personas /app/personas
+COPY crates/counsel/assets /app/assets
+COPY crates/counsel/config.toml /app/config.toml
+WORKDIR /app
+# SIP :5060/udp, RTP :40000-40099/udp, control :8092 — run with
+# network_mode: host; EXPOSE is documentation only.
+EXPOSE 5060/udp 8092
+CMD ["counsel", "--config", "/app/config.toml"]
