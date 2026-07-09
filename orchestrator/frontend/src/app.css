@@ -627,7 +627,8 @@ button.plea.recording:hover { background: #8b2326; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.4;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
   resize: vertical;
 }
 .panel-body input[type="range"] { flex: 1; max-width: 240px; }
