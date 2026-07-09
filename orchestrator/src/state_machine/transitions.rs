@@ -489,6 +489,7 @@ mod tests {
             printer: PrinterConfig::default(),
             vision: VisionConfig::default(),
             capture: CaptureConfig::default(),
+            lawyer: LawyerConfig::default(),
         }
     }
 

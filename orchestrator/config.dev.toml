@@ -113,3 +113,8 @@ dir = "captures"        # one <case_label>/ subdir per guilty trial
 fire_delay_ms = 250     # wait after FIRE so the water is on the defendant
 frames = 8
 interval_ms = 110       # frames × interval spans the burst (~0.8s)
+
+# Call-your-lawyer phone service (counsel), running via
+# `cargo run -p counsel -- --config crates/counsel/config.dev.toml`.
+[lawyer]
+base_url = "http://127.0.0.1:8092"

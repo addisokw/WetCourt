@@ -81,3 +81,8 @@ mode = "real"
 width_dots = 576
 qr_url = "https://wetcourt.lol"
 booth_location = "Find the Wet Court near you"
+
+# Call-your-lawyer phone service (counsel). On the Spark both run with host
+# networking, so localhost reaches it; the console proxies /lawyer/* there.
+[lawyer]
+base_url = "http://127.0.0.1:8092"

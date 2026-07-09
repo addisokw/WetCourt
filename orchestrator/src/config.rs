@@ -26,6 +26,27 @@ pub struct Config {
     pub vision: VisionConfig,
     #[serde(default)]
     pub capture: CaptureConfig,
+    #[serde(default)]
+    pub lawyer: LawyerConfig,
+}
+
+/// The call-your-lawyer phone service (`counsel`). The orchestrator
+/// reverse-proxies its status/ring-out at `/lawyer/*` (console stays
+/// same-origin) and serves it a read-only trial snapshot at `/trial/state`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct LawyerConfig {
+    #[serde(default = "d_lawyer_base_url")]
+    pub base_url: String,
+}
+
+impl Default for LawyerConfig {
+    fn default() -> Self {
+        Self { base_url: d_lawyer_base_url() }
+    }
+}
+
+fn d_lawyer_base_url() -> String {
+    "http://localhost:8092".into()
 }
 
 #[derive(Debug, Deserialize, Clone)]

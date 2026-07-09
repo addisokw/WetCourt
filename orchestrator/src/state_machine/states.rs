@@ -87,3 +87,56 @@ impl State {
         }
     }
 }
+
+/// Read-only mirror of the trial for `GET /trial/state` — the lawyer-phone
+/// service polls it at call start so the AI lawyer knows the live charge.
+/// Derived from whatever the `State` variant happens to carry; fields the
+/// current phase doesn't know are simply absent.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TrialSnapshot {
+    pub phase: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charge: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plea: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<VerdictSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VerdictSnapshot {
+    pub guilty: bool,
+    pub remarks: String,
+}
+
+impl From<&State> for TrialSnapshot {
+    fn from(state: &State) -> Self {
+        let phase = state.name();
+        let (charge, plea, verdict) = match state {
+            State::DisplayingCharge { charge, .. } => (Some(charge.clone()), None, None),
+            State::AwaitingPlea { charge, .. } | State::FlushingPlea { charge, .. } => {
+                (Some(charge.clone()), None, None)
+            }
+            State::Transcribing { charge, .. } => (Some(charge.clone()), None, None),
+            State::CrossGeneratingQuestion { charge, plea, .. }
+            | State::CrossSpeaking { charge, plea, .. }
+            | State::CrossAwaitingAnswer { charge, plea, .. }
+            | State::CrossFlushingAnswer { charge, plea, .. }
+            | State::CrossTranscribing { charge, plea, .. }
+            | State::Deliberating { charge, plea, .. } => {
+                (Some(charge.clone()), Some(plea.clone()), None)
+            }
+            State::PronouncingVerdict { verdict, .. }
+            | State::ExecutingSentence { verdict, .. } => (
+                None,
+                None,
+                Some(VerdictSnapshot {
+                    guilty: verdict.guilty,
+                    remarks: verdict.remarks.clone(),
+                }),
+            ),
+            _ => (None, None, None),
+        };
+        Self { phase, charge, plea, verdict }
+    }
+}

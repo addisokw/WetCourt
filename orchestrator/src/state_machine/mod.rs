@@ -30,6 +30,9 @@ pub struct Runtime {
     /// command path); `is_idle` is true in `State::Idle` (gates entry).
     maintenance: Arc<AtomicBool>,
     is_idle: Arc<AtomicBool>,
+    /// Read-only mirror of the trial for `GET /trial/state` (lawyer phone).
+    /// Written on every transition beside the atomic mirrors above.
+    trial_snapshot: Arc<std::sync::RwLock<states::TrialSnapshot>>,
     event_rx: mpsc::Receiver<Event>,
     inference_tx: mpsc::Sender<Command>,
     hardware_tx: mpsc::Sender<Command>,
@@ -75,6 +78,7 @@ impl Runtime {
         cross_enabled: Arc<AtomicBool>,
         maintenance: Arc<AtomicBool>,
         is_idle: Arc<AtomicBool>,
+        trial_snapshot: Arc<std::sync::RwLock<states::TrialSnapshot>>,
         event_rx: mpsc::Receiver<Event>,
         inference_tx: mpsc::Sender<Command>,
         hardware_tx: mpsc::Sender<Command>,
@@ -92,6 +96,7 @@ impl Runtime {
             cross_enabled,
             maintenance,
             is_idle,
+            trial_snapshot,
             event_rx,
             inference_tx,
             hardware_tx,
@@ -147,6 +152,9 @@ impl Runtime {
             .store(matches!(self.state, State::Maintenance), Ordering::Relaxed);
         self.is_idle
             .store(matches!(self.state, State::Idle), Ordering::Relaxed);
+        if let Ok(mut snap) = self.trial_snapshot.write() {
+            *snap = states::TrialSnapshot::from(&self.state);
+        }
 
         if entering_sentence {
             self.finalize_trial();
@@ -327,6 +335,7 @@ mod tests {
             printer: PrinterConfig::default(),
             vision: VisionConfig::default(),
             capture: CaptureConfig::default(),
+            lawyer: LawyerConfig::default(),
         }
     }
 
@@ -368,6 +377,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)), // cross-exam off → simplest path
             Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicBool::new(true)),
+            Arc::new(std::sync::RwLock::new(states::TrialSnapshot::default())),
             event_rx,
             inf_tx,
             hw_tx,

@@ -97,6 +97,12 @@ pub struct AppState {
     /// fresh `fire_ok` while targeting is armed. Shared with the hardware
     /// adapter task in `main.rs`.
     pub vision_gate: Arc<crate::hardware::gate::VisionFireGate>,
+    /// Read-only trial mirror for `GET /trial/state` (the lawyer phone reads
+    /// it at call pickup). Written by `Runtime` on every transition.
+    pub trial_snapshot: Arc<std::sync::RwLock<crate::state_machine::states::TrialSnapshot>>,
+    /// Base URL of the lawyer-phone service (`counsel`); `/lawyer/*` proxies
+    /// there, same pattern as vision (reuses `vision_http`).
+    pub lawyer_base_url: String,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -138,6 +144,10 @@ pub fn router(state: AppState) -> Router {
         .route("/vision/boresight", post(vision_boresight))
         .route("/vision/gains", post(vision_gains))
         .route("/vision/center", post(vision_center))
+        // ---- Lawyer phone (read-only trial snapshot + counsel proxy) ----
+        .route("/trial/state", get(trial_state))
+        .route("/lawyer/status", get(lawyer_status))
+        .route("/lawyer/call", post(lawyer_call))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -437,6 +447,58 @@ async fn vision_state(AxumState(s): AxumState<AppState>) -> Response {
             }
         }
         Err(_) => (StatusCode::BAD_GATEWAY, "vision offline").into_response(),
+    }
+}
+
+/// Read-only trial snapshot for the lawyer-phone service: current phase,
+/// charge, plea, verdict — whatever the FSM state carries right now.
+async fn trial_state(AxumState(s): AxumState<AppState>) -> Response {
+    match s.trial_snapshot.read() {
+        Ok(snap) => axum::Json(snap.clone()).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "snapshot poisoned").into_response(),
+    }
+}
+
+/// Proxy counsel's `/status` (registered? in a call?) for the console panel.
+async fn lawyer_status(AxumState(s): AxumState<AppState>) -> Response {
+    let url = format!("{}/status", s.lawyer_base_url.trim_end_matches('/'));
+    lawyer_forward(s.vision_http.get(&url).timeout(Duration::from_secs(2))).await
+}
+
+/// Proxy a ring-out to counsel. Long timeout — counsel lets the phone ring
+/// up to ~25 s before reporting no-answer, and the console wants the truth.
+async fn lawyer_call(
+    AxumState(s): AxumState<AppState>,
+    body: Option<axum::Json<serde_json::Value>>,
+) -> Response {
+    let url = format!("{}/call", s.lawyer_base_url.trim_end_matches('/'));
+    let payload = body.map(|axum::Json(v)| v).unwrap_or(serde_json::json!({}));
+    lawyer_forward(
+        s.vision_http
+            .post(&url)
+            .json(&payload)
+            .timeout(Duration::from_secs(40)),
+    )
+    .await
+}
+
+async fn lawyer_forward(req: reqwest::RequestBuilder) -> Response {
+    match req.send().await {
+        Ok(resp) => {
+            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+            match resp.bytes().await {
+                Ok(body) => (
+                    status,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    body,
+                )
+                    .into_response(),
+                Err(e) => {
+                    (StatusCode::BAD_GATEWAY, format!("lawyer read error: {e}")).into_response()
+                }
+            }
+        }
+        Err(_) => (StatusCode::BAD_GATEWAY, "lawyer offline").into_response(),
     }
 }
 

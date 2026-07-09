@@ -270,6 +270,9 @@ async fn main() -> Result<()> {
         cfg.capture.clone(),
     ));
 
+    let trial_snapshot = Arc::new(std::sync::RwLock::new(
+        state_machine::states::TrialSnapshot::default(),
+    ));
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -289,6 +292,8 @@ async fn main() -> Result<()> {
         targeting_armed,
         vision_gate,
         auto_fire,
+        trial_snapshot: trial_snapshot.clone(),
+        lawyer_base_url: cfg.lawyer.base_url.clone(),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;
@@ -300,7 +305,7 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx, Some(targeting), Some(capture));
+    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, trial_snapshot, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx, Some(targeting), Some(capture));
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {
