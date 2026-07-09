@@ -26,6 +26,8 @@ pub struct AppShared {
     pub persona: LawyerPersona,
     pub cover: CoverAssets,
     pub ring_tx: tokio::sync::mpsc::Sender<crate::sip::RingRequest>,
+    /// Where finished calls land as WAV+JSON pairs; `None` = recording off.
+    pub recording_dir: Option<std::path::PathBuf>,
 }
 
 pub type Shared = Arc<AppShared>;

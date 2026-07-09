@@ -96,7 +96,19 @@ async fn run_call(
     let peer: SocketAddr = format!("{}:{}", media.ip, media.port)
         .parse()
         .with_context(|| format!("peer addr {}:{}", media.ip, media.port))?;
-    let session = rtp::start(socket, peer, media.dtmf_pt, token.clone())?;
+    let recorder = ctx.shared.recording_dir.as_ref().map(|_| {
+        Arc::new(crate::recorder::CallRecorder::new(
+            "inbound",
+            format!("{}:{}", media.ip, media.port),
+        ))
+    });
+    let session = rtp::start(socket, peer, media.dtmf_pt, token.clone(), recorder.clone())?;
 
-    crate::call::session_loop(&ctx.shared, session, token).await
+    let result = crate::call::session_loop(&ctx.shared, session, token).await;
+    if let (Some(rec), Some(dir)) = (recorder, &ctx.shared.recording_dir) {
+        if let Err(e) = rec.finalize(dir) {
+            tracing::warn!("recording finalize failed: {e:#}");
+        }
+    }
+    result
 }

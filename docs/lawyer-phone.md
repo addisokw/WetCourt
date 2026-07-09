@@ -77,6 +77,14 @@ Software-only regression (no ATA needed): the scripted SIP/RTP clients in
 `orchestrator/crates/counsel/scripts/` cover echo, the conversation loop,
 the IVR menu, and ring-out — see the crate README for the run matrix.
 
+**No hardware at all?** `scripts/softphone.py` makes your computer the phone
+(mic + speakers over real SIP/RTP; `pip install sounddevice`), so you can
+experiment with Dewey anywhere. Every call — softphone, scripted, or real
+ATA — is recorded under `recordings/` as a stereo WAV (caller left, lawyer
+right) plus a JSON transcript timeline, ready to share with collaborators.
+See the crate README's "Testing without the phone hardware" and "Recordings"
+sections.
+
 ## Bring-up order (first time on real hardware)
 
 1. `COUNSEL__AUDIO__ECHO_TEST=true`, lift handset, talk — you should hear

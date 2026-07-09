@@ -34,3 +34,4 @@ orchestrator/captures/
 
 # Plan files / claude state
 .claude/
+orchestrator/crates/counsel/recordings/

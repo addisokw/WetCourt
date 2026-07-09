@@ -80,3 +80,32 @@ python3 crates/counsel/scripts/real_convo_test.py  # full stack vs the Spark (re
 
 Or point any PCMU-capable softphone (Linphone) at `<host>:5060` and dial `1`.
 `scripts/make_assets.py` regenerates the synthesized cover assets.
+
+## Testing without the phone hardware
+
+`scripts/softphone.py` turns your computer into the booth phone — real
+SIP/RTP, your mic and speakers, so it exercises the exact path the HT801
+uses:
+
+```bash
+pip install sounddevice
+python3 crates/counsel/scripts/softphone.py             # register + dial the lawyer
+python3 crates/counsel/scripts/softphone.py --listen    # wait for a ring-out, auto-answer
+python3 crates/counsel/scripts/softphone.py --server <counsel-host>  # remote counsel
+```
+
+Talk into your mic; `0-9 * #` send DTMF ("press 1 if guilty…"), `q` hangs up.
+
+## Recordings
+
+Every call is recorded (unless `[recording] enabled = false`) under
+`recordings/` as a shareable pair — send colleagues the two files:
+
+- `<timestamp>-<inbound|outbound>.wav` — stereo 8 kHz: **caller on the left,
+  lawyer on the right** (plays in anything; the split makes turn-taking and
+  interruptions obvious)
+- `<timestamp>-<...>.json` — annotated timeline: charge/case file, IVR key,
+  every transcript and reply with timestamps
+
+Works identically for the softphone, scripted tests, and the real ATA. Turn
+it off or move it with `[recording]` in the config.

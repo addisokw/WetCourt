@@ -59,6 +59,9 @@ struct MixerInner {
     speech_len: AtomicUsize,
     cover: Mutex<Option<CoverState>>,
     drained: Notify,
+    /// False once the send task exits (call torn down). Unblocks any
+    /// `wait_drained` so a hangup mid-speech can't deadlock the agent.
+    sending: std::sync::atomic::AtomicBool,
 }
 
 /// Control half of the outbound path. Priority per frame:
@@ -86,12 +89,15 @@ impl MixerHandle {
         self.inner.speech_len.load(Ordering::Relaxed)
     }
 
-    /// Resolves once the speech queue has fully played out (checks first —
-    /// safe to call after the last `queue_speech`).
+    /// Resolves once the speech queue has fully played out, or immediately if
+    /// the send task has stopped (call torn down) — otherwise a hangup mid-
+    /// speech would leave the queue undrainable and hang the caller forever.
     pub async fn wait_drained(&self) {
         loop {
             let notified = self.inner.drained.notified();
-            if self.speech_remaining() == 0 {
+            if self.speech_remaining() == 0
+                || !self.inner.sending.load(Ordering::Relaxed)
+            {
                 return;
             }
             notified.await;
@@ -113,6 +119,8 @@ impl MixerHandle {
 pub struct RtpSession {
     pub mixer: MixerHandle,
     pub events: mpsc::Receiver<RtpEvent>,
+    /// Per-call recorder (both legs + annotations), when recording is on.
+    pub recorder: Option<Arc<crate::recorder::CallRecorder>>,
 }
 
 /// Spawn the send/recv tasks for an answered call. `peer` comes from the
@@ -122,6 +130,7 @@ pub fn start(
     peer: SocketAddr,
     dtmf_pt: Option<u8>,
     token: CancellationToken,
+    recorder: Option<Arc<crate::recorder::CallRecorder>>,
 ) -> Result<RtpSession> {
     let socket = Arc::new(socket);
     let mixer = MixerHandle {
@@ -130,6 +139,7 @@ pub fn start(
             speech_len: AtomicUsize::new(0),
             cover: Mutex::new(None),
             drained: Notify::new(),
+            sending: std::sync::atomic::AtomicBool::new(true),
         }),
     };
     let (event_tx, event_rx) = mpsc::channel(64);
@@ -143,10 +153,18 @@ pub fn start(
         mixer.clone(),
         peer_slot.clone(),
         token.clone(),
+        recorder.clone(),
     ));
-    tokio::spawn(recv_task(socket, event_tx, peer_slot, dtmf_pt, token));
+    tokio::spawn(recv_task(
+        socket,
+        event_tx,
+        peer_slot,
+        dtmf_pt,
+        token,
+        recorder.clone(),
+    ));
 
-    Ok(RtpSession { mixer, events: event_rx })
+    Ok(RtpSession { mixer, events: event_rx, recorder })
 }
 
 async fn send_task(
@@ -154,6 +172,7 @@ async fn send_task(
     mixer: MixerHandle,
     peer_slot: Arc<Mutex<SocketAddr>>,
     token: CancellationToken,
+    recorder: Option<Arc<crate::recorder::CallRecorder>>,
 ) {
     let ssrc: u32 = rand::random();
     let mut seq: u16 = rand::random();
@@ -165,7 +184,7 @@ async fn send_task(
 
     loop {
         tokio::select! {
-            _ = token.cancelled() => return,
+            _ = token.cancelled() => break,
             _ = ticker.tick() => {}
         }
 
@@ -203,6 +222,10 @@ async fn send_task(
         let marker = is_speech && !in_talkspurt;
         in_talkspurt = is_speech;
 
+        if let Some(rec) = &recorder {
+            rec.push_lawyer(&g711::decode(&frame));
+        }
+
         let packet = match RtpPacketBuilder::new()
             .payload_type(PT_PCMU)
             .ssrc(ssrc)
@@ -226,6 +249,10 @@ async fn send_task(
             tracing::debug!("rtp send to {peer}: {e}");
         }
     }
+
+    // Torn down: unblock anyone awaiting drain (they'd wait forever now).
+    mixer.inner.sending.store(false, Ordering::Relaxed);
+    mixer.inner.drained.notify_waiters();
 }
 
 async fn recv_task(
@@ -234,6 +261,7 @@ async fn recv_task(
     peer_slot: Arc<Mutex<SocketAddr>>,
     dtmf_pt: Option<u8>,
     token: CancellationToken,
+    recorder: Option<Arc<crate::recorder::CallRecorder>>,
 ) {
     let mut buf = vec![0u8; 1500];
     let mut dtmf = dtmf::DtmfParser::new();
@@ -271,6 +299,9 @@ async fn recv_task(
             }
         } else if pt == PT_PCMU {
             let samples = g711::decode(reader.payload());
+            if let Some(rec) = &recorder {
+                rec.push_caller(&samples);
+            }
             // try_send: if the consumer stalls we drop frames rather than
             // build latency — this is a phone call, not a recording.
             let _ = events.try_send(RtpEvent::Audio(samples));

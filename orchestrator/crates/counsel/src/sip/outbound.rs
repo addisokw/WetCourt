@@ -115,11 +115,20 @@ pub async fn ring_out(ctx: Arc<SipCtx>, reason: Option<String>) -> Result<RingOu
         remote: target.destination.to_string(),
     });
 
-    let session = rtp::start(socket, peer, media.dtmf_pt, token.clone())?;
+    let recorder = ctx.shared.recording_dir.as_ref().map(|_| {
+        Arc::new(crate::recorder::CallRecorder::new(
+            "outbound",
+            format!("{}:{}", media.ip, media.port),
+        ))
+    });
+    let session = rtp::start(socket, peer, media.dtmf_pt, token.clone(), recorder.clone())?;
     let ctx2 = ctx.clone();
     let note = Some(reason.unwrap_or_else(|| {
         "checking in on your case unprompted, as good lawyers do".to_string()
     }));
+    if let (Some(rec), Some(n)) = (&recorder, &note) {
+        rec.note("ring_out_reason", n.clone());
+    }
     tokio::spawn(async move {
         if let Err(e) = agent::run(&ctx2.shared, session, token.clone(), note).await {
             tracing::warn!("outbound agent failed: {e:#}");
@@ -128,6 +137,11 @@ pub async fn ring_out(ctx: Arc<SipCtx>, reason: Option<String>) -> Result<RingOu
             dialog.bye().await.ok();
         }
         ctx2.shared.calls.end(&id);
+        if let (Some(rec), Some(dir)) = (recorder, &ctx2.shared.recording_dir) {
+            if let Err(e) = rec.finalize(dir) {
+                tracing::warn!("recording finalize failed: {e:#}");
+            }
+        }
     });
 
     Ok(RingOutcome::Answered)

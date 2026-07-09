@@ -23,7 +23,33 @@ pub struct Config {
     #[serde(default)]
     pub control: ControlConfig,
     #[serde(default)]
+    pub recording: RecordingConfig,
+    #[serde(default)]
     pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RecordingConfig {
+    /// Record every call: stereo WAV (caller left, lawyer right) + a JSON
+    /// event sidecar, written on hangup.
+    #[serde(default = "d_recording_enabled")]
+    pub enabled: bool,
+    /// Output dir, relative to the config file's directory.
+    #[serde(default = "d_recording_dir")]
+    pub dir: String,
+}
+
+impl Default for RecordingConfig {
+    fn default() -> Self {
+        Self { enabled: d_recording_enabled(), dir: d_recording_dir() }
+    }
+}
+
+fn d_recording_enabled() -> bool {
+    true
+}
+fn d_recording_dir() -> String {
+    "recordings".into()
 }
 
 #[derive(Debug, Deserialize, Clone)]

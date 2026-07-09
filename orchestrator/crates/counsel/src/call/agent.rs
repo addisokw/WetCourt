@@ -21,9 +21,14 @@ pub async fn run(
     token: CancellationToken,
     opening_note: Option<String>,
 ) -> Result<()> {
-    let RtpSession { mixer, mut events, .. } = session;
+    let RtpSession { mixer, mut events, recorder } = session;
     let cfg = &shared.cfg.audio;
     let persona = &shared.persona;
+    let note = |kind: &str, detail: String| {
+        if let Some(rec) = &recorder {
+            rec.note(kind, detail);
+        }
+    };
 
     let mut vad = EnergyVad::new(cfg);
     let mut fallbacks = 0usize;
@@ -43,14 +48,22 @@ pub async fn run(
         (context::fetch(&shared.cfg.trial_context).await, ivr::IvrOutcome::Skipped)
     };
 
+    note(
+        "case_file",
+        snapshot
+            .as_ref()
+            .and_then(|s| s.charge.clone())
+            .unwrap_or_else(|| "unavailable".into()),
+    );
     let system = format!(
         "{}{}",
         persona.system_prompt,
         context::case_file_block(&snapshot)
     );
     let mut history = vec![ChatMessage::system(system)];
-    if let Some(note) = ivr_outcome.history_note() {
-        history.push(ChatMessage::user(note));
+    if let Some(ivr_note) = ivr_outcome.history_note() {
+        note("ivr", ivr_note.clone());
+        history.push(ChatMessage::user(ivr_note));
     }
 
     // Opening line. Ring-out calls get a reason-seeded opener; inbound gets
@@ -67,6 +80,7 @@ pub async fn run(
         }
         None => persona.greeting.clone(),
     };
+    note("lawyer", opening.clone());
     speak(shared, &mixer, &opening).await.ok();
     history.push(ChatMessage::assistant(opening));
     flush_stale(&mut events, &mut vad);
@@ -81,6 +95,7 @@ pub async fn run(
             _ = token.cancelled() => break,
             _ = tokio::time::sleep_until(deadline) => {
                 tracing::info!("max_call_secs reached — signing off");
+                note("lawyer", persona.signoff.clone());
                 speak(shared, &mixer, &persona.signoff).await.ok();
                 break;
             }
@@ -91,16 +106,25 @@ pub async fn run(
                 }
                 Some(RtpEvent::Audio(frame)) => {
                     if let Some(utterance) = vad.push(&frame) {
-                        take_turn(shared, &mixer, &mut history, utterance, &mut fallbacks)
-                            .await;
+                        take_turn(
+                            shared,
+                            &mixer,
+                            &mut history,
+                            utterance,
+                            &mut fallbacks,
+                            recorder.as_ref(),
+                        )
+                        .await;
                         flush_stale(&mut events, &mut vad);
                         reprompted = false;
                     } else if vad.idle_ms() >= silence_limit {
                         if reprompted {
                             tracing::info!("client stayed silent — signing off");
+                            note("lawyer", persona.signoff.clone());
                             speak(shared, &mixer, &persona.signoff).await.ok();
                             break;
                         }
+                        note("lawyer", persona.reprompt.clone());
                         speak(shared, &mixer, &persona.reprompt).await.ok();
                         history.push(ChatMessage::assistant(persona.reprompt.clone()));
                         flush_stale(&mut events, &mut vad);
@@ -121,6 +145,7 @@ async fn take_turn(
     history: &mut Vec<ChatMessage>,
     utterance: Vec<i16>,
     fallbacks: &mut usize,
+    recorder: Option<&std::sync::Arc<crate::recorder::CallRecorder>>,
 ) {
     let icfg = &shared.cfg.inference;
     mixer.set_cover(shared.cover.thinking.clone());
@@ -139,6 +164,9 @@ async fn take_turn(
             anyhow::bail!("empty transcript");
         }
         tracing::info!(client = %text, "transcript");
+        if let Some(rec) = recorder {
+            rec.note("caller", text.clone());
+        }
         history.push(ChatMessage::user(text));
         chat_reply(shared, history).await
     }
@@ -153,6 +181,9 @@ async fn take_turn(
         }
     };
     tracing::info!(lawyer = %line, "reply");
+    if let Some(rec) = recorder {
+        rec.note("lawyer", line.clone());
+    }
     history.push(ChatMessage::assistant(line.clone()));
     if let Err(e) = speak(shared, mixer, &line).await {
         tracing::warn!("tts failed: {e:#}");

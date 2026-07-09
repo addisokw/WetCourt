@@ -4,6 +4,7 @@ mod config;
 mod http;
 mod inference;
 mod persona;
+mod recorder;
 mod rtp;
 mod sip;
 
@@ -39,6 +40,13 @@ async fn main() -> Result<()> {
     tracing::info!(id = %persona.id, persona = %persona.display_name, voice = %persona.tts_voice, "lawyer on retainer");
     let cover = audio::cover::CoverAssets::load(&base_dir.join(&cfg.persona.assets_dir));
     let backend = inference::Backend::from_config(&cfg.inference);
+    let recording_dir = cfg
+        .recording
+        .enabled
+        .then(|| base_dir.join(&cfg.recording.dir));
+    if let Some(d) = &recording_dir {
+        tracing::info!(dir = %d.display(), "call recording enabled");
+    }
 
     let (ring_tx, ring_rx) = tokio::sync::mpsc::channel(4);
     let shared = Arc::new(http::AppShared {
@@ -49,6 +57,7 @@ async fn main() -> Result<()> {
         persona,
         cover,
         ring_tx,
+        recording_dir,
     });
 
     let token = tokio_util::sync::CancellationToken::new();
