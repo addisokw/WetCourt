@@ -151,6 +151,26 @@ button.plea.recording:hover { background: #8b2326; }
   display: inline-block;
 }
 
+/* Plea fell back to "[no defense offered]" for a technical reason (STT failed
+   or timed out) — red: the defendant is about to be judged undefended. */
+.plea-fallback-banner {
+  background: #21110f;
+  color: #ff7b72;
+  padding: 0.6rem 2rem;
+  border-bottom: 1px solid #da3633;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+.plea-fallback-banner .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff7b72;
+  display: inline-block;
+}
+
 /* Superseded: another operator console took over this /ws session. This tab is
    dormant until the operator clicks "Take control here". */
 .superseded-banner {

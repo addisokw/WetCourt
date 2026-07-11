@@ -45,9 +45,15 @@ export const [phaseDeadlineLabel, setPhaseDeadlineLabel] = createSignal<string>(
 // the dim/pulse visuals on every view.
 export const [theaterActive, setTheaterActive] = createSignal<boolean>(false);
 // Eye-safety: set when the orchestrator suppresses a guilty-verdict FIRE because
-// vision targeting was armed without a fresh fire_ok (m4b). Surfaced as an
-// operator banner; cleared at idle/reset when the next trial begins.
+// vision had no fresh target lock. Surfaced as an operator banner; cleared at
+// idle/reset when the next trial begins.
 export const [fireHeldReason, setFireHeldReason] = createSignal<string>('');
+// Set when the plea/answer fell back to "[no defense offered]" for a technical
+// reason (STT failed or timed out) rather than silence — operator banner.
+export const [pleaFallbackReason, setPleaFallbackReason] = createSignal<string>('');
+// True while the open recording window is a cross-examination *answer* (the
+// case view prompts "answer the judge" instead of "begin your defense").
+export const [crossAnswerWindow, setCrossAnswerWindow] = createSignal<boolean>(false);
 
 // TTS robot/glitch effect state now lives in robotSettings.ts (local to this
 // browser's audio; seeded into the graph at startup via index.tsx).
@@ -162,6 +168,8 @@ function handleEvent(ev: DisplayEvent) {
       setPhaseDeadlineAt(0);
       setPhaseDeadlineLabel('');
       setFireHeldReason('');
+      setPleaFallbackReason('');
+      setCrossAnswerWindow(false);
       if (theaterActive()) {
         setTheaterActive(false);
         if (!readOnly) stopTheater();
@@ -197,6 +205,7 @@ function handleEvent(ev: DisplayEvent) {
     case 'start_plea_recording':
       setPleaWindowOpen(true);
       setPleaRecordingActive(false);
+      setCrossAnswerWindow(Boolean(ev.cross));
       break;
     case 'plea_recording':
       setPleaRecordingActive(Boolean(ev.active));
@@ -228,6 +237,9 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'fire_held':
       setFireHeldReason(String(ev.reason ?? 'held for safety'));
+      break;
+    case 'plea_fallback':
+      setPleaFallbackReason(String(ev.reason ?? 'transcription unavailable'));
       break;
     case 'device_connected':
       onDeviceConnected(String(ev.role ?? ''), String(ev.addr ?? ''));

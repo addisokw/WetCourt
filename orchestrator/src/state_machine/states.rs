@@ -40,7 +40,11 @@ pub enum State {
     /// `Idle` via `ExitMaintenance` (or an e-stop).
     Maintenance,
     GeneratingCharge { started_at: Instant },
-    DisplayingCharge { charge: String, until: Instant },
+    /// The charge is on screen and being read aloud. Advances once BOTH the
+    /// minimum display time (`until`) has passed and the charge TTS has drained
+    /// (`tts_done`), so the plea window can never open over the judge's voice;
+    /// `watchdog_at` escapes if the TtsFinished ack is lost.
+    DisplayingCharge { charge: String, until: Instant, tts_done: bool, watchdog_at: Instant },
     AwaitingPlea { charge: String, deadline: Instant },
     /// Plea window elapsed; we've told the frontend to stop recording but are
     /// waiting briefly for its in-flight audio upload to arrive before

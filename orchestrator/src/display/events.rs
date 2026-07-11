@@ -13,7 +13,13 @@ pub enum DisplayEvent {
     /// "no more audio chunks for this utterance" — frontend schedules a
     /// `tts_finished` ClientEvent for after the queued audio drains.
     TtsEnd,
-    StartPleaRecording { deadline_ms: u64 },
+    StartPleaRecording {
+        deadline_ms: u64,
+        /// True when this window is a cross-examination *answer* (the case view
+        /// prompts "answer the judge" instead of "begin your defense").
+        #[serde(default)]
+        cross: bool,
+    },
     StopPleaRecording,
     /// Broadcast when the operator's microphone actually starts/stops capturing
     /// — distinct from the plea *window* opening. Drives the case-view prompt
@@ -49,6 +55,11 @@ pub enum DisplayEvent {
     /// armed but vision had no fresh `fire_ok`). The trial still advances; this
     /// is operator feedback that the shot was *held*, not silently dropped.
     FireHeld { reason: String },
+    /// The plea (or cross answer) fell back to "[no defense offered]" for a
+    /// technical reason — STT failed or timed out — NOT because the defendant
+    /// stayed silent. Operator banner so they can e-stop and retry instead of
+    /// letting the defendant be judged on a defense they never got to make.
+    PleaFallback { reason: String },
     /// The active persona's robot voice-effect params. Pushed to each audio
     /// client on connect and broadcast whenever the active persona changes or
     /// its robot settings are edited, so playback colour follows the persona.

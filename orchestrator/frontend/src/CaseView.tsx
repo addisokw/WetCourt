@@ -2,6 +2,7 @@ import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } fro
 import {
   charge,
   connect,
+  crossAnswerWindow,
   crossQuestion,
   currentState,
   deliberation,
@@ -13,22 +14,6 @@ import {
   verdictRemarks,
   verdictKeyFactor,
 } from './ws';
-
-function stripMarkers(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => {
-      const t = line.trimStart();
-      return (
-        !t.startsWith('VERDICT:') &&
-        !t.startsWith('INTENSITY:') &&
-        !t.startsWith('KEY_FACTOR:') &&
-        !t.startsWith('REASON:')
-      );
-    })
-    .join('\n')
-    .trim();
-}
 
 // Presentational read-only view served at /case — meant for the visitor /
 // accused-facing monitor. Shows the charge, instructions on what to do, the
@@ -44,10 +29,18 @@ function StateInstruction() {
         <p class="instruction">Listen carefully to the charge against you.</p>
       </Match>
       <Match when={currentState() === 'awaiting_plea' && !pleaRecordingActive()}>
-        <p class="instruction big">Press the plea button to begin your defense.</p>
+        <p class="instruction big">
+          {crossAnswerWindow()
+            ? 'Press the plea button to answer the judge.'
+            : 'Press the plea button to begin your defense.'}
+        </p>
       </Match>
       <Match when={currentState() === 'awaiting_plea' && pleaRecordingActive()}>
-        <p class="instruction big">Press the button again to end your plea.</p>
+        <p class="instruction big">
+          {crossAnswerWindow()
+            ? 'Press the button again to finish your answer.'
+            : 'Press the button again to end your plea.'}
+        </p>
       </Match>
       <Match when={currentState() === 'transcribing'}>
         <p class="instruction">Transcribing your plea…</p>
@@ -81,7 +74,12 @@ function PleaCountdown() {
     if (timer) window.clearInterval(timer);
   });
   const remaining = createMemo(() => Math.max(0, Math.ceil((phaseDeadlineAt() - now()) / 1000)));
-  const label = () => (pleaRecordingActive() ? 'seconds remaining' : 'seconds to make your case');
+  const label = () =>
+    pleaRecordingActive()
+      ? 'seconds remaining'
+      : crossAnswerWindow()
+        ? 'seconds to answer'
+        : 'seconds to make your case';
   return (
     <Show when={phaseDeadlineAt() > 0 && currentState() === 'awaiting_plea'}>
       <div class={`countdown ${pleaRecordingActive() ? 'recording' : ''}`}>
@@ -135,7 +133,9 @@ export function CaseContent() {
     (currentState() === 'cross_examining' ||
       currentState() === 'awaiting_plea' ||
       currentState() === 'transcribing');
-  const cleanedDeliberation = () => stripMarkers(deliberation());
+  // Marker lines are filtered server-side now (StreamMarkerFilter), so the
+  // deliberation buffer is display-ready as-is.
+  const cleanedDeliberation = () => deliberation();
   // Hide the deliberation as soon as the verdict reveals — otherwise it sits
   // below the GUILTY panel for the post-fire hold, which crowds the screen.
   const showDeliberation = () =>

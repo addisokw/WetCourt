@@ -119,6 +119,81 @@ pub fn strip_markers(text: &str) -> String {
         .to_string()
 }
 
+const MARKERS: [&str; 4] = ["VERDICT:", "INTENSITY:", "KEY_FACTOR:", "REASON:"];
+
+enum LineState {
+    /// The line so far is still a viable marker prefix (or just whitespace);
+    /// its chars sit in `held`, unemitted.
+    Undecided,
+    /// The line diverged from every marker — pass chars straight through.
+    Emitting,
+    /// The line IS a marker line — swallow it (and its newline) entirely.
+    Dropping,
+}
+
+/// Incremental [`strip_markers`] for the deliberation token stream: text passes
+/// through as it arrives, but any line that could still turn into a marker line
+/// is held back until it either diverges (flushed) or confirms (dropped). This
+/// runs server-side, before broadcast, so a token split like "VERD|ICT: GUIL…"
+/// can never flash the verdict on the big screens ahead of the reveal.
+pub struct StreamMarkerFilter {
+    state: LineState,
+    held: String,
+}
+
+impl StreamMarkerFilter {
+    pub fn new() -> Self {
+        Self { state: LineState::Undecided, held: String::new() }
+    }
+
+    /// Feed a chunk; returns the text that is now safe to display. A trailing
+    /// fragment still ambiguous at stream end is deliberately never flushed —
+    /// in practice that tail *is* the marker block.
+    pub fn push(&mut self, chunk: &str) -> String {
+        let mut out = String::new();
+        for ch in chunk.chars() {
+            match self.state {
+                LineState::Dropping => {
+                    if ch == '\n' {
+                        self.state = LineState::Undecided;
+                    }
+                }
+                LineState::Emitting => {
+                    out.push(ch);
+                    if ch == '\n' {
+                        self.state = LineState::Undecided;
+                    }
+                }
+                LineState::Undecided => {
+                    if ch == '\n' {
+                        // Line ended while still ambiguous (e.g. a bare
+                        // "VERDICT" with no colon) — a real line, flush it.
+                        out.push_str(&self.held);
+                        out.push('\n');
+                        self.held.clear();
+                        continue;
+                    }
+                    self.held.push(ch);
+                    let t = self.held.trim_start();
+                    if t.is_empty() {
+                        continue; // leading whitespace: still ambiguous
+                    }
+                    if MARKERS.iter().any(|m| t.starts_with(m)) {
+                        self.state = LineState::Dropping;
+                        self.held.clear();
+                    } else if !MARKERS.iter().any(|m| m.starts_with(t)) {
+                        // Diverged from every marker — flush and stream on.
+                        out.push_str(&self.held);
+                        self.held.clear();
+                        self.state = LineState::Emitting;
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
 /// Estimate playback duration from PCM bytes and emit `TtsFinished` after that
 /// long. This is a fallback for headless / disconnected runs; the live browser
 /// path beats us to it via the `tts_finished` ClientEvent.
@@ -127,4 +202,47 @@ async fn schedule_self_ack(event_tx: mpsc::Sender<Event>, pcm_bytes: usize) {
     let secs = (pcm_bytes as f64 / 48_000.0).max(0.1);
     tokio::time::sleep(Duration::from_secs_f64(secs + 0.5)).await;
     let _ = event_tx.send(Event::TtsFinished).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(chunks: &[&str]) -> String {
+        let mut f = StreamMarkerFilter::new();
+        chunks.iter().map(|c| f.push(c)).collect()
+    }
+
+    #[test]
+    fn plain_text_streams_through_incrementally() {
+        let mut f = StreamMarkerFilter::new();
+        // Once a line diverges from the markers, chars flow immediately.
+        assert_eq!(f.push("Your plea"), "Your plea");
+        assert_eq!(f.push(" is nonsense.\nMore."), " is nonsense.\nMore.");
+    }
+
+    #[test]
+    fn marker_split_across_tokens_never_leaks() {
+        assert_eq!(run(&["Weak.\n", "VERD", "ICT: GUIL", "TY\nafter"]), "Weak.\nafter");
+    }
+
+    #[test]
+    fn all_marker_lines_dropped_with_leading_whitespace() {
+        assert_eq!(
+            run(&["ok\n  KEY_FACTOR: smugness\nREASON: none\nVERDICT: ACQUITTED"]),
+            "ok\n"
+        );
+    }
+
+    #[test]
+    fn bare_marker_word_without_colon_is_kept() {
+        assert_eq!(run(&["The VERDICT is mine.\nVERDICT\ndone\n"]), "The VERDICT is mine.\nVERDICT\ndone\n");
+    }
+
+    #[test]
+    fn ambiguous_tail_is_withheld() {
+        // "REASON" with no colon and no newline at stream end: withheld (it's
+        // almost certainly the marker block starting).
+        assert_eq!(run(&["fine.\nREASON"]), "fine.\n");
+    }
 }

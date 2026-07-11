@@ -17,7 +17,8 @@ pub enum Event {
     PleaRecordingStarted,
     PleaTimeout,
     TranscriptReady(String),
-    #[allow(dead_code)]
+    /// STT errored (distinct from a silent defendant) — the FSM falls back to
+    /// "[no defense offered]" AND raises the operator PleaFallback banner.
     TranscriptFailed(String),
     CrossQuestionReady(String),
     #[allow(dead_code)]

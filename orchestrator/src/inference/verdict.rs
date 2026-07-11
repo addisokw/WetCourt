@@ -17,7 +17,7 @@ use crate::state_machine::states::{CrossExam, Verdict};
 use crate::state_machine::{Command, Event};
 
 use super::client::LlmClient;
-use super::tts::{strip_markers, synth_into_display};
+use super::tts::{strip_markers, synth_into_display, StreamMarkerFilter};
 
 pub async fn mock(
     cfg: Arc<Config>,
@@ -88,6 +88,10 @@ pub async fn real(
     futures_util::pin_mut!(stream);
 
     let mut full = String::new();
+    // Marker lines (VERDICT:/KEY_FACTOR:/…) are filtered server-side, mid-token,
+    // so no display can ever flash "VERDICT: GUIL…" before the reveal. `full`
+    // keeps the raw text — the parser needs the markers.
+    let mut caption = StreamMarkerFilter::new();
     while let Some(item) = stream.next().await {
         let chunk = match item {
             Ok(c) => c,
@@ -100,9 +104,12 @@ pub async fn real(
         };
         full.push_str(&chunk);
 
-        let _ = display_tx
-            .send(Command::Display(DisplayEvent::DeliberationToken { text: chunk.clone() }))
-            .await;
+        let visible = caption.push(&chunk);
+        if !visible.is_empty() {
+            let _ = display_tx
+                .send(Command::Display(DisplayEvent::DeliberationToken { text: visible }))
+                .await;
+        }
     }
 
     let _ = display_tx

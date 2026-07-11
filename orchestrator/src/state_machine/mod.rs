@@ -391,7 +391,9 @@ mod tests {
 
         rt.handle(Event::OperatorStart).await;
         rt.handle(Event::ChargeReady("the CHARGE".into())).await;
-        rt.handle(Event::Tick).await; // charge_display_secs = 0 → AwaitingPlea
+        // charge_display_secs = 0, so the charge TTS draining is what opens
+        // the plea window.
+        rt.handle(Event::TtsFinished).await; // → AwaitingPlea
         rt.handle(Event::PleaAudioReceived(vec![1, 2, 3])).await; // → Transcribing
         rt.handle(Event::TranscriptReady("the PLEA".into())).await; // → Deliberating
         rt.handle(Event::VerdictReady(Verdict {

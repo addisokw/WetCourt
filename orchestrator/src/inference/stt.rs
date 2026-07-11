@@ -39,8 +39,11 @@ pub async fn real(cfg: Arc<Config>, audio: Vec<u8>, event_tx: mpsc::Sender<Event
             let _ = event_tx.send(Event::TranscriptReady(text)).await;
         }
         Err(e) => {
+            // Distinct from silence: the FSM still falls back to "no defense",
+            // but also surfaces an operator banner (PleaFallback) so a broken
+            // STT backend doesn't silently railroad defendants.
             warn!("transcribe failed: {e:#}; treating as no defense");
-            let _ = event_tx.send(Event::TranscriptReady(EMPTY_PLEA.into())).await;
+            let _ = event_tx.send(Event::TranscriptFailed(format!("{e:#}"))).await;
         }
     }
 }

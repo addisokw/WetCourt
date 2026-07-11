@@ -9,6 +9,7 @@ import {
   endPlea,
   fetchCrossExam,
   fireHeldReason,
+  pleaFallbackReason,
   log,
   phaseDeadlineAt,
   phaseDeadlineLabel,
@@ -129,6 +130,12 @@ export default function App() {
         <div class="fire-held-banner">
           <span class="dot" /> Shot held for safety — no fresh target lock at sentencing
           ({fireHeldReason()}). The sentence advanced without firing.
+        </div>
+      </Show>
+      <Show when={pleaFallbackReason()}>
+        <div class="plea-fallback-banner">
+          <span class="dot" /> No plea captured — {pleaFallbackReason()}. The defendant is being
+          judged as offering no defense; E-Stop to retry the trial.
         </div>
       </Show>
       <Show when={currentState() === 'superseded'}>

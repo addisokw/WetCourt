@@ -96,22 +96,20 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         }
         (s @ GeneratingCharge { .. }, _) => (s, vec![]),
 
-        (DisplayingCharge { charge, until }, Tick) if Instant::now() >= until => {
-            let deadline = Instant::now() + Duration::from_secs(cfg.trial.plea_window_secs);
-            (
-                AwaitingPlea { charge, deadline },
-                vec![
-                    Command::Display(DisplayEvent::StartPleaRecording {
-                        deadline_ms: cfg.trial.plea_window_secs * 1000,
-                    }),
-                    Command::Display(DisplayEvent::PhaseDeadline {
-                        phase: "awaiting_plea".into(),
-                        deadline_ms: cfg.trial.plea_window_secs * 1000,
-                    }),
-                    Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
-                    Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
-                ],
-            )
+        // The plea window opens once the minimum display time has passed AND
+        // the charge TTS has drained — a long charge is never still being read
+        // over the defendant's talking time. The watchdog escapes a lost ack.
+        (DisplayingCharge { charge, until, .. }, TtsFinished) if Instant::now() >= until => {
+            begin_awaiting_plea(charge, cfg)
+        }
+        (DisplayingCharge { charge, until, watchdog_at, .. }, TtsFinished) => (
+            DisplayingCharge { charge, until, tts_done: true, watchdog_at },
+            vec![],
+        ),
+        (DisplayingCharge { charge, until, tts_done, watchdog_at }, Tick)
+            if (tts_done && Instant::now() >= until) || Instant::now() >= watchdog_at =>
+        {
+            begin_awaiting_plea(charge, cfg)
         }
         (s @ DisplayingCharge { .. }, _) => (s, vec![]),
 
@@ -149,14 +147,18 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         (Transcribing { charge, .. }, TranscriptReady(text)) => after_plea(charge, text, cross_enabled, cfg),
         (Transcribing { charge, started_at, audio }, Tick) => {
             if started_at.elapsed() > Duration::from_secs(cfg.inference.stt_timeout_secs) {
-                begin_deliberating(charge, NO_DEFENSE.into(), None, cfg)
+                with_plea_fallback(
+                    begin_deliberating(charge, NO_DEFENSE.into(), None, cfg),
+                    "plea transcription timed out",
+                )
             } else {
                 (Transcribing { charge, started_at, audio }, vec![])
             }
         }
-        (Transcribing { charge, .. }, TranscriptFailed(_)) => {
-            begin_deliberating(charge, NO_DEFENSE.into(), None, cfg)
-        }
+        (Transcribing { charge, .. }, TranscriptFailed(err)) => with_plea_fallback(
+            begin_deliberating(charge, NO_DEFENSE.into(), None, cfg),
+            &format!("plea transcription failed: {err}"),
+        ),
         (s @ Transcribing { .. }, _) => (s, vec![]),
 
         // ---- Cross-examination ----
@@ -230,14 +232,18 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         }
         (CrossTranscribing { charge, plea, question, started_at, audio }, Tick) => {
             if started_at.elapsed() > Duration::from_secs(cfg.inference.stt_timeout_secs) {
-                begin_deliberating(charge, plea, Some(CrossExam { question, answer: NO_ANSWER.into() }), cfg)
+                with_plea_fallback(
+                    begin_deliberating(charge, plea, Some(CrossExam { question, answer: NO_ANSWER.into() }), cfg),
+                    "answer transcription timed out",
+                )
             } else {
                 (CrossTranscribing { charge, plea, question, started_at, audio }, vec![])
             }
         }
-        (CrossTranscribing { charge, plea, question, .. }, TranscriptFailed(_)) => {
-            begin_deliberating(charge, plea, Some(CrossExam { question, answer: NO_ANSWER.into() }), cfg)
-        }
+        (CrossTranscribing { charge, plea, question, .. }, TranscriptFailed(err)) => with_plea_fallback(
+            begin_deliberating(charge, plea, Some(CrossExam { question, answer: NO_ANSWER.into() }), cfg),
+            &format!("answer transcription failed: {err}"),
+        ),
         (s @ CrossTranscribing { .. }, _) => (s, vec![]),
 
         (Deliberating { .. }, VerdictReady(v)) => begin_pronouncing(v),
@@ -303,8 +309,12 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
 
 fn begin_displaying_charge(text: String, cfg: &Config) -> (State, Vec<Command>) {
     let until = Instant::now() + Duration::from_secs(cfg.trial.charge_display_secs);
+    // TTS-length estimate (same pace as the pronounce watchdog) + margin: the
+    // escape hatch if the charge TtsFinished never arrives.
+    let watchdog_at = Instant::now()
+        + Duration::from_secs(cfg.trial.charge_display_secs + 10 + text.len() as u64 / 12);
     (
-        State::DisplayingCharge { charge: text.clone(), until },
+        State::DisplayingCharge { charge: text.clone(), until, tts_done: false, watchdog_at },
         vec![
             Command::Display(DisplayEvent::ShowCharge { text: text.clone() }),
             Command::Display(DisplayEvent::PhaseDeadline {
@@ -312,6 +322,26 @@ fn begin_displaying_charge(text: String, cfg: &Config) -> (State, Vec<Command>) 
                 deadline_ms: cfg.trial.charge_display_secs * 1000,
             }),
             Command::Speak(text),
+        ],
+    )
+}
+
+/// The `DisplayingCharge → AwaitingPlea` edge: open the plea window.
+fn begin_awaiting_plea(charge: String, cfg: &Config) -> (State, Vec<Command>) {
+    let deadline = Instant::now() + Duration::from_secs(cfg.trial.plea_window_secs);
+    (
+        State::AwaitingPlea { charge, deadline },
+        vec![
+            Command::Display(DisplayEvent::StartPleaRecording {
+                deadline_ms: cfg.trial.plea_window_secs * 1000,
+                cross: false,
+            }),
+            Command::Display(DisplayEvent::PhaseDeadline {
+                phase: "awaiting_plea".into(),
+                deadline_ms: cfg.trial.plea_window_secs * 1000,
+            }),
+            Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
+            Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
         ],
     )
 }
@@ -370,6 +400,15 @@ fn begin_deliberating(
     (state, cmds)
 }
 
+/// Tag a fallback transition with the operator-facing banner explaining that
+/// the defendant is about to be judged on "[no defense offered]" through no
+/// fault of their own (STT failure/timeout) — so the operator can e-stop and
+/// retry instead of silently railroading them.
+fn with_plea_fallback((s, mut cmds): (State, Vec<Command>), reason: &str) -> (State, Vec<Command>) {
+    cmds.push(Command::Display(DisplayEvent::PleaFallback { reason: reason.into() }));
+    (s, cmds)
+}
+
 /// First plea is in. Branch into cross-examination when it's enabled and the
 /// defendant actually said something; otherwise go straight to the verdict.
 fn after_plea(charge: String, plea: String, cross_enabled: bool, cfg: &Config) -> (State, Vec<Command>) {
@@ -410,7 +449,10 @@ fn begin_cross_answer(charge: String, plea: String, question: String, cfg: &Conf
     (
         State::CrossAwaitingAnswer { charge, plea, question, deadline },
         vec![
-            Command::Display(DisplayEvent::StartPleaRecording { deadline_ms: window * 1000 }),
+            Command::Display(DisplayEvent::StartPleaRecording {
+                deadline_ms: window * 1000,
+                cross: true,
+            }),
             Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "cross_answer".into(),
                 deadline_ms: window * 1000,
@@ -625,6 +667,87 @@ mod tests {
         let (s, _) = step(State::GeneratingCharge { started_at: Instant::now() },
                           Event::ChargeReady("you stand accused".into()), &cfg, false);
         assert!(matches!(s, State::DisplayingCharge { .. }));
+    }
+
+    #[test]
+    fn plea_window_waits_for_charge_tts() {
+        let cfg = test_cfg();
+        let far = Instant::now() + Duration::from_secs(60);
+        // Min display passed but TTS still speaking → hold.
+        let s = State::DisplayingCharge {
+            charge: "c".into(),
+            until: Instant::now(),
+            tts_done: false,
+            watchdog_at: far,
+        };
+        let (s, _) = step(s, Event::Tick, &cfg, false);
+        assert!(matches!(s, State::DisplayingCharge { .. }));
+        // TTS drains → plea window opens (cross=false on the event).
+        let (s, cmds) = step(s, Event::TtsFinished, &cfg, false);
+        assert!(matches!(s, State::AwaitingPlea { .. }));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::StartPleaRecording { cross: false, .. })
+        )));
+    }
+
+    #[test]
+    fn charge_tts_before_min_display_waits_for_the_min() {
+        let cfg = test_cfg();
+        let far = Instant::now() + Duration::from_secs(60);
+        let s = State::DisplayingCharge {
+            charge: "c".into(),
+            until: Instant::now() + Duration::from_secs(30),
+            tts_done: false,
+            watchdog_at: far,
+        };
+        // TTS drained early → latch tts_done, keep displaying until `until`.
+        let (s, _) = step(s, Event::TtsFinished, &cfg, false);
+        match &s {
+            State::DisplayingCharge { tts_done, .. } => assert!(tts_done),
+            other => panic!("expected DisplayingCharge, got {}", other.name()),
+        }
+        let (s, _) = step(s, Event::Tick, &cfg, false);
+        assert!(matches!(s, State::DisplayingCharge { .. }));
+    }
+
+    #[test]
+    fn charge_watchdog_escapes_a_lost_tts_ack() {
+        let cfg = test_cfg();
+        let s = State::DisplayingCharge {
+            charge: "c".into(),
+            until: Instant::now(),
+            tts_done: false,
+            watchdog_at: Instant::now(),
+        };
+        let (s, _) = step(s, Event::Tick, &cfg, false);
+        assert!(matches!(s, State::AwaitingPlea { .. }));
+    }
+
+    #[test]
+    fn stt_failure_raises_the_plea_fallback_banner() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(
+            State::Transcribing { charge: "c".into(), audio: vec![1], started_at: Instant::now() },
+            Event::TranscriptFailed("kokoro exploded".into()),
+            &cfg,
+            false,
+        );
+        assert!(matches!(s, State::Deliberating { .. }));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::PleaFallback { .. })
+        )));
+    }
+
+    #[test]
+    fn cross_answer_window_is_flagged_cross() {
+        let cfg = test_cfg();
+        let (_s, cmds) = begin_cross_answer("c".into(), "p".into(), "q?".into(), &cfg);
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::StartPleaRecording { cross: true, .. })
+        )));
     }
 
     #[test]
