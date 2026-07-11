@@ -52,7 +52,13 @@ async fn main() -> Result<()> {
     let shared = Arc::new(http::AppShared {
         cfg: cfg.clone(),
         registrar: Default::default(),
-        calls: Default::default(),
+        calls: {
+            // Call-lifecycle pushes go to the same orchestrator the case file
+            // comes from, so the trial clock can pause during consultations.
+            let calls = call::CallManager::default();
+            calls.set_notify_base(cfg.trial_context.orchestrator_base_url.clone());
+            calls
+        },
         backend,
         persona,
         cover,

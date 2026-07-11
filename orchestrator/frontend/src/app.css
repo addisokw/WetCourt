@@ -276,6 +276,9 @@ button.plea.recording:hover { background: #8b2326; }
 .case-embed .instruction { font-size: clamp(0.8rem, 1.1vw, 1rem); }
 .case-embed .instruction.big { font-size: clamp(1rem, 1.5vw, 1.3rem); }
 .case-embed .countdown-num { font-size: clamp(1.5rem, 2.8vw, 2.5rem); }
+/* Clock frozen for a lawyer consultation — steady blue, no urgency. */
+.countdown.paused .countdown-num { color: #79c0ff; }
+.countdown.paused .countdown-label { color: #79c0ff; }
 .case-embed .countdown-label { font-size: 0.65rem; }
 .case-embed .verdict-panel { padding: 1rem; gap: 0.6rem; }
 .case-embed .verdict-word { font-size: clamp(2rem, 4vw, 3.5rem); }

@@ -16,6 +16,9 @@ export default function LawyerPanel() {
   const [reason, setReason] = createSignal('');
   const [calling, setCalling] = createSignal(false);
   const [outcome, setOutcome] = createSignal('');
+  // Trial integration: off-hook pauses the plea/answer clock and the phone
+  // rings on cross-examination. Toggle off on busy days to speed trials up.
+  const [integration, setIntegration] = createSignal(true);
 
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -34,7 +37,29 @@ export default function LawyerPanel() {
   onMount(() => {
     poll();
     timer = setInterval(poll, 3000);
+    void (async () => {
+      try {
+        const r = await fetch('/operator/lawyer_integration');
+        if (r.ok) setIntegration(Boolean(((await r.json()) as { enabled: boolean }).enabled));
+      } catch {
+        /* keep optimistic default */
+      }
+    })();
   });
+
+  async function setIntegrationEnabled(enabled: boolean) {
+    setIntegration(enabled); // optimistic
+    try {
+      const r = await fetch('/operator/lawyer_integration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (r.ok) setIntegration(Boolean(((await r.json()) as { enabled: boolean }).enabled));
+    } catch {
+      /* next poll of the checkbox is manual; leave optimistic value */
+    }
+  }
   onCleanup(() => timer && clearInterval(timer));
 
   async function ring() {
@@ -86,6 +111,23 @@ export default function LawyerPanel() {
           </p>
         )}
       </Show>
+
+      <h3>Trial integration</h3>
+      <p>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            checked={integration()}
+            onChange={(e) => void setIntegrationEnabled(e.currentTarget.checked)}
+          />{' '}
+          picking up the phone pauses the plea/answer clock, and the phone rings
+          when the judge cross-examines
+        </label>
+      </p>
+      <p class="muted">
+        Disable when the line gets long — trials run straight through. The
+        force-ring button below works either way.
+      </p>
 
       <h3>Ring the booth phone</h3>
       <p class="muted">

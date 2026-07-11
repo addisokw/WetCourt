@@ -56,6 +56,14 @@ pub struct Runtime {
     /// Captures the guilty "moment of justice" burst for the keepsake. `None`
     /// disables it (and in tests).
     capture: Option<Arc<crate::capture::CaptureController>>,
+    /// Operator toggle for the lawyer-phone trial integration; shared with the
+    /// display server's `/operator/lawyer_integration` + `/lawyer/event`.
+    lawyer_enabled: Arc<AtomicBool>,
+    /// Live lawyer-call flag (written by `/lawyer/event`). Read on window-entry
+    /// edges so a window that opens mid-call starts paused.
+    lawyer_call_active: Arc<AtomicBool>,
+    /// Rings the phone as a cross-answer window opens. `None` disables (tests).
+    lawyer: Option<Arc<crate::lawyer::LawyerBridge>>,
 }
 
 /// Mutable scratchpad that gathers one trial's pieces as they flow past the
@@ -88,6 +96,9 @@ impl Runtime {
         print_tx: mpsc::Sender<TrialRecord>,
         targeting: Option<Arc<crate::targeting::TargetingController>>,
         capture: Option<Arc<crate::capture::CaptureController>>,
+        lawyer_enabled: Arc<AtomicBool>,
+        lawyer_call_active: Arc<AtomicBool>,
+        lawyer: Option<Arc<crate::lawyer::LawyerBridge>>,
     ) -> Self {
         let next_case_no = AtomicU64::new(casebook.next_case_no());
         Self {
@@ -108,6 +119,9 @@ impl Runtime {
             draft: None,
             targeting,
             capture,
+            lawyer_enabled,
+            lawyer_call_active,
+            lawyer,
         }
     }
 
@@ -176,6 +190,41 @@ impl Runtime {
 
         for cmd in cmds {
             self.dispatch(cmd).await;
+        }
+
+        // Lawyer-phone trial integration (when enabled): ring the phone as a
+        // cross-answer window opens, and pause any freshly opened window if
+        // the defendant is *already* on the phone (they picked up during the
+        // charge or the judge's question — the call_started event fired before
+        // the window existed, so we synthesize the pause on entry).
+        if self.lawyer_enabled.load(Ordering::Relaxed) {
+            let entered_plea =
+                matches!(self.state, State::AwaitingPlea { .. }) && prev_name != "awaiting_plea";
+            let entered_cross = matches!(self.state, State::CrossAwaitingAnswer { .. })
+                && prev_name != "cross_answer";
+            let call_active = self.lawyer_call_active.load(Ordering::Relaxed);
+            if entered_cross && !call_active {
+                if let (Some(bridge), State::CrossAwaitingAnswer { question, .. }) =
+                    (&self.lawyer, &self.state)
+                {
+                    bridge.ring(format!(
+                        "the judge just asked your client: '{question}' — they need \
+                         your finest advice before they answer"
+                    ));
+                }
+            }
+            if (entered_plea || entered_cross) && call_active {
+                let prev = std::mem::replace(&mut self.state, State::Idle);
+                let (next, cmds) =
+                    transitions::step(prev, Event::LawyerCallStarted, &self.cfg, cross_enabled);
+                self.state = next;
+                if let Ok(mut snap) = self.trial_snapshot.write() {
+                    *snap = states::TrialSnapshot::from(&self.state);
+                }
+                for cmd in cmds {
+                    self.dispatch(cmd).await;
+                }
+            }
         }
     }
 
@@ -387,6 +436,9 @@ mod tests {
             print_tx,
             None, // no targeting controller in the unit test
             None, // no capture controller in the unit test
+            Arc::new(AtomicBool::new(false)), // lawyer integration off
+            Arc::new(AtomicBool::new(false)),
+            None, // no lawyer bridge in the unit test
         );
 
         rt.handle(Event::OperatorStart).await;

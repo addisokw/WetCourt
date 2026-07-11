@@ -2,6 +2,7 @@ import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } fro
 import { resumeAudio } from './audio';
 import {
   charge,
+  clockPausedMs,
   connect,
   crossAnswerWindow,
   crossQuestion,
@@ -28,6 +29,9 @@ function StateInstruction() {
       </Match>
       <Match when={currentState() === 'displaying_charge'}>
         <p class="instruction">Listen carefully to the charge against you.</p>
+      </Match>
+      <Match when={currentState() === 'awaiting_plea' && clockPausedMs() > 0}>
+        <p class="instruction big">You are consulting your counsel. The clock is stopped.</p>
       </Match>
       <Match when={currentState() === 'awaiting_plea' && !pleaRecordingActive()}>
         <p class="instruction big">
@@ -74,16 +78,23 @@ function PleaCountdown() {
   onCleanup(() => {
     if (timer) window.clearInterval(timer);
   });
-  const remaining = createMemo(() => Math.max(0, Math.ceil((phaseDeadlineAt() - now()) / 1000)));
+  const paused = () => clockPausedMs() > 0;
+  const remaining = createMemo(() =>
+    paused()
+      ? Math.max(0, Math.ceil(clockPausedMs() / 1000))
+      : Math.max(0, Math.ceil((phaseDeadlineAt() - now()) / 1000)),
+  );
   const label = () =>
-    pleaRecordingActive()
-      ? 'seconds remaining'
-      : crossAnswerWindow()
-        ? 'seconds to answer'
-        : 'seconds to make your case';
+    paused()
+      ? 'seconds held — counsel consultation'
+      : pleaRecordingActive()
+        ? 'seconds remaining'
+        : crossAnswerWindow()
+          ? 'seconds to answer'
+          : 'seconds to make your case';
   return (
-    <Show when={phaseDeadlineAt() > 0 && currentState() === 'awaiting_plea'}>
-      <div class={`countdown ${pleaRecordingActive() ? 'recording' : ''}`}>
+    <Show when={(phaseDeadlineAt() > 0 || paused()) && currentState() === 'awaiting_plea'}>
+      <div class={`countdown ${pleaRecordingActive() ? 'recording' : ''} ${paused() ? 'paused' : ''}`}>
         <span class="countdown-num">{remaining()}</span>
         <span class="countdown-label">{label()}</span>
       </div>

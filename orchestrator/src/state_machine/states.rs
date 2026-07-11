@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Sentinel transcript used when the defendant said nothing intelligible. Shared
 /// by the STT path (which emits it) and the state machine (which skips
@@ -45,7 +45,10 @@ pub enum State {
     /// (`tts_done`), so the plea window can never open over the judge's voice;
     /// `watchdog_at` escapes if the TtsFinished ack is lost.
     DisplayingCharge { charge: String, until: Instant, tts_done: bool, watchdog_at: Instant },
-    AwaitingPlea { charge: String, deadline: Instant },
+    /// Plea window. `paused_remaining` is set while the defendant is on the
+    /// lawyer phone: the countdown freezes with that much time left and the
+    /// deadline is restored when the call ends.
+    AwaitingPlea { charge: String, deadline: Instant, paused_remaining: Option<Duration> },
     /// Plea window elapsed; we've told the frontend to stop recording but are
     /// waiting briefly for its in-flight audio upload to arrive before
     /// committing to transcription with whatever bytes (if any) we have.
@@ -57,8 +60,15 @@ pub enum State {
     /// The question is being displayed and spoken; we open the answer window
     /// once its TTS drains (or a watchdog fires).
     CrossSpeaking { charge: String, plea: String, question: String, started_at: Instant },
-    /// Recording the defendant's answer (reuses the plea-recording machinery).
-    CrossAwaitingAnswer { charge: String, plea: String, question: String, deadline: Instant },
+    /// Recording the defendant's answer (reuses the plea-recording machinery,
+    /// including the lawyer-phone clock pause).
+    CrossAwaitingAnswer {
+        charge: String,
+        plea: String,
+        question: String,
+        deadline: Instant,
+        paused_remaining: Option<Duration>,
+    },
     /// Answer window elapsed; brief grace for the in-flight audio upload.
     CrossFlushingAnswer { charge: String, plea: String, question: String, hard_deadline: Instant },
     /// Transcribing the answer before deliberation.
@@ -118,6 +128,10 @@ pub struct TrialSnapshot {
     /// remaining-ms countdown at connect time.
     #[serde(skip)]
     pub deadline: Option<Instant>,
+    /// Set while the window's clock is paused for a lawyer consultation: the
+    /// frozen remaining time. Not serialized (WS snapshot only).
+    #[serde(skip)]
+    pub paused_remaining: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,9 +151,10 @@ impl From<&State> for TrialSnapshot {
                 snap.charge = Some(charge.clone());
                 snap.deadline = Some(*until);
             }
-            State::AwaitingPlea { charge, deadline } => {
+            State::AwaitingPlea { charge, deadline, paused_remaining } => {
                 snap.charge = Some(charge.clone());
                 snap.deadline = Some(*deadline);
+                snap.paused_remaining = *paused_remaining;
             }
             State::FlushingPlea { charge, .. } | State::Transcribing { charge, .. } => {
                 snap.charge = Some(charge.clone());
@@ -153,11 +168,12 @@ impl From<&State> for TrialSnapshot {
                 snap.plea = Some(plea.clone());
                 snap.cross_question = Some(question.clone());
             }
-            State::CrossAwaitingAnswer { charge, plea, question, deadline } => {
+            State::CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining } => {
                 snap.charge = Some(charge.clone());
                 snap.plea = Some(plea.clone());
                 snap.cross_question = Some(question.clone());
                 snap.deadline = Some(*deadline);
+                snap.paused_remaining = *paused_remaining;
             }
             State::CrossFlushingAnswer { charge, plea, question, .. }
             | State::CrossTranscribing { charge, plea, question, .. } => {

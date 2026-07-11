@@ -54,6 +54,10 @@ export const [pleaFallbackReason, setPleaFallbackReason] = createSignal<string>(
 // True while the open recording window is a cross-examination *answer* (the
 // case view prompts "answer the judge" instead of "begin your defense").
 export const [crossAnswerWindow, setCrossAnswerWindow] = createSignal<boolean>(false);
+// Frozen remaining ms while the plea/answer clock is paused for a lawyer
+// consultation (0 = not paused). Set by clock_paused, cleared by the next
+// phase_deadline (resume) or reset.
+export const [clockPausedMs, setClockPausedMs] = createSignal<number>(0);
 
 // TTS robot/glitch effect state now lives in robotSettings.ts (local to this
 // browser's audio; seeded into the graph at startup via index.tsx).
@@ -176,6 +180,7 @@ function handleEvent(ev: DisplayEvent) {
       setFireHeldReason('');
       setPleaFallbackReason('');
       setCrossAnswerWindow(false);
+      setClockPausedMs(0);
       if (theaterActive()) {
         setTheaterActive(false);
         if (audioEnabled()) stopTheater();
@@ -201,10 +206,16 @@ function handleEvent(ev: DisplayEvent) {
       } else {
         setLastVerdictGuilty(null);
       }
-      if (ev.deadline_ms != null) {
+      if (ev.clock_paused) {
+        setClockPausedMs(Math.max(1, Number(ev.deadline_ms ?? 0)));
+        setPhaseDeadlineAt(0);
+        setPhaseDeadlineLabel(phase);
+      } else if (ev.deadline_ms != null) {
+        setClockPausedMs(0);
         setPhaseDeadlineAt(Date.now() + Number(ev.deadline_ms));
         setPhaseDeadlineLabel(phase);
       } else {
+        setClockPausedMs(0);
         setPhaseDeadlineAt(0);
         setPhaseDeadlineLabel('');
       }
@@ -257,6 +268,10 @@ function handleEvent(ev: DisplayEvent) {
     case 'phase_deadline':
       setPhaseDeadlineLabel(String(ev.phase ?? ''));
       setPhaseDeadlineAt(Date.now() + Number(ev.deadline_ms ?? 0));
+      setClockPausedMs(0); // any live deadline resumes a paused clock
+      break;
+    case 'clock_paused':
+      setClockPausedMs(Math.max(1, Number(ev.remaining_ms ?? 0)));
       break;
     case 'theater_start':
       setTheaterActive(true);

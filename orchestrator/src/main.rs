@@ -18,6 +18,7 @@ mod personas;
 // Thermal-printer keepsake transcript: report renderer, casebook trial log, and
 // the printer service. Driven from the state machine at each completed verdict.
 mod printer;
+mod lawyer;
 mod state_machine;
 mod targeting;
 
@@ -327,6 +328,13 @@ async fn main() -> Result<()> {
     let trial_snapshot = Arc::new(std::sync::RwLock::new(
         state_machine::states::TrialSnapshot::default(),
     ));
+
+    // Lawyer-phone trial integration: operator toggle (seeded from config),
+    // live-call flag (written by counsel's /lawyer/event pushes), and the
+    // ring-out bridge the Runtime uses on cross-answer entry.
+    let lawyer_enabled = Arc::new(AtomicBool::new(cfg.lawyer.trial_integration));
+    let lawyer_call_active = Arc::new(AtomicBool::new(false));
+    let lawyer_bridge = Arc::new(lawyer::LawyerBridge::new(cfg.lawyer.base_url.clone()));
     let app_state = AppState {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
@@ -348,6 +356,8 @@ async fn main() -> Result<()> {
         vision_gate,
         auto_fire,
         trial_snapshot: trial_snapshot.clone(),
+        lawyer_enabled: lawyer_enabled.clone(),
+        lawyer_call_active: lawyer_call_active.clone(),
         lawyer_base_url: cfg.lawyer.base_url.clone(),
     };
     let app = display::router(app_state);
@@ -360,7 +370,25 @@ async fn main() -> Result<()> {
     });
 
     // State machine runs in this task; never returns until ctrl-c.
-    let runtime = Runtime::new(cfg.clone(), cross_enabled, maintenance, is_idle, trial_snapshot, event_rx, inference_tx, hardware_tx, display_tx, personas_for_sm, casebook, print_tx, Some(targeting), Some(capture));
+    let runtime = Runtime::new(
+        cfg.clone(),
+        cross_enabled,
+        maintenance,
+        is_idle,
+        trial_snapshot,
+        event_rx,
+        inference_tx,
+        hardware_tx,
+        display_tx,
+        personas_for_sm,
+        casebook,
+        print_tx,
+        Some(targeting),
+        Some(capture),
+        lawyer_enabled,
+        lawyer_call_active,
+        Some(lawyer_bridge),
+    );
     let sm = tokio::spawn(async move { runtime.run().await });
 
     tokio::select! {

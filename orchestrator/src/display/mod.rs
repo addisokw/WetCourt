@@ -103,6 +103,13 @@ pub struct AppState {
     /// Read-only trial mirror for `GET /trial/state` (the lawyer phone reads
     /// it at call pickup). Written by `Runtime` on every transition.
     pub trial_snapshot: Arc<std::sync::RwLock<crate::state_machine::states::TrialSnapshot>>,
+    /// Operator toggle for the lawyer-phone trial integration (off-hook clock
+    /// pause + cross-exam ring-out). The force-ring button is independent.
+    pub lawyer_enabled: Arc<AtomicBool>,
+    /// Whether a lawyer call is live right now (set by counsel's lifecycle
+    /// pushes at /lawyer/event). The Runtime reads it to pause a freshly
+    /// opened window when the defendant is already on the phone.
+    pub lawyer_call_active: Arc<AtomicBool>,
     /// Base URL of the lawyer-phone service (`counsel`); `/lawyer/*` proxies
     /// there, same pattern as vision (reuses `vision_http`).
     pub lawyer_base_url: String,
@@ -151,6 +158,8 @@ pub fn router(state: AppState) -> Router {
         .route("/trial/state", get(trial_state))
         .route("/lawyer/status", get(lawyer_status))
         .route("/lawyer/call", post(lawyer_call))
+        .route("/lawyer/event", post(lawyer_event))
+        .route("/operator/lawyer_integration", get(get_lawyer_integration).post(set_lawyer_integration))
         .route("/health", get(health))
         .fallback(assets::serve)
         .with_state(state)
@@ -470,6 +479,58 @@ async fn trial_state(AxumState(s): AxumState<AppState>) -> Response {
 }
 
 /// Proxy counsel's `/status` (registered? in a call?) for the console panel.
+/// Call-lifecycle push from counsel: the defendant picked up / hung up the
+/// lawyer phone. Tracks the live-call flag always; forwards the pause event to
+/// the FSM only while the trial integration is enabled (the resume event is
+/// always forwarded so a mid-call toggle-off can't leave a clock frozen).
+#[derive(Deserialize)]
+struct LawyerEventReq {
+    event: String,
+}
+
+async fn lawyer_event(
+    AxumState(s): AxumState<AppState>,
+    Json(req): Json<LawyerEventReq>,
+) -> impl IntoResponse {
+    match req.event.as_str() {
+        "call_started" => {
+            s.lawyer_call_active.store(true, Ordering::Relaxed);
+            info!("lawyer call started");
+            if s.lawyer_enabled.load(Ordering::Relaxed) {
+                let _ = s.event_tx.send(Event::LawyerCallStarted).await;
+            }
+        }
+        "call_ended" => {
+            s.lawyer_call_active.store(false, Ordering::Relaxed);
+            info!("lawyer call ended");
+            let _ = s.event_tx.send(Event::LawyerCallEnded).await;
+        }
+        other => {
+            warn!(event = other, "unknown lawyer event");
+            return StatusCode::BAD_REQUEST;
+        }
+    }
+    StatusCode::NO_CONTENT
+}
+
+#[derive(Serialize, Deserialize)]
+struct LawyerIntegrationState {
+    enabled: bool,
+}
+
+async fn get_lawyer_integration(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    Json(LawyerIntegrationState { enabled: s.lawyer_enabled.load(Ordering::Relaxed) })
+}
+
+async fn set_lawyer_integration(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<LawyerIntegrationState>,
+) -> impl IntoResponse {
+    s.lawyer_enabled.store(body.enabled, Ordering::Relaxed);
+    info!(enabled = body.enabled, "lawyer trial integration toggled");
+    (StatusCode::OK, Json(LawyerIntegrationState { enabled: body.enabled }))
+}
+
 async fn lawyer_status(AxumState(s): AxumState<AppState>) -> Response {
     let url = format!("{}/status", s.lawyer_base_url.trim_end_matches('/'));
     lawyer_forward(s.vision_http.get(&url).timeout(Duration::from_secs(2))).await
@@ -902,9 +963,11 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
             .as_ref()
             .filter(|_| revealed)
             .and_then(|v| v.key_factor.clone()),
-        deadline_ms: snap
-            .deadline
-            .map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis() as u64),
+        deadline_ms: snap.paused_remaining.map(|d| d.as_millis() as u64).or_else(|| {
+            snap.deadline
+                .map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis() as u64)
+        }),
+        clock_paused: snap.paused_remaining.is_some(),
         maintenance: s.maintenance.load(Ordering::Relaxed),
     }
 }

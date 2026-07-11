@@ -34,9 +34,32 @@ pub struct ActiveCall {
 pub struct CallManager {
     slot: Mutex<Option<ActiveCall>>,
     last_summary: Mutex<Option<Value>>,
+    /// Orchestrator base URL for call-lifecycle pushes (`POST /lawyer/event`),
+    /// so the trial clock can pause while the defendant consults counsel.
+    /// `None` = no notifications (e.g. standalone testing).
+    notify_base: Mutex<Option<String>>,
 }
 
 impl CallManager {
+    pub fn set_notify_base(&self, url: String) {
+        *self.notify_base.lock().unwrap() = Some(url);
+    }
+
+    /// Fire-and-forget lifecycle push to the orchestrator. Best-effort: a down
+    /// or older orchestrator just ignores it — the phone works regardless.
+    fn notify(&self, event: &'static str) {
+        let Some(base) = self.notify_base.lock().unwrap().clone() else { return };
+        tokio::spawn(async move {
+            let url = format!("{}/lawyer/event", base.trim_end_matches('/'));
+            let _ = reqwest::Client::new()
+                .post(url)
+                .timeout(Duration::from_secs(2))
+                .json(&json!({ "event": event }))
+                .send()
+                .await;
+        });
+    }
+
     pub fn busy(&self) -> bool {
         self.slot.lock().unwrap().is_some()
     }
@@ -48,6 +71,8 @@ impl CallManager {
             return false;
         }
         *slot = Some(call);
+        drop(slot);
+        self.notify("call_started");
         true
     }
 
@@ -69,6 +94,8 @@ impl CallManager {
                 });
                 tracing::info!(summary = %summary, "call ended");
                 *self.last_summary.lock().unwrap() = Some(summary);
+                drop(slot);
+                self.notify("call_ended");
             }
         }
     }

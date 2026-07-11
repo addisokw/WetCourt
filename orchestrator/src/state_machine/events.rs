@@ -30,5 +30,11 @@ pub enum Event {
     HardwareAck(String),
     HardwareError(String),
 
+    /// The defendant picked up the lawyer phone (a counsel call went live).
+    /// Pauses the plea / cross-answer countdown while they consult.
+    LawyerCallStarted,
+    /// The lawyer call ended — resume the paused countdown.
+    LawyerCallEnded,
+
     Tick,
 }

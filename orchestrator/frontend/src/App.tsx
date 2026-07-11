@@ -10,6 +10,7 @@ import {
   fetchCrossExam,
   fireHeldReason,
   pleaFallbackReason,
+  clockPausedMs,
   log,
   phaseDeadlineAt,
   phaseDeadlineLabel,
@@ -63,13 +64,18 @@ function PhaseCountdown() {
   onCleanup(() => {
     if (timer) window.clearInterval(timer);
   });
-  const remainingMs = createMemo(() => Math.max(0, phaseDeadlineAt() - now()));
-  const show = () => phaseDeadlineAt() > 0 && remainingMs() > 0;
+  const paused = () => clockPausedMs() > 0;
+  const remainingMs = createMemo(() =>
+    paused() ? clockPausedMs() : Math.max(0, phaseDeadlineAt() - now()),
+  );
+  const show = () => paused() || (phaseDeadlineAt() > 0 && remainingMs() > 0);
   const secs = () => (remainingMs() / 1000).toFixed(remainingMs() < 10_000 ? 1 : 0);
   return (
     <Show when={show()}>
       <span class="phase-countdown" title={phaseDeadlineLabel()}>
-        <span class="phase-countdown-label">{phaseDeadlineLabel().replace(/_/g, ' ')} →</span>
+        <span class="phase-countdown-label">
+          {paused() ? '⏸ counsel consultation —' : `${phaseDeadlineLabel().replace(/_/g, ' ')} →`}
+        </span>
         <span class="phase-countdown-num">{secs()}s</span>
       </span>
     </Show>

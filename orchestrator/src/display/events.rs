@@ -25,8 +25,11 @@ pub enum DisplayEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         verdict_key_factor: Option<String>,
         /// Remaining ms of the current window (plea/answer/sentence hold).
+        /// When `clock_paused` is set this is the frozen remaining time.
         #[serde(skip_serializing_if = "Option::is_none")]
         deadline_ms: Option<u64>,
+        /// The window's clock is paused for a lawyer consultation.
+        clock_paused: bool,
         maintenance: bool,
     },
     ShowCharge { text: String },
@@ -51,8 +54,13 @@ pub enum DisplayEvent {
     PleaRecording { active: bool },
     /// Operator-facing countdown helper. Emitted whenever the state machine
     /// enters a state with a deadline; `deadline_ms` is the duration from
-    /// emission until the watchdog/timeout fires.
+    /// emission until the watchdog/timeout fires. Also re-emitted when a
+    /// lawyer-paused clock resumes (with the remaining time).
     PhaseDeadline { phase: String, deadline_ms: u64 },
+    /// The plea/answer countdown froze because the defendant picked up the
+    /// lawyer phone; `remaining_ms` is the time left on the clock. Cleared by
+    /// the next `PhaseDeadline` (resume) or `Reset`.
+    ClockPaused { remaining_ms: u64 },
     /// "The court finds the defendant…" preamble is done; pause begins. The
     /// operator console plays an ambient pad and viewers dim until TheaterEnd.
     TheaterStart,

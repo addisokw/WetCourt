@@ -37,11 +37,21 @@ pub struct Config {
 pub struct LawyerConfig {
     #[serde(default = "d_lawyer_base_url")]
     pub base_url: String,
+    /// Startup default for the trial integration (operator-toggleable live via
+    /// `/operator/lawyer_integration`): off-hook pauses the plea/answer clock,
+    /// and the phone rings when a cross-examination answer window opens. Off =
+    /// the phone is a standalone prop (the force-ring button still works).
+    #[serde(default = "d_lawyer_trial_integration")]
+    pub trial_integration: bool,
+}
+
+fn d_lawyer_trial_integration() -> bool {
+    true
 }
 
 impl Default for LawyerConfig {
     fn default() -> Self {
-        Self { base_url: d_lawyer_base_url() }
+        Self { base_url: d_lawyer_base_url(), trial_integration: d_lawyer_trial_integration() }
     }
 }
 
