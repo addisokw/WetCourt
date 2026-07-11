@@ -47,8 +47,12 @@ pub async fn real(
     }
     let client = LlmClient::new(&cfg.inference);
     let connect_to = Duration::from_secs(cfg.inference.tts_timeout_secs);
-    let voice = personas.read().await.active().tts_voice.clone();
-    match client.synth_pcm_stream(&text, &voice, connect_to).await {
+    let (voice, speed) = {
+        let reg = personas.read().await;
+        let p = reg.active();
+        (p.tts_voice.clone(), p.tts_speed)
+    };
+    match client.synth_pcm_stream(&text, &voice, speed, connect_to).await {
         Ok(stream) => {
             futures_util::pin_mut!(stream);
             let _ = display_tx
@@ -88,10 +92,11 @@ pub async fn synth_into_display(
     client: &LlmClient,
     text: &str,
     voice: &str,
+    speed: Option<f32>,
     display_tx: &mpsc::Sender<Command>,
     connect_to: Duration,
 ) -> anyhow::Result<usize> {
-    let stream = client.synth_pcm_stream(text, voice, connect_to).await?;
+    let stream = client.synth_pcm_stream(text, voice, speed, connect_to).await?;
     futures_util::pin_mut!(stream);
     let mut total = 0usize;
     while let Some(chunk) = stream.next().await {

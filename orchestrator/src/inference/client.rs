@@ -67,14 +67,19 @@ impl LlmClient {
         &self,
         text: &str,
         voice: &str,
+        speed: Option<f32>,
         connect_timeout: Duration,
     ) -> Result<impl Stream<Item = Result<Bytes>>> {
-        let body = json!({
+        let mut body = json!({
             "model": self.tts_model,
             "voice": voice,
             "input": text,
             "response_format": "pcm",
         });
+        // Per-persona speaking rate (Kokoro supports 0.5–2.0; omit = 1.0).
+        if let Some(sp) = speed {
+            body["speed"] = json!(sp);
+        }
         let send_once = || async {
             let req = self.build(reqwest::Method::POST, "/audio/speech").json(&body);
             tokio::time::timeout(connect_timeout, req.send())

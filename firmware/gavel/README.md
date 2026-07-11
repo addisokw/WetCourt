@@ -93,6 +93,6 @@ strike (`STRIKE < REST < RAISE`); flip if mirrored. Dwells are clamped to
 - **No servo presence detection**: direct PWM can't tell whether a servo is
   attached or powered (the old 8-Servos board could be probed on I2C), so
   `GAVEL`/`GJOG` always ack `OK` — watch the mech, not just the ack.
-- **Servo motion not yet verified on hardware** (the adapter cable doesn't
-  exist yet); the board itself is commissioned — flashed, on WiFi, OTA-updated
-  by name, acks verified over the wire.
+- **Verified on hardware** (2026-07-11): servo motion confirmed on the bench;
+  the board is commissioned — flashed, on WiFi, OTA-updated by name, acks
+  verified over the wire.

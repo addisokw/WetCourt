@@ -79,12 +79,11 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | `AUDIO <level>` | judge-face | Live mic envelope, `0.0`–`1.0`; stream at ~20–30 Hz while `listening` (drives pupil dilation). Acked like any command. |
 | `PERSONA <name>` | judge-face | Switch the judge's visual persona (see vocab). |
 | `PANEL <pattern>` | judge-face | *Legacy* face animation (see vocab); kept while the host migrates to `FACE`. |
-| `LIGHTS <state>` | *(deferred — no owner)* | Booth lighting. Not currently driven by any device; may return later. |
+| `LIGHTS <state>` | *(retired)* | Booth lighting never got a device owner; the orchestrator no longer emits it. Reintroduce verb + emissions together with a splash-lights device. |
 | `PING` | any | Keepalive; acknowledged with `OK PING`, like any other command. |
 
 ### Vocabularies
 
-- `LIGHTS <state>`: `splash_idle` · `splash_arming` · `guilty` · `not_guilty`
 - `FACE <phase>`: `idle` · `listening` · `deliberating` · `verdict:guilty` ·
   `verdict:innocent`
 - `PERSONA <name>`: `honorable` · `magistrate` · `cosmic` · `nullpointer` ·
@@ -93,8 +92,8 @@ Every command is acknowledged (see Acks). `<...>` are required args.
   maps these onto `FACE` phases: `idle`→`idle`, `thinking`→`deliberating`,
   `verdict`→`verdict:guilty`.
 
-`LIGHTS`/`PANEL` mirror the orchestrator's `LightState` / `PanelPattern` —
-extend in both places together. The trial FSM now drives the face through
+`PANEL` mirrors the orchestrator's `PanelPattern` — extend in both places
+together. The trial FSM now drives the face through
 `FACE` (listening/deliberating on the trial edges, `verdict:*` at the reveal)
 and syncs `PERSONA` on selection + face reconnect; `PANEL` remains only as the
 console's legacy test verb. `AUDIO` is spec'd but not emitted — pupil dilation

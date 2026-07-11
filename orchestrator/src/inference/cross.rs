@@ -75,7 +75,8 @@ pub async fn real(
             let question = strip_markers(&out.question).trim().to_string();
             if question.is_empty() {
                 warn!("cross-exam question empty after stripping; skipping cross-exam");
-                let _ = event_tx.send(Event::CrossQuestionFailed("empty question".into())).await;
+                tracing::warn!("cross question came back empty; skipping cross-exam");
+                let _ = event_tx.send(Event::CrossQuestionFailed).await;
             } else {
                 info!(question = %question, "cross-exam question ready");
                 let _ = event_tx.send(Event::CrossQuestionReady(question)).await;
@@ -83,7 +84,7 @@ pub async fn real(
         }
         Err(e) => {
             warn!("cross-exam question generation failed: {e:#}; skipping cross-exam");
-            let _ = event_tx.send(Event::CrossQuestionFailed(e.to_string())).await;
+            let _ = event_tx.send(Event::CrossQuestionFailed).await;
         }
     }
 }

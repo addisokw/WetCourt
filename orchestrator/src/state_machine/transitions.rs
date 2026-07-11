@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::fallbacks;
-use crate::hardware::protocol::{FacePhase, HardwareCommand, LightState};
+use crate::hardware::protocol::{FacePhase, HardwareCommand};
 
 use super::commands::{Command, TargetingCue};
 use super::events::Event;
@@ -45,7 +45,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             vec![
                 Command::Display(DisplayEvent::Reset),
                 Command::Display(DisplayEvent::Idle),
-                Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
                 Command::Hardware(HardwareCommand::Face(FacePhase::Idle)),
             ],
         );
@@ -90,9 +89,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             } else {
                 (GeneratingCharge { started_at }, vec![])
             }
-        }
-        (GeneratingCharge { .. }, ChargeFailed(_)) => {
-            begin_displaying_charge(fallbacks::charges::random(), cfg)
         }
         (s @ GeneratingCharge { .. }, _) => (s, vec![]),
 
@@ -149,7 +145,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         {
             begin_flushing_plea(charge, cfg)
         }
-        (AwaitingPlea { charge, .. }, PleaTimeout) => begin_flushing_plea(charge, cfg),
         (s @ AwaitingPlea { .. }, _) => (s, vec![]),
 
         // Frontend is racing to ship its recorded blob after the deadline; take
@@ -191,7 +186,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                 (CrossGeneratingQuestion { charge, plea, started_at }, vec![])
             }
         }
-        (CrossGeneratingQuestion { charge, plea, .. }, CrossQuestionFailed(_)) => {
+        (CrossGeneratingQuestion { charge, plea, .. }, CrossQuestionFailed) => {
             begin_deliberating(charge, plea, None, cfg)
         }
         (s @ CrossGeneratingQuestion { .. }, _) => (s, vec![]),
@@ -262,9 +257,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         ) if Instant::now() >= deadline => {
             begin_cross_flushing(charge, plea, question)
         }
-        (CrossAwaitingAnswer { charge, plea, question, .. }, PleaTimeout) => {
-            begin_cross_flushing(charge, plea, question)
-        }
         (s @ CrossAwaitingAnswer { .. }, _) => (s, vec![]),
 
         (CrossFlushingAnswer { charge, plea, question, .. }, PleaAudioReceived(audio)) => {
@@ -303,9 +295,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                 (Deliberating { started_at, charge, plea }, vec![])
             }
         }
-        (Deliberating { .. }, VerdictFailed(_)) => {
-            begin_pronouncing(fallbacks::verdicts::random(cfg.trial.guilty_bias))
-        }
         (s @ Deliberating { .. }, _) => (s, vec![]),
 
         (PronouncingVerdict { verdict, .. }, TtsFinished) => begin_executing_sentence(verdict, cfg),
@@ -331,7 +320,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                         phase: "executing_sentence".into(),
                         deadline_ms: cfg.trial.cooldown_secs * 1000,
                     }),
-                    Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
                     // The face keeps its verdict phase (guilty strobe / innocent
                     // bloom) through the cooldown; it resets on the Idle edge.
                 ],
@@ -348,10 +336,6 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         }
         (s @ ExecutingSentence { .. }, _) => (s, vec![]),
 
-        (Error { until, .. }, Tick) if Instant::now() >= until => {
-            (Idle, vec![Command::Display(DisplayEvent::Idle)])
-        }
-        (s @ Error { .. }, _) => (s, vec![]),
     }
 }
 
@@ -388,7 +372,6 @@ fn begin_awaiting_plea(charge: String, cfg: &Config) -> (State, Vec<Command>) {
                 phase: "awaiting_plea".into(),
                 deadline_ms: cfg.trial.plea_window_secs * 1000,
             }),
-            Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
             Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
         ],
     )
@@ -519,7 +502,6 @@ fn begin_cross_answer(charge: String, plea: String, question: String, cfg: &Conf
                 phase: "cross_answer".into(),
                 deadline_ms: window * 1000,
             }),
-            Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
             Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
         ],
     )
@@ -595,7 +577,6 @@ fn begin_executing_sentence(verdict: Verdict, cfg: &Config) -> (State, Vec<Comma
 fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {
     let mut cmds = vec![Command::Display(DisplayEvent::ExecuteSentence { guilty: v.guilty })];
     if v.guilty {
-        cmds.push(Command::Hardware(HardwareCommand::Lights(LightState::Guilty)));
         // Freeze the aim before firing (when trial-targeting): the turret holds
         // where vision locked it, so the shot lands on the defendant. Ordered
         // before Fire — dispatched sequentially. The hardware adapter still
@@ -605,10 +586,7 @@ fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {
             cmds.push(Command::Targeting(TargetingCue::Freeze));
         }
         cmds.push(Command::Hardware(HardwareCommand::Fire(cfg.squirt.duration_ms)));
-        cmds.push(Command::Display(DisplayEvent::PlayCue { name: "organ_guilty".into() }));
     } else {
-        cmds.push(Command::Hardware(HardwareCommand::Lights(LightState::NotGuilty)));
-        cmds.push(Command::Display(DisplayEvent::PlayCue { name: "choir_acquittal".into() }));
         cmds.push(Command::Hardware(HardwareCommand::Ping)); // synthetic ack source
     }
     cmds
@@ -624,12 +602,12 @@ mod tests {
             inference: InferenceConfig {
                 mode: "mock".into(),
                 base_url: "x".into(), chat_model: "x".into(), stt_model: "x".into(),
-                tts_model: "x".into(), tts_voice: "x".into(),
+                tts_model: "x".into(),
                 charge_timeout_secs: 10, verdict_first_token_timeout_secs: 15,
                 verdict_total_timeout_secs: 30, stt_timeout_secs: 5, tts_timeout_secs: 10,
                 enable_thinking: false, api_key: None,
             },
-            hardware: HardwareConfig { driver: "mock".into(), serial_port: "x".into(), baud: 0, ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into() },
+            hardware: HardwareConfig { driver: "mock".into(), ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into() },
             mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
             mock_inference: MockInferenceConfig::default(),
             squirt: SquirtConfig { duration_ms: 150 },

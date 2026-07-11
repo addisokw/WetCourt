@@ -37,7 +37,6 @@ pub fn build(cfg: &HardwareConfig, mock_cfg: &MockHwConfig) -> Box<dyn HardwareD
     match cfg.driver.as_str() {
         "mock" => Box::new(mock::MockDriver::new(mock_cfg.clone())),
         "tcp" => Box::new(tcp::TcpRegistry::new(cfg.bind_addr.clone(), cfg.ack_timeout_ms)),
-        "serial" => unimplemented!("serial driver lands in Phase 4"),
-        other => panic!("unknown hardware.driver: {other}"),
+        other => panic!("unknown hardware.driver: {other} (expected \"mock\" or \"tcp\")"),
     }
 }

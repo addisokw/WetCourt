@@ -11,6 +11,7 @@ import {
   fireHeldReason,
   pleaFallbackReason,
   clockPausedMs,
+  serverError,
   log,
   phaseDeadlineAt,
   phaseDeadlineLabel,
@@ -142,6 +143,11 @@ export default function App() {
         <div class="plea-fallback-banner">
           <span class="dot" /> No plea captured — {pleaFallbackReason()}. The defendant is being
           judged as offering no defense; E-Stop to retry the trial.
+        </div>
+      </Show>
+      <Show when={serverError()}>
+        <div class="fire-held-banner">
+          <span class="dot" /> {serverError()}
         </div>
       </Show>
       <Show when={currentState() === 'superseded'}>

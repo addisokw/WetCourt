@@ -209,7 +209,6 @@ pub struct InferenceConfig {
     pub chat_model: String,
     pub stt_model: String,
     pub tts_model: String,
-    pub tts_voice: String,
     pub charge_timeout_secs: u64,
     pub verdict_first_token_timeout_secs: u64,
     pub verdict_total_timeout_secs: u64,
@@ -223,8 +222,6 @@ pub struct InferenceConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct HardwareConfig {
     pub driver: String,         // "mock" | "tcp" | "serial"
-    pub serial_port: String,
-    pub baud: u32,
     pub ack_timeout_ms: u64,
     /// Where to listen for the MCU's TCP connection when driver = "tcp".
     #[serde(default = "default_bind_addr")]

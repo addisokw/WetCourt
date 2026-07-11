@@ -129,6 +129,7 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/persona/{id}/save", post(save_persona))
         .route("/operator/persona/{id}/test", post(test_persona))
         .route("/operator/crimes", get(list_crimes).post(add_crime))
+        .route("/operator/crimes/reload", post(reload_crimes))
         .route("/operator/crimes/filter", post(set_crime_filter))
         .route("/operator/crimes/queue", post(queue_charge))
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
@@ -584,12 +585,10 @@ struct AimMsg {
     /// build that omits it reads as not-ok — fail-safe.
     #[serde(default)]
     fire_ok: bool,
-    /// On-target flag (informational; `fire_ok` already subsumes lock). Accepted
-    /// for forward-compat with the vision aim body; not gated on directly.
-    #[serde(default)]
-    #[allow(dead_code)]
-    locked: bool,
 }
+
+// (vision also posts a `locked` flag; serde ignores unknown fields — `fire_ok`
+// subsumes it.)
 
 async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) -> StatusCode {
     // Record the safety verdict on every frame, even while disarmed, so the
@@ -1075,7 +1074,6 @@ async fn handle_client_text(text: &str, state: &AppState) {
             let _ = state.event_tx.send(Event::PleaAudioReceived(audio)).await;
         }
         Ok(ClientEvent::PleaAudioChunk) => {} // header before binary frame; nothing to do
-        Ok(ClientEvent::CueFinished { name }) => debug!(cue = %name, "cue_finished"),
         Err(e) => warn!("bad client message: {e} — payload: {text}"),
     }
 }
@@ -1194,11 +1192,42 @@ async fn send_face_persona(s: &AppState, slug: String) {
         .await;
 }
 
+/// Best-effort voice validation against the live TTS backend: a tiny synth
+/// probe at persona save time, so a voice that has drifted out of the Kokoro
+/// deployment fails the edit with a clear 400 instead of 500ing mid-verdict.
+/// An unreachable/slow backend accepts with a warning (offline editing works);
+/// mock mode skips entirely.
+async fn validate_voice(cfg: &InferenceConfig, voice: &str) -> Result<(), String> {
+    if cfg.mode != "real" {
+        return Ok(());
+    }
+    let client = LlmClient::new(cfg);
+    match client.synth_pcm_stream("ok", voice, None, Duration::from_secs(4)).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let msg = format!("{e:#}");
+            // Only a definite backend rejection blocks the save; anything that
+            // smells like "backend down/slow" must not break persona editing.
+            let looks_like_rejection =
+                msg.contains("400") || msg.to_ascii_lowercase().contains("voice");
+            if looks_like_rejection {
+                Err(format!("voice '{voice}' rejected by the TTS backend: {msg}"))
+            } else {
+                warn!("voice probe inconclusive (accepting '{voice}'): {msg}");
+                Ok(())
+            }
+        }
+    }
+}
+
 async fn update_persona(
     AxumState(s): AxumState<AppState>,
     Path(id): Path<String>,
     Json(body): Json<Persona>,
 ) -> impl IntoResponse {
+    if let Err(msg) = validate_voice(&s.inference_cfg, &body.tts_voice).await {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
     let mut reg = s.personas.write().await;
     if !reg.get(&id).is_some() {
         return (StatusCode::NOT_FOUND, format!("unknown persona '{id}'")).into_response();
@@ -1239,6 +1268,9 @@ async fn create_persona(
     AxumState(s): AxumState<AppState>,
     Json(body): Json<Persona>,
 ) -> impl IntoResponse {
+    if let Err(msg) = validate_voice(&s.inference_cfg, &body.tts_voice).await {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
     let mut reg = s.personas.write().await;
     if reg.get(&body.id).is_some() {
         return (StatusCode::CONFLICT, format!("id '{}' already exists", body.id)).into_response();
@@ -1322,6 +1354,21 @@ async fn crimes_snapshot(s: &AppState) -> CrimesResp {
         categories: store.categories(),
         category_filter: store.category_filter().map(str::to_string),
         queue: store.queue().map(str::to_string).collect(),
+    }
+}
+
+/// Re-read the crimes file from disk (picks up out-of-process crimes-editor
+/// edits without a booth restart). Preserves the operator queue / filter /
+/// no-repeat history.
+async fn reload_crimes(AxumState(s): AxumState<AppState>) -> Response {
+    let mut store = s.crimes.write().await;
+    match store.reload() {
+        Ok(()) => {
+            let n = store.list().len();
+            info!(count = n, "crimes reloaded from disk");
+            (StatusCode::OK, Json(serde_json::json!({ "count": n }))).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, format!("reload failed: {e:#}")).into_response(),
     }
 }
 

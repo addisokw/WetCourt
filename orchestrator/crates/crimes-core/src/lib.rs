@@ -106,6 +106,16 @@ impl CrimeStore {
         })
     }
 
+    /// Re-read the crimes file in place (the crimes-editor writes it from a
+    /// separate process). Replaces the crime list + header; live operator
+    /// state — queue, category filter, no-repeat history — is preserved.
+    pub fn reload(&mut self) -> Result<()> {
+        let fresh = Self::load_from_file(&self.path, self.no_repeat_window)?;
+        self.crimes = fresh.crimes;
+        self.header = fresh.header;
+        Ok(())
+    }
+
     pub fn save(&self) -> Result<()> {
         let file = CrimesFile {
             exhibit: self.header.0.clone(),

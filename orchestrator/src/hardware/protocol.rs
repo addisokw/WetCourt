@@ -1,24 +1,6 @@
 use std::fmt;
 
 #[derive(Debug, Clone)]
-pub enum LightState {
-    SplashIdle,
-    SplashArming,
-    Guilty,
-    NotGuilty,
-}
-impl fmt::Display for LightState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            LightState::SplashIdle => "splash_idle",
-            LightState::SplashArming => "splash_arming",
-            LightState::Guilty => "guilty",
-            LightState::NotGuilty => "not_guilty",
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
 pub enum PanelPattern {
     Idle,
     Thinking,
@@ -94,7 +76,6 @@ pub enum HardwareCommand {
     /// catchlight can counter-move (specular parallax). Same `AIM` verb on the
     /// wire; degrees because the face has no servo calibration to invert.
     FaceAim { pan: f32, tilt: f32 },
-    Lights(LightState),
     Panel(PanelPattern),
     /// Set the LED-matrix eye phase — the trial's face choreography.
     Face(FacePhase),
@@ -124,7 +105,6 @@ impl HardwareCommand {
             HardwareCommand::GavelJog(us) => format!("GJOG {us}"),
             HardwareCommand::Aim { pan, tilt } => format!("AIM {pan} {tilt}"),
             HardwareCommand::FaceAim { pan, tilt } => format!("AIM {pan:.1} {tilt:.1}"),
-            HardwareCommand::Lights(s) => format!("LIGHTS {s}"),
             HardwareCommand::Panel(p) => format!("PANEL {p}"),
             HardwareCommand::Face(p) => format!("FACE {p}"),
             HardwareCommand::Persona(slug) => format!("PERSONA {slug}"),

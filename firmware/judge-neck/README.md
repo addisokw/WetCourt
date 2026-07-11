@@ -67,7 +67,5 @@ the eye's catchlight parallax — nothing this board needs to do about it.
 
 ## Status
 
-Logic is stub-tested host-side (dispatch, clamping, ack shapes); **not yet
-verified on a physical NanoC6 + servo board** — deploy with `./deploy.sh`
-and check the LED goes red → amber → green, then `AIM 1500 1500` from the
-maintenance console.
+Logic is stub-tested host-side (dispatch, clamping, ack shapes) and
+**verified on a physical NanoC6 + servo board** (2026-07-11).

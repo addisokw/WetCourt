@@ -64,10 +64,10 @@ pub async fn real(
     // don't apply by design.
     // The guilty_bias slider is injected into the prompt here (not baked into
     // the persona text) so it is the sole knob governing conviction rate.
-    let (system_prompt, voice, guilty_bias) = {
+    let (system_prompt, voice, speed, guilty_bias) = {
         let reg = personas.read().await;
         let p = reg.active();
-        (reg.verdict_prompt(p), p.tts_voice.clone(), p.guilty_bias as f64)
+        (reg.verdict_prompt(p), p.tts_voice.clone(), p.tts_speed, p.guilty_bias as f64)
     };
 
     let client = LlmClient::new(&cfg.inference);
@@ -154,7 +154,7 @@ pub async fn real(
     // 1) Speak the deliberation body.
     let t1 = Instant::now();
     info!(text = %truncate(&speakable, 120), "tts segment 1 (deliberation) start");
-    let n1 = synth_body(&client, &speakable, &voice, &display_tx, tts_connect_to).await;
+    let n1 = synth_body(&client, &speakable, &voice, speed, &display_tx, tts_connect_to).await;
     info!(bytes = n1, "tts segment 1 (deliberation) bytes");
     play_through(t1, n1).await;
 
@@ -162,7 +162,7 @@ pub async fn real(
     let preamble = "The court finds the defendant...";
     let t2 = Instant::now();
     info!(text = preamble, "tts segment 2 (preamble) start");
-    let n2 = synth_body(&client, preamble, &voice, &display_tx, tts_connect_to).await;
+    let n2 = synth_body(&client, preamble, &voice, speed, &display_tx, tts_connect_to).await;
     info!(bytes = n2, "tts segment 2 (preamble) bytes");
     play_through(t2, n2).await;
 
@@ -195,7 +195,7 @@ pub async fn real(
 
     let t3 = Instant::now();
     info!(text = verdict_word, "tts segment 3 (verdict word) start");
-    let n3 = synth_body(&client, verdict_word, &voice, &display_tx, tts_connect_to).await;
+    let n3 = synth_body(&client, verdict_word, &voice, speed, &display_tx, tts_connect_to).await;
     info!(bytes = n3, "tts segment 3 (verdict word) bytes");
 
     // Close the single audio session. Browser fires tts_finished once after
@@ -220,13 +220,14 @@ async fn synth_body(
     client: &LlmClient,
     text: &str,
     voice: &str,
+    speed: Option<f32>,
     display_tx: &mpsc::Sender<Command>,
     connect_to: Duration,
 ) -> usize {
     if text.is_empty() {
         return 0;
     }
-    match synth_into_display(client, text, voice, display_tx, connect_to).await {
+    match synth_into_display(client, text, voice, speed, display_tx, connect_to).await {
         Ok(n) => n,
         Err(e) => { warn!("tts segment failed: {e:#}"); 0 }
     }

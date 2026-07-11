@@ -55,8 +55,7 @@ LED: red = no WiFi · amber = dialing · green = connected) is the shared
    afterwards `python3 ../micropython/otapush.py <role>.local` updates over WiFi,
    no cable (see [`../micropython/`](../micropython/README.md)).
 
-> The MicroPython port is not yet verified on hardware (the Arduino version
-> was); logic is stub-tested host-side.
+> Verified on hardware (2026-07-11) — MicroPython port confirmed on the bench.
 
 ## Bring-up
 

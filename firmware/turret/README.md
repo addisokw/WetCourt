@@ -69,6 +69,5 @@ red = no WiFi · amber = dialing · green = connected) is the shared
 
 - **No AIM slew** yet: the firmware sets the target pulse directly. If the mech
   slams on large moves, add a stepped slew in `handle_aim()`.
-- **MicroPython port not yet verified on hardware** — the Arduino version was;
-  logic is stub-tested host-side. First bench session: `./deploy.sh`, check the
-  LED goes red → amber → green, re-run the turret panel bring-up.
+- **Verified on hardware** (2026-07-11) — MicroPython port confirmed on the
+  bench (the Arduino version was verified earlier).

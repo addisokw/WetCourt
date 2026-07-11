@@ -9,6 +9,7 @@ import {
   deleteCrime,
   fetchCrimes,
   queueCharge,
+  reloadCrimes,
   setCrimeFilter,
   unqueueCharge,
   updateCrime,
@@ -86,6 +87,17 @@ export default function CrimesPanel() {
       </button>
       <Show when={open()}>
         <div class="panel-body">
+          {/* The crimes-editor writes the file from its own process; the booth
+              reads it at startup — this picks up show-day edits live. */}
+          <div class="field">
+            <div class="row-line">
+              <button onClick={() => run('reload', () => reloadCrimes().then(() => undefined))}>
+                Reload crimes from disk
+              </button>
+              <span class="muted small">picks up crimes-editor changes without a restart</span>
+            </div>
+          </div>
+
           {/* Manual charge queue — next trial uses these before any draw */}
           <div class="field">
             <label>queue a charge for the next trial</label>

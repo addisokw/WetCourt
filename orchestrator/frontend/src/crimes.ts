@@ -86,6 +86,15 @@ export async function deleteCrime(id: number): Promise<void> {
   await fetchCrimes();
 }
 
+/** Re-read the crimes file on the server (crimes-editor edits) and refresh. */
+export async function reloadCrimes(): Promise<number> {
+  const res = await fetch('/operator/crimes/reload', { method: 'POST' });
+  if (!res.ok) throw new Error(await res.text());
+  const body = (await res.json()) as { count: number };
+  await fetchCrimes();
+  return body.count;
+}
+
 export async function setCrimeFilter(category: string | null): Promise<void> {
   const res = await fetch('/operator/crimes/filter', {
     method: 'POST',

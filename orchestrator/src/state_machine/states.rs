@@ -79,7 +79,6 @@ pub enum State {
     /// lost — the only thing standing between a dead TTS task and a wedged trial.
     PronouncingVerdict { verdict: Verdict, watchdog_at: Instant },
     ExecutingSentence { verdict: Verdict, deadline: Instant, hardware_done: bool },
-    Error { message: String, until: Instant },
 }
 
 impl State {
@@ -100,7 +99,6 @@ impl State {
             State::Deliberating { .. } => "deliberating",
             State::PronouncingVerdict { .. } => "pronouncing_verdict",
             State::ExecutingSentence { .. } => "executing_sentence",
-            State::Error { .. } => "error",
         }
     }
 }

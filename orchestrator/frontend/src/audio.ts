@@ -28,6 +28,12 @@ let sessionStartPending = false;
 // sample and produce bursts of white noise at chunk seams).
 let pcmResidue: number | null = null;
 
+/** Drop any half-carried PCM byte — called on trial reset so a session aborted
+ * mid-frame (e-stop) can't misalign the next session's first samples. */
+export function resetPcmResidue() {
+  pcmResidue = null;
+}
+
 function ensureCtx(): AudioContext {
   if (!playCtx) {
     playCtx = new AudioContext({ sampleRate: TTS_SAMPLE_RATE });

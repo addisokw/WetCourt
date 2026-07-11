@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
+import { enqueuePcmFrame, endTtsSession, resetPcmResidue, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
 import { onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 import { applyRobotParamsToGraph } from './robotParams';
@@ -58,6 +58,9 @@ export const [crossAnswerWindow, setCrossAnswerWindow] = createSignal<boolean>(f
 // consultation (0 = not paused). Set by clock_paused, cleared by the next
 // phase_deadline (resume) or reset.
 export const [clockPausedMs, setClockPausedMs] = createSignal<number>(0);
+// Server-side problem report (printer not ready, print failed, …) — operator
+// banner; cleared when the next trial starts.
+export const [serverError, setServerError] = createSignal<string>('');
 
 // TTS robot/glitch effect state now lives in robotSettings.ts (local to this
 // browser's audio; seeded into the graph at startup via index.tsx).
@@ -181,6 +184,8 @@ function handleEvent(ev: DisplayEvent) {
       setPleaFallbackReason('');
       setCrossAnswerWindow(false);
       setClockPausedMs(0);
+      setServerError('');
+      resetPcmResidue(); // e-stop can abort a TTS session mid-frame
       if (theaterActive()) {
         setTheaterActive(false);
         if (audioEnabled()) stopTheater();
@@ -299,6 +304,9 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'plea_fallback':
       setPleaFallbackReason(String(ev.reason ?? 'transcription unavailable'));
+      break;
+    case 'error':
+      setServerError(String(ev.message ?? 'unknown problem'));
       break;
     case 'device_connected':
       onDeviceConnected(String(ev.role ?? ''), String(ev.addr ?? ''));

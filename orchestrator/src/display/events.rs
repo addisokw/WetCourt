@@ -74,7 +74,6 @@ pub enum DisplayEvent {
     DeliberationComplete,
     Verdict { guilty: bool, remarks: String, #[serde(skip_serializing_if = "Option::is_none")] key_factor: Option<String> },
     ExecuteSentence { guilty: bool },
-    PlayCue { name: String },
     /// A device announced itself (`HELLO <role>`) and was accepted; surfaced to
     /// the maintenance console so its tab enables.
     DeviceConnected { role: String, addr: String },
@@ -102,7 +101,8 @@ pub enum DisplayEvent {
         saturation: f32,
         peak_hz: f32,
     },
-    #[allow(dead_code)]
+    /// Operator-facing problem banner (e.g. printer not ready / print failed).
+    /// The show goes on; this is "something needs a human" feedback.
     Error { message: String },
 }
 
@@ -114,5 +114,4 @@ pub enum ClientEvent {
     PleaAudioChunk,
     PleaAudioComplete,
     TtsFinished,
-    CueFinished { name: String },
 }

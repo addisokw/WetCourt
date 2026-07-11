@@ -26,10 +26,6 @@ impl Casebook {
         Self { path: path.as_ref().to_path_buf() }
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// Append one completed trial as a single JSON line. The file (and any
     /// missing parent dirs) is created on first write.
     pub fn record(&self, rec: &TrialRecord) -> Result<()> {

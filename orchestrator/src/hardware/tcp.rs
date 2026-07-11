@@ -198,7 +198,6 @@ async fn router(
                     }
                     // Deferred verb (Lights): no owner, and never the sole ack source on
                     // a gating path — skip silently so it can't steal FIRE-ack timing.
-                    RouteTarget::Skip => info!("registry: skipping deferred '{line}'"),
                 }
             },
 
@@ -249,8 +248,6 @@ enum RouteTarget {
     Role(Role),
     /// Ack locally without touching a device (trial `Ping` filler).
     SynthAck,
-    /// Deferred/ownerless verb: drop with no event.
-    Skip,
 }
 
 fn role_for(cmd: &HardwareCommand) -> RouteTarget {
@@ -271,7 +268,6 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         HardwareCommand::Face(_) | HardwareCommand::Persona(_) => {
             RouteTarget::Role(Role::JudgeFace)
         }
-        HardwareCommand::Lights(_) => RouteTarget::Skip,
         HardwareCommand::Ping => RouteTarget::SynthAck,
     }
 }

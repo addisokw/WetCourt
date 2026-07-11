@@ -5,9 +5,8 @@
 mode = "real"
 base_url = "http://litellm:4000"
 chat_model = "qwen3.6-35b-a3b"
-stt_model = "whisper-1"
+stt_model = "whisper-1"     # LiteLLM route name; resolves to Parakeet on the Spark
 tts_model = "kokoro-tts"
-tts_voice = "bm_george"
 charge_timeout_secs = 10
 verdict_first_token_timeout_secs = 15
 verdict_total_timeout_secs = 30
@@ -17,8 +16,6 @@ enable_thinking = false
 
 [hardware]
 driver = "tcp"
-serial_port = "/dev/ttyUSB0"
-baud = 115200
 ack_timeout_ms = 3000
 # MCU dials the orchestrator over WiFi using the line protocol from §5.2.
 bind_addr = "0.0.0.0:8090"

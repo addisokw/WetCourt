@@ -113,14 +113,16 @@ async fn main() -> Result<()> {
         next_case = casebook.next_case_no(),
         "casebook ready"
     );
-    let print_tx = printer::service::spawn(cfg.printer.clone());
     // The state machine needs its own persona handle; `personas` is moved into
     // AppState below.
     let personas_for_sm = personas.clone();
 
     // Display broadcast (ws fan-out) — defined before the hardware driver so the
-    // driver can publish device-presence events (DeviceConnected/Disconnected).
+    // driver can publish device-presence events (DeviceConnected/Disconnected),
+    // and before the printer service so it can raise operator Error banners.
     let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
+
+    let print_tx = printer::service::spawn(cfg.printer.clone(), display_bcast.clone());
 
     // Maintenance direct-control sink + shared device-presence snapshot. The
     // hardware driver consumes `maint_cmd_rx` and keeps `devices` in sync as

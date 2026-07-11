@@ -11,24 +11,22 @@ pub enum Event {
     ExitMaintenance,
 
     ChargeReady(String),
-    #[allow(dead_code)]
-    ChargeFailed(String),
     PleaAudioReceived(Vec<u8>),
     PleaRecordingStarted,
-    PleaTimeout,
     TranscriptReady(String),
     /// STT errored (distinct from a silent defendant) — the FSM falls back to
     /// "[no defense offered]" AND raises the operator PleaFallback banner.
     TranscriptFailed(String),
     CrossQuestionReady(String),
-    #[allow(dead_code)]
-    CrossQuestionFailed(String),
+    /// Question generation failed/empty (logged at the source) — cross-exam is
+    /// skipped and the trial proceeds straight to deliberation.
+    CrossQuestionFailed,
     VerdictReady(Verdict),
-    #[allow(dead_code)]
-    VerdictFailed(String),
     TtsFinished,
-    HardwareAck(String),
-    HardwareError(String),
+    /// Payload is the raw ack/err line off the wire — nothing branches on it,
+    /// but it shows up in event debugging; kept deliberately.
+    HardwareAck(#[allow(dead_code)] String),
+    HardwareError(#[allow(dead_code)] String),
 
     /// The defendant picked up the lawyer phone (a counsel call went live).
     /// Pauses the plea / cross-answer countdown while they consult.
