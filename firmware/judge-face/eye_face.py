@@ -208,8 +208,29 @@ class EyeFace:
         if gy != self._iris.y:
             self._iris.y = gy
 
-        # 2. Pupil dilation (brief §3.2): 3 + a*4.5 px, quantized to 1 px.
-        dil = min(8, max(3, int(3.0 + a * 4.5 + 0.5)))
+        # 2. Pupil dilation (brief §3.2 + integration-plan item 7): every phase
+        #    has its own dilation pattern so the pupil reads as alive all the
+        #    time, not only while audio flows. All patterns ride the persona-
+        #    speed-scaled clock, so each judge breathes at their own tempo.
+        if phase == "idle":
+            # Slow breathing oscillation, 3..5 px.
+            dil_f = 3.0 + (0.5 + 0.5 * math.sin(t * 0.8 + self._seed)) * 2.0
+        elif phase == "listening":
+            # Brief dilation "reactions" at irregular intervals — the judge
+            # visibly responds to the plea — plus the live audio envelope
+            # when the host streams one (whichever is stronger wins).
+            r = snoise(t * 0.55, self._seed * 0.13 + 9.1)
+            react = max(0.0, r - 0.62) / 0.38
+            dil_f = 3.0 + max(a * 4.5, react * 3.5)
+        elif deliberating:
+            # Quicker, irregular wandering (3..7 px) — thinking hard.
+            dil_f = 3.0 + snoise(t * 1.9, self._seed * 0.31 + 2.4) * 4.0
+        elif phase == "verdict:guilty":
+            dil_f = 8.0                     # sharp full dilation for the strobe
+        else:                               # verdict:innocent
+            # Full dilation settling back as the green bloom eases (~2 s).
+            dil_f = 8.0 - min(1.0, self._phase_elapsed / 2.0) * 4.0
+        dil = min(8, max(3, int(dil_f + 0.5)))
         if dil != self._dil:
             self._dil = dil
             self._redraw_pupil()

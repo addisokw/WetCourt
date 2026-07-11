@@ -28,8 +28,12 @@ const EMPTY: Persona = {
   guilty_bias: 0.5,
   tts_voice: 'af_heart',
   tts_speed: null,
+  face_persona: 'honorable',
   robot: { ...ROBOT_DEFAULTS },
 };
+
+// LED-matrix eye themes the judge-face firmware ships (personas.py ORDER).
+const FACE_PERSONAS = ['honorable', 'magistrate', 'cosmic', 'nullpointer', 'petunia'];
 
 export default function PersonaPanel() {
   const [open, setOpen] = createSignal(false);
@@ -293,6 +297,16 @@ export default function PersonaPanel() {
               </select>
             </Show>
             <Show when={errors().tts_voice}><span class="err">{errors().tts_voice}</span></Show>
+          </div>
+
+          <div class="field">
+            <label>LED eye theme <span class="muted">(judge-face matrix persona)</span></label>
+            <select
+              value={form().face_persona}
+              onChange={(e) => patch('face_persona', e.currentTarget.value)}
+            >
+              <For each={FACE_PERSONAS}>{(t) => <option value={t}>{t}</option>}</For>
+            </select>
           </div>
 
           <div class="field inline">

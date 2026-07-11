@@ -86,24 +86,35 @@ impl TargetingController {
         });
     }
 
-    /// Command the turret back to its calibrated center, detached.
+    /// Command the turret — and the judge's head, which mirrors the vision aim
+    /// during trials — back to calibrated center, detached.
     fn spawn_recenter(&self) {
         let calibration = self.calibration.clone();
         let tx = self.maint_cmd_tx.clone();
         tokio::spawn(async move {
-            let raw = {
-                let reg = calibration.read().await;
-                reg.get(Role::Turret.as_str()).and_then(|c| c.aim_to_raw(0.0, 0.0).ok())
-            };
-            if let Some((pan, tilt)) = raw {
-                let _ = tx
-                    .send(MaintenanceCommand {
-                        target: Role::Turret,
-                        cmd: HardwareCommand::Aim { pan, tilt },
-                        reply: None,
-                    })
-                    .await;
+            for role in [Role::Turret, Role::JudgeNeck] {
+                let raw = {
+                    let reg = calibration.read().await;
+                    reg.get(role.as_str()).and_then(|c| c.aim_to_raw(0.0, 0.0).ok())
+                };
+                if let Some((pan, tilt)) = raw {
+                    let _ = tx
+                        .send(MaintenanceCommand {
+                            target: role,
+                            cmd: HardwareCommand::Aim { pan, tilt },
+                            reply: None,
+                        })
+                        .await;
+                }
             }
+            // Reset the eye's catchlight parallax with the neck.
+            let _ = tx
+                .send(MaintenanceCommand {
+                    target: Role::JudgeFace,
+                    cmd: HardwareCommand::FaceAim { pan: 0.0, tilt: 0.0 },
+                    reply: None,
+                })
+                .await;
         });
     }
 }

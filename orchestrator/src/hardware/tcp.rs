@@ -268,6 +268,9 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         | HardwareCommand::GavelStrike { .. }
         | HardwareCommand::GavelJog(_) => RouteTarget::Role(Role::Gavel),
         HardwareCommand::Panel(_) => RouteTarget::Role(Role::JudgeFace),
+        HardwareCommand::Face(_) | HardwareCommand::Persona(_) => {
+            RouteTarget::Role(Role::JudgeFace)
+        }
         HardwareCommand::Lights(_) => RouteTarget::Skip,
         HardwareCommand::Ping => RouteTarget::SynthAck,
     }

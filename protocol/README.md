@@ -94,9 +94,11 @@ Every command is acknowledged (see Acks). `<...>` are required args.
   `verdict`→`verdict:guilty`.
 
 `LIGHTS`/`PANEL` mirror the orchestrator's `LightState` / `PanelPattern` —
-extend in both places together. `FACE`/`AUDIO`/`PERSONA` are spec'd
-firmware-first (the judge-face CircuitPython eye implements them); the
-orchestrator still emits only `PANEL` today and should migrate to `FACE`.
+extend in both places together. The trial FSM now drives the face through
+`FACE` (listening/deliberating on the trial edges, `verdict:*` at the reveal)
+and syncs `PERSONA` on selection + face reconnect; `PANEL` remains only as the
+console's legacy test verb. `AUDIO` is spec'd but not emitted — pupil dilation
+runs on firmware-side per-phase patterns instead (integration-plan item 7).
 
 ## Acks (device → host)
 

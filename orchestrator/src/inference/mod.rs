@@ -5,6 +5,7 @@ use tracing::warn;
 
 use crate::config::Config;
 use crate::crimes::CrimeStore;
+use crate::hardware::maintenance::MaintenanceCommand;
 use crate::personas::PersonaRegistry;
 use crate::state_machine::{Command, Event};
 
@@ -22,6 +23,10 @@ pub async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
+    // For the verdict service's LED-face reveal (FACE verdict:* at the same
+    // beat as the Verdict display event) — bypasses the FSM like its other
+    // reveal choreography.
+    maint_cmd_tx: mpsc::Sender<MaintenanceCommand>,
 ) {
     let mode = cfg.inference.mode.as_str();
     if mode != "real" && mode != "mock" {
@@ -54,8 +59,9 @@ pub async fn run(
                 });
             }
             Command::Deliberate { charge: c, plea, cross } => {
+                let maint_cmd_tx = maint_cmd_tx.clone();
                 tokio::spawn(async move {
-                    if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx).await }
+                    if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx, maint_cmd_tx).await }
                     else    { verdict::mock(cfg, c, plea, cross, event_tx).await }
                 });
             }

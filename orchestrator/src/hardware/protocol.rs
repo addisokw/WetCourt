@@ -35,6 +35,34 @@ impl fmt::Display for PanelPattern {
     }
 }
 
+/// Eye phase for the LED-matrix judge face (`FACE <phase>` on the wire — the
+/// firmware's native vocabulary, superseding the legacy `PANEL` patterns).
+/// Matches `firmware/judge-face/eye_face.py` PHASES.
+#[derive(Debug, Clone)]
+pub enum FacePhase {
+    Idle,
+    Listening,
+    Deliberating,
+    VerdictGuilty,
+    VerdictInnocent,
+}
+impl fmt::Display for FacePhase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            FacePhase::Idle => "idle",
+            FacePhase::Listening => "listening",
+            FacePhase::Deliberating => "deliberating",
+            FacePhase::VerdictGuilty => "verdict:guilty",
+            FacePhase::VerdictInnocent => "verdict:innocent",
+        })
+    }
+}
+impl FacePhase {
+    pub fn verdict(guilty: bool) -> Self {
+        if guilty { FacePhase::VerdictGuilty } else { FacePhase::VerdictInnocent }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum HardwareCommand {
     Fire(u32),
@@ -68,6 +96,12 @@ pub enum HardwareCommand {
     FaceAim { pan: f32, tilt: f32 },
     Lights(LightState),
     Panel(PanelPattern),
+    /// Set the LED-matrix eye phase — the trial's face choreography.
+    Face(FacePhase),
+    /// Switch the LED-matrix eye's persona theme (an eye-theme slug from
+    /// `firmware/judge-face/personas.py`, carried by the orchestrator persona's
+    /// `face_persona` field — not the orchestrator persona id).
+    Persona(String),
     Ping,
 }
 
@@ -92,6 +126,8 @@ impl HardwareCommand {
             HardwareCommand::FaceAim { pan, tilt } => format!("AIM {pan:.1} {tilt:.1}"),
             HardwareCommand::Lights(s) => format!("LIGHTS {s}"),
             HardwareCommand::Panel(p) => format!("PANEL {p}"),
+            HardwareCommand::Face(p) => format!("FACE {p}"),
+            HardwareCommand::Persona(slug) => format!("PERSONA {slug}"),
             HardwareCommand::Ping => "PING".into(),
         }
     }
@@ -124,5 +160,20 @@ mod tests {
     #[test]
     fn bare_gavel_is_unqualified() {
         assert_eq!(HardwareCommand::Gavel.to_line(), "GAVEL");
+    }
+
+    #[test]
+    fn face_phases_use_firmware_vocabulary() {
+        assert_eq!(HardwareCommand::Face(FacePhase::Listening).to_line(), "FACE listening");
+        assert_eq!(HardwareCommand::Face(FacePhase::verdict(true)).to_line(), "FACE verdict:guilty");
+        assert_eq!(
+            HardwareCommand::Face(FacePhase::verdict(false)).to_line(),
+            "FACE verdict:innocent"
+        );
+    }
+
+    #[test]
+    fn persona_serialises_slug() {
+        assert_eq!(HardwareCommand::Persona("cosmic".into()).to_line(), "PERSONA cosmic");
     }
 }

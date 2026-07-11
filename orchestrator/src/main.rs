@@ -117,6 +117,19 @@ async fn main() -> Result<()> {
     // AppState below.
     let personas_for_sm = personas.clone();
 
+    // Display broadcast (ws fan-out) — defined before the hardware driver so the
+    // driver can publish device-presence events (DeviceConnected/Disconnected).
+    let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
+
+    // Maintenance direct-control sink + shared device-presence snapshot. The
+    // hardware driver consumes `maint_cmd_rx` and keeps `devices` in sync as
+    // devices connect/disconnect (the mock driver seeds all roles present).
+    // (Created before the inference task: the verdict service uses it for the
+    // LED-face reveal.)
+    let (maint_cmd_tx, maint_cmd_rx) =
+        mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
+    let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+
     // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
     // still mocked. Set [inference] mode = "mock" for offline dev.
     {
@@ -125,21 +138,45 @@ async fn main() -> Result<()> {
         let crimes = crimes.clone();
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
+        let maint_cmd_tx = maint_cmd_tx.clone();
         tokio::spawn(async move {
-            inference::run(cfg, personas, crimes, inference_rx, event_tx, display_tx).await;
+            inference::run(cfg, personas, crimes, inference_rx, event_tx, display_tx, maint_cmd_tx)
+                .await;
         });
     }
 
-    // Display broadcast (ws fan-out) — defined before the hardware driver so the
-    // driver can publish device-presence events (DeviceConnected/Disconnected).
-    let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
-
-    // Maintenance direct-control sink + shared device-presence snapshot. The
-    // hardware driver consumes `maint_cmd_rx` and keeps `devices` in sync as
-    // devices connect/disconnect (the mock driver seeds all roles present).
-    let (maint_cmd_tx, maint_cmd_rx) =
-        mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
-    let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+    // Judge-face persona sync: whenever the face (re)connects, push the active
+    // persona's eye theme so the panel stops free-running its demo rotation and
+    // matches the presiding judge. (Mock driver seeds DeviceConnected for every
+    // role at startup, so this also covers boot.) Live persona *switches* are
+    // pushed by the /operator/persona select/update handlers.
+    {
+        let personas = personas.clone();
+        let tx = maint_cmd_tx.clone();
+        let mut presence = display_bcast.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match presence.recv().await {
+                    Ok(DisplayMessage::Json(display::events::DisplayEvent::DeviceConnected {
+                        role,
+                        ..
+                    })) if role == "judge_face" => {
+                        let slug = personas.read().await.active().face_persona.clone();
+                        let _ = tx
+                            .send(hardware::maintenance::MaintenanceCommand {
+                                target: hardware::maintenance::Role::JudgeFace,
+                                cmd: hardware::HardwareCommand::Persona(slug),
+                                reply: None,
+                            })
+                            .await;
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
 
     // Vision targeting arm switch + lock fire gate, shared between the HTTP
     // layer (AppState) and the hardware adapter below. `targeting_armed` gates

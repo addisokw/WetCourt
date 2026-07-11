@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::fallbacks;
-use crate::hardware::protocol::{HardwareCommand, LightState, PanelPattern};
+use crate::hardware::protocol::{FacePhase, HardwareCommand, LightState};
 
 use super::commands::{Command, TargetingCue};
 use super::events::Event;
@@ -46,7 +46,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                 Command::Display(DisplayEvent::Reset),
                 Command::Display(DisplayEvent::Idle),
                 Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
-                Command::Hardware(HardwareCommand::Panel(PanelPattern::Idle)),
+                Command::Hardware(HardwareCommand::Face(FacePhase::Idle)),
             ],
         );
     }
@@ -61,7 +61,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                     phase: "generating_charge".into(),
                     deadline_ms: cfg.inference.charge_timeout_secs * 1000,
                 }),
-                Command::Hardware(HardwareCommand::Panel(PanelPattern::Thinking)),
+                Command::Hardware(HardwareCommand::Face(FacePhase::Deliberating)),
             ],
         ),
         // Enter the maintenance/test plane — only from Idle. The atomic mirror
@@ -109,6 +109,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                         deadline_ms: cfg.trial.plea_window_secs * 1000,
                     }),
                     Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
+                    Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
                 ],
             )
         }
@@ -277,12 +278,19 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                         deadline_ms: cfg.trial.cooldown_secs * 1000,
                     }),
                     Command::Hardware(HardwareCommand::Lights(LightState::SplashIdle)),
-                    Command::Hardware(HardwareCommand::Panel(PanelPattern::Idle)),
+                    // The face keeps its verdict phase (guilty strobe / innocent
+                    // bloom) through the cooldown; it resets on the Idle edge.
                 ],
             )
         }
         (ExecutingSentence { deadline, .. }, Tick) if Instant::now() >= deadline => {
-            (Idle, vec![Command::Display(DisplayEvent::Idle)])
+            (
+                Idle,
+                vec![
+                    Command::Display(DisplayEvent::Idle),
+                    Command::Hardware(HardwareCommand::Face(FacePhase::Idle)),
+                ],
+            )
         }
         (s @ ExecutingSentence { .. }, _) => (s, vec![]),
 
@@ -318,6 +326,7 @@ fn begin_transcribing(charge: String, audio: Vec<u8>, cfg: &Config) -> (State, V
                 phase: "transcribing".into(),
                 deadline_ms: cfg.inference.stt_timeout_secs * 1000,
             }),
+            Command::Hardware(HardwareCommand::Face(FacePhase::Deliberating)),
             Command::Transcribe(audio),
         ],
     )
@@ -380,7 +389,7 @@ fn begin_cross(charge: String, plea: String, cfg: &Config) -> (State, Vec<Comman
                 phase: "cross_examining".into(),
                 deadline_ms: cfg.cross_examination.question_timeout_secs * 1000,
             }),
-            Command::Hardware(HardwareCommand::Panel(PanelPattern::Thinking)),
+            Command::Hardware(HardwareCommand::Face(FacePhase::Deliberating)),
         ],
     )
 }
@@ -407,6 +416,7 @@ fn begin_cross_answer(charge: String, plea: String, question: String, cfg: &Conf
                 deadline_ms: window * 1000,
             }),
             Command::Hardware(HardwareCommand::Lights(LightState::SplashArming)),
+            Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
         ],
     )
 }
@@ -435,6 +445,7 @@ fn begin_cross_transcribing(
                 phase: "transcribing".into(),
                 deadline_ms: cfg.inference.stt_timeout_secs * 1000,
             }),
+            Command::Hardware(HardwareCommand::Face(FacePhase::Deliberating)),
             Command::Transcribe(audio),
         ],
     )
@@ -454,6 +465,11 @@ fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
             key_factor: v.key_factor.clone(),
         }));
         cmds.push(Command::Speak(v.deliberation.clone()));
+        // Fallback path reveals immediately, so the eye flips with it. On the
+        // pre_announced path the verdict service sends FACE itself at its
+        // reveal moment (after the theater beat) — flipping the eye here would
+        // spoil the verdict a whole deliberation early.
+        cmds.push(Command::Hardware(HardwareCommand::Face(FacePhase::verdict(v.guilty))));
     }
     cmds.push(Command::Hardware(HardwareCommand::Gavel));
     let watchdog_at = Instant::now() + pronounce_watchdog(&v.deliberation);
@@ -623,6 +639,35 @@ mod tests {
             assert_eq!(c, charge);
             assert_eq!(plea, "i did not");
         } else { panic!("not deliberating"); }
+    }
+
+    #[test]
+    fn fallback_verdict_flips_the_face_immediately_but_preannounced_does_not() {
+        let cfg = test_cfg();
+        // Fallback path (pre_announced=false): reveal is immediate, face flips.
+        let (_s, cmds) = step(
+            State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() },
+            Event::VerdictReady(guilty_verdict(true)),
+            &cfg,
+            false,
+        );
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Hardware(HardwareCommand::Face(FacePhase::VerdictGuilty))
+        )));
+        // Pre-announced path: the verdict service owns the reveal moment — the
+        // FSM must NOT flip the face at VerdictReady (it would spoil the verdict).
+        let mut v = guilty_verdict(true);
+        v.pre_announced = true;
+        let (_s, cmds) = step(
+            State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() },
+            Event::VerdictReady(v),
+            &cfg,
+            false,
+        );
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Face(_)))));
     }
 
     #[test]

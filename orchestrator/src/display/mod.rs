@@ -579,6 +579,34 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
             })
             .await;
     }
+    // Judge-neck mirror: while vision is driving the turret, the judge's head
+    // tracks the same target — it visibly *looks at* the defendant during the
+    // pre-verdict lock-on — and the eye's catchlight counter-moves via the
+    // FaceAim fan-out (same pairing as the maintenance AIM handler). The neck
+    // calibration clamps to its own softer limits; absent devices just drop.
+    let neck = {
+        let reg = s.calibration.read().await;
+        reg.get(Role::JudgeNeck.as_str())
+            .and_then(|c| c.aim_to_raw(aim.pan, aim.tilt).ok())
+    };
+    if let Some((pan, tilt)) = neck {
+        let _ = s
+            .maint_cmd_tx
+            .send(MaintenanceCommand {
+                target: Role::JudgeNeck,
+                cmd: HardwareCommand::Aim { pan, tilt },
+                reply: None,
+            })
+            .await;
+        let _ = s
+            .maint_cmd_tx
+            .send(MaintenanceCommand {
+                target: Role::JudgeFace,
+                cmd: HardwareCommand::FaceAim { pan: aim.pan, tilt: aim.tilt },
+                reply: None,
+            })
+            .await;
+    }
     StatusCode::NO_CONTENT
 }
 
@@ -1010,12 +1038,28 @@ async fn select_persona(
     match reg.set_active(&id) {
         Ok(()) => {
             let ev = robot_params_event(reg.active());
+            let face = reg.active().face_persona.clone();
             drop(reg);
             let _ = s.display_bcast.send(DisplayMessage::Json(ev));
+            send_face_persona(&s, face).await;
             (StatusCode::NO_CONTENT, String::new()).into_response()
         }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
+}
+
+/// Push an eye-theme switch to the LED-matrix judge face. Fire-and-forget —
+/// an absent face just drops it (it re-syncs on reconnect via the
+/// DeviceConnected watcher in main).
+async fn send_face_persona(s: &AppState, slug: String) {
+    let _ = s
+        .maint_cmd_tx
+        .send(MaintenanceCommand {
+            target: Role::JudgeFace,
+            cmd: HardwareCommand::Persona(slug),
+            reply: None,
+        })
+        .await;
 }
 
 async fn update_persona(
@@ -1031,10 +1075,13 @@ async fn update_persona(
     match reg.update(&id, body.clone()) {
         Ok(()) => {
             let updated = reg.get(&id).unwrap().clone();
+            drop(reg);
             // If this is the live persona, push its (possibly retuned) robot
-            // params to audio clients so the change is heard immediately.
+            // params to audio clients so the change is heard immediately —
+            // and its (possibly re-themed) eye to the LED face.
             if is_active {
                 let _ = s.display_bcast.send(DisplayMessage::Json(robot_params_event(&updated)));
+                send_face_persona(&s, updated.face_persona.clone()).await;
             }
             (StatusCode::OK, Json(updated)).into_response()
         }

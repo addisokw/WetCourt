@@ -10,6 +10,8 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::fallbacks;
+use crate::hardware::maintenance::{MaintenanceCommand, Role};
+use crate::hardware::protocol::{FacePhase, HardwareCommand};
 use crate::personas::PersonaRegistry;
 use crate::state_machine::states::{CrossExam, Verdict};
 use crate::state_machine::{Command, Event};
@@ -47,6 +49,7 @@ fn build_user_msg(charge: &str, plea: &str, cross: &Option<CrossExam>) -> String
 /// synthesize the whole stripped body in a single Kokoro call so tone /
 /// prosody stays coherent across sentences. Trades ~2–4s of first-audio
 /// latency vs. the old per-sentence pipeline for a unified voice.
+#[allow(clippy::too_many_arguments)]
 pub async fn real(
     cfg: Arc<Config>,
     personas: Arc<RwLock<PersonaRegistry>>,
@@ -55,6 +58,7 @@ pub async fn real(
     cross: Option<CrossExam>,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
+    maint_cmd_tx: mpsc::Sender<MaintenanceCommand>,
 ) {
     // Snapshot the active persona once at trial start; mid-trial changes
     // don't apply by design.
@@ -162,15 +166,24 @@ pub async fn real(
     tokio::time::sleep(THEATER_BEAT).await;
     let _ = display_tx.send(Command::Display(DisplayEvent::TheaterEnd)).await;
 
-    // 4) Reveal: broadcast the Verdict display event NOW (face flips colour,
-    //    case view shows GUILTY/NOT GUILTY) right as the verdict-word TTS
-    //    starts playing.
+    // 4) Reveal: broadcast the Verdict display event NOW (case view shows
+    //    GUILTY/NOT GUILTY) right as the verdict-word TTS starts playing, and
+    //    flip the LED-matrix eye to its verdict phase at the same beat — the
+    //    guilty strobe / innocent bloom must land with the reveal, never at
+    //    VerdictReady (a whole deliberation earlier).
     let _ = display_tx
         .send(Command::Display(DisplayEvent::Verdict {
             guilty,
             remarks,
             key_factor,
         }))
+        .await;
+    let _ = maint_cmd_tx
+        .send(MaintenanceCommand {
+            target: Role::JudgeFace,
+            cmd: HardwareCommand::Face(FacePhase::verdict(guilty)),
+            reply: None, // fire-and-forget; the face may be absent
+        })
         .await;
 
     let t3 = Instant::now();

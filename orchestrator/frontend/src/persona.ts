@@ -8,6 +8,8 @@ export interface Persona {
   guilty_bias: number;
   tts_voice: string;
   tts_speed: number | null;
+  /** LED-matrix eye theme (judge-face firmware persona slug). */
+  face_persona: string;
   robot: RobotParams;
 }
 
@@ -93,7 +95,12 @@ export async function fetchActivePersona(): Promise<Persona> {
 // UI checks `=== null`. Coerce here so the rest of the code can rely on null.
 // Also backfill robot params defensively (the backend always sends them).
 function normalize(p: Persona): Persona {
-  return { ...p, tts_speed: p.tts_speed ?? null, robot: { ...ROBOT_DEFAULTS, ...(p.robot ?? {}) } };
+  return {
+    ...p,
+    tts_speed: p.tts_speed ?? null,
+    face_persona: p.face_persona ?? 'honorable',
+    robot: { ...ROBOT_DEFAULTS, ...(p.robot ?? {}) },
+  };
 }
 
 export async function selectPersona(id: string): Promise<void> {

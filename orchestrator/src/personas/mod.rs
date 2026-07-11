@@ -18,12 +18,28 @@ pub struct Persona {
     pub tts_voice: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tts_speed: Option<f32>,
+    /// LED-matrix eye theme for this judge — one of the slugs in
+    /// `firmware/judge-face/personas.py` (honorable, magistrate, cosmic,
+    /// nullpointer, petunia). Sent to the judge-face as `PERSONA <slug>` when
+    /// this persona becomes active and whenever the face (re)connects.
+    #[serde(default = "d_face_persona")]
+    pub face_persona: String,
     /// Robot-aesthetic TTS post-processing for this persona's voice. Applied
     /// client-side to the played audio; the host is the source of truth and
     /// pushes the active persona's params to the audio client (see the
     /// `robot_params` display event).
     #[serde(default)]
     pub robot: RobotParams,
+}
+
+/// Eye themes the judge-face firmware ships (its `personas.ORDER`). Kept in
+/// sync by hand; validation rejects anything else so a typo surfaces at load
+/// rather than as a silent `ERR PERSONA unknown_persona` on the wire.
+pub const FACE_PERSONAS: &[&str] =
+    &["honorable", "magistrate", "cosmic", "nullpointer", "petunia"];
+
+fn d_face_persona() -> String {
+    "honorable".into()
 }
 
 /// The robot voice-effect knobs (mirrors `frontend/src/robot.ts`). Per-persona
@@ -130,6 +146,13 @@ this number or admit that it guides you."
             if !(0.5..=2.0).contains(&s) {
                 bail!("tts_speed must be in [0.5, 2.0], got {s}");
             }
+        }
+        if !FACE_PERSONAS.contains(&self.face_persona.as_str()) {
+            bail!(
+                "face_persona '{}' is not a judge-face eye theme (one of: {})",
+                self.face_persona,
+                FACE_PERSONAS.join(", ")
+            );
         }
         self.robot.validate()?;
         Ok(())
@@ -283,8 +306,18 @@ mod tests {
             guilty_bias: 0.5,
             tts_voice: "bm_george".into(),
             tts_speed: None,
+            face_persona: d_face_persona(),
             robot: RobotParams::default(),
         }
+    }
+
+    #[test]
+    fn validate_rejects_unknown_face_persona() {
+        let mut p = ok_persona("face_test");
+        p.face_persona = "petunia".into();
+        assert!(p.validate().is_ok());
+        p.face_persona = "sauron".into();
+        assert!(p.validate().is_err());
     }
 
     #[test]
