@@ -5,6 +5,30 @@ use serde::{Deserialize, Serialize};
 pub enum DisplayEvent {
     Reset,
     Idle,
+    /// Connect-time resync: the full current trial view-state, sent as the
+    /// first event on every `/ws` and `/ws/view` connection so a client that
+    /// (re)connects mid-trial renders the live phase instead of stale idle.
+    /// Verdict fields are withheld until `executing_sentence` — during
+    /// `pronouncing_verdict` the reveal may not have happened yet.
+    Snapshot {
+        phase: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        charge: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        plea: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cross_question: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        verdict_guilty: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        verdict_remarks: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        verdict_key_factor: Option<String>,
+        /// Remaining ms of the current window (plea/answer/sentence hold).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        deadline_ms: Option<u64>,
+        maintenance: bool,
+    },
     ShowCharge { text: String },
     /// "next binary frame is audio in this format" — emitted before each chunk
     /// so frontend knows how to decode. May appear multiple times per utterance

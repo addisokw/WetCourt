@@ -110,6 +110,7 @@ Everything is served on `:8080` (`display.listen_addr`):
 |---|---|---|
 | `/` | Operator console: state banner, Start/Plea/E-Stop, turret-feed + case-view preview panes, event log, persona panel | Operator |
 | `/case` | Standalone case view: charge, plea countdown, transcript, verdict | Visitor-facing monitor |
+| `/case?audio=1` | Case view that is also the booth's speakers: plays TTS + theater pad (newest audio viewer wins; launch the kiosk with `--autoplay-policy=no-user-gesture-required`) | Booth kiosk |
 
 Keyboard on the console: **Space** starts a trial, **P** starts/stops plea
 recording (browser asks for mic permission on first use). Plea audio is
@@ -117,7 +118,10 @@ captured with MediaRecorder and uploaded over the WS as binary.
 
 The console uses the single-client `/ws` socket (read+write); `/case` uses
 the multi-client read-only `/ws/view`, so you can mirror it on as many
-monitors as you like. During the verdict reveal the frontend runs a
+monitors as you like. Every connection starts with a `snapshot` event carrying
+the live trial state, so mid-trial (re)connects resync instead of showing
+idle. Exactly one `?audio=1` viewer receives the PCM stream (the newest one);
+the plea microphone remains the operator console's. During the verdict reveal the frontend runs a
 "deliberation theater" beat — an ambient synth pad and dimmed visuals over a
 held silence before the guilty/not-guilty word lands.
 

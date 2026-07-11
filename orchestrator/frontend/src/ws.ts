@@ -85,9 +85,15 @@ function pushLog(entry: LogEntry) {
 }
 
 let readOnly = false;
+// Set when this read-only view opted in as the booth's speakers (?audio=1 on
+// /ws/view): it receives + plays the PCM stream like the operator console.
+let audioView = false;
+// Whether THIS client should produce sound (operator console, or audio view).
+const audioEnabled = () => !readOnly || audioView;
 
-export function connect(opts: { readOnly?: boolean } = {}) {
+export function connect(opts: { readOnly?: boolean; audio?: boolean } = {}) {
   readOnly = !!opts.readOnly;
+  audioView = !!opts.audio;
   // Tear down any prior socket so we don't accumulate listeners. Without this,
   // a Vite HMR reload or accidental double-mount stacks multiple live sockets
   // — every broadcast event then fires its handler N times, and signals like
@@ -104,7 +110,7 @@ export function connect(opts: { readOnly?: boolean } = {}) {
     }
     socket = null;
   }
-  const path = readOnly ? '/ws/view' : '/ws';
+  const path = readOnly ? `/ws/view${audioView ? '?audio=1' : ''}` : '/ws';
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
   socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
@@ -144,7 +150,7 @@ export function connect(opts: { readOnly?: boolean } = {}) {
       return;
     }
     setCurrentState('reconnecting');
-    setTimeout(() => connect({ readOnly }), reconnectDelay);
+    setTimeout(() => connect({ readOnly, audio: audioView }), reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 8000);
   };
 
@@ -172,10 +178,42 @@ function handleEvent(ev: DisplayEvent) {
       setCrossAnswerWindow(false);
       if (theaterActive()) {
         setTheaterActive(false);
-        if (!readOnly) stopTheater();
+        if (audioEnabled()) stopTheater();
       }
       nextBinaryIsAudio = false;
       break;
+    // Connect-time resync: the server's first event on every connection is
+    // the live trial view-state, so a mid-trial (re)connect renders the
+    // current phase instead of stale idle. Verdict fields only appear once
+    // the reveal has happened (executing_sentence).
+    case 'snapshot': {
+      const phase = String(ev.phase ?? 'idle');
+      const crossAnswer = phase === 'cross_answer';
+      setCurrentState(crossAnswer ? 'awaiting_plea' : phase);
+      setCrossAnswerWindow(crossAnswer);
+      setCharge(String(ev.charge ?? ''));
+      setPleaTranscript(String(ev.plea ?? ''));
+      setCrossQuestion(String(ev.cross_question ?? ''));
+      if (ev.verdict_guilty != null) {
+        setLastVerdictGuilty(Boolean(ev.verdict_guilty));
+        setVerdictRemarks(String(ev.verdict_remarks ?? ''));
+        setVerdictKeyFactor(String(ev.verdict_key_factor ?? ''));
+      } else {
+        setLastVerdictGuilty(null);
+      }
+      if (ev.deadline_ms != null) {
+        setPhaseDeadlineAt(Date.now() + Number(ev.deadline_ms));
+        setPhaseDeadlineLabel(phase);
+      } else {
+        setPhaseDeadlineAt(0);
+        setPhaseDeadlineLabel('');
+      }
+      setPleaWindowOpen(phase === 'awaiting_plea' || crossAnswer);
+      setPleaRecordingActive(false);
+      setMaintenanceActive(Boolean(ev.maintenance));
+      if (phase === 'idle') setDeliberation('');
+      break;
+    }
     case 'show_charge':
       setCharge(String(ev.text ?? ''));
       break;
@@ -188,11 +226,17 @@ function handleEvent(ev: DisplayEvent) {
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
       nextBinaryIsAudio = true;
-      if (!readOnly) startTtsSession();
+      if (audioEnabled()) startTtsSession();
       break;
     case 'tts_end':
       nextBinaryIsAudio = false;
-      if (!readOnly) endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
+      if (audioEnabled()) {
+        // Audio views drain the queue too, but only the operator reports
+        // tts_finished (the view socket ignores inbound anyway).
+        endTtsSession(() => {
+          if (!readOnly) socket?.send(JSON.stringify({ type: 'tts_finished' }));
+        });
+      }
       break;
     case 'deliberation_token':
       setDeliberation((prev) => prev + (ev.text as string));
@@ -216,11 +260,11 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'theater_start':
       setTheaterActive(true);
-      if (!readOnly) startTheater();
+      if (audioEnabled()) startTheater();
       break;
     case 'theater_end':
       setTheaterActive(false);
-      if (!readOnly) stopTheater();
+      if (audioEnabled()) stopTheater();
       break;
     case 'deliberation_complete':
       // No-op; deliberation buffer holds the full text.
@@ -316,7 +360,7 @@ export async function setCrossExam(enabled: boolean): Promise<void> {
 /// and the other goes dormant.
 export function reconnect() {
   reconnectDelay = 500;
-  connect({ readOnly });
+  connect({ readOnly, audio: audioView });
 }
 
 export async function startTrial() {

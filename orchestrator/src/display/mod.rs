@@ -5,7 +5,7 @@ use axum::{
     body::Body,
     extract::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
-        Path, State as AxumState,
+        Path, Query, State as AxumState,
     },
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -56,6 +56,9 @@ pub struct AppState {
     /// and supersedes the previous one (last-connection-wins), so a reconnect is
     /// never rejected by a stale session that hasn't cleaned up yet.
     pub ws_generation: Arc<AtomicUsize>,
+    /// Monotonic `/ws/view?audio=1` generation — the newest audio viewer is the
+    /// booth's speakers; older ones silently stop receiving PCM.
+    pub audio_generation: Arc<AtomicUsize>,
     /// Buffer for binary plea audio uploaded by the frontend across multiple
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
@@ -796,24 +799,47 @@ async fn ws_handler(
 }
 
 /// Read-only WebSocket for presentational monitors (the `/case` view).
-/// Subscribes to the display broadcast but forwards only JSON events (no PCM
-/// binary frames) and ignores anything the client sends. Doesn't participate
-/// in the single-client budget that `/ws` enforces, so multiple read-only
-/// viewers can connect simultaneously.
+/// Subscribes to the display broadcast and ignores anything the client sends.
+/// Doesn't participate in the single-client budget that `/ws` enforces, so
+/// multiple read-only viewers can connect simultaneously.
+///
+/// `?audio=1` opts a viewer in as the booth's speakers: it also receives the
+/// binary PCM frames (TTS audio). Exactly one audio viewer is live at a time —
+/// the newest one wins, older ones silently stop getting PCM (they keep the
+/// JSON stream; no close/reconnect churn on a kiosk).
 async fn view_ws_handler(
     ws: WebSocketUpgrade,
+    Query(q): Query<ViewWsParams>,
     AxumState(state): AxumState<AppState>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| view_ws_session(socket, state))
+    let audio_gen = q
+        .audio
+        .filter(|a| matches!(a.as_str(), "1" | "true" | "yes"))
+        .map(|_| state.audio_generation.fetch_add(1, Ordering::SeqCst) + 1);
+    ws.on_upgrade(move |socket| view_ws_session(socket, state, audio_gen))
 }
 
-async fn view_ws_session(mut socket: WebSocket, state: AppState) {
-    info!("view ws client connected");
+#[derive(Deserialize)]
+struct ViewWsParams {
+    #[serde(default)]
+    audio: Option<String>,
+}
+
+async fn view_ws_session(mut socket: WebSocket, state: AppState, audio_gen: Option<usize>) {
+    info!(audio = audio_gen.is_some(), "view ws client connected");
     let _ = socket
         .send(Message::Text(
-            serde_json::to_string(&DisplayEvent::Idle).unwrap().into(),
+            serde_json::to_string(&snapshot_event(&state)).unwrap().into(),
         ))
         .await;
+    // Seed the persona's robot voice params — needed by an ?audio=1 viewer to
+    // colour playback; harmless for the rest.
+    {
+        let ev = robot_params_event(state.personas.read().await.active());
+        let _ = socket
+            .send(Message::Text(serde_json::to_string(&ev).unwrap().into()))
+            .await;
+    }
     let mut bcast_rx = state.display_bcast.subscribe();
     loop {
         tokio::select! {
@@ -824,7 +850,14 @@ async fn view_ws_session(mut socket: WebSocket, state: AppState) {
                         break;
                     }
                 }
-                Ok(DisplayMessage::Binary(_)) => {} // read-only viewers don't need PCM
+                Ok(DisplayMessage::Binary(b)) => {
+                    // PCM goes only to the *current* audio viewer.
+                    let live = audio_gen
+                        .is_some_and(|g| state.audio_generation.load(Ordering::SeqCst) == g);
+                    if live && socket.send(Message::Binary(b.into())).await.is_err() {
+                        break;
+                    }
+                }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     warn!("view ws lagged {n} display messages");
                 }
@@ -838,6 +871,42 @@ async fn view_ws_session(mut socket: WebSocket, state: AppState) {
         }
     }
     info!("view ws client disconnected");
+}
+
+/// Connect-time resync event: the live trial view-state from the FSM's
+/// snapshot mirror, so any (re)connecting client renders the current phase
+/// instead of stale idle. Verdict fields are withheld while the phase is
+/// `pronouncing_verdict` — on the pipelined path that state begins a whole
+/// deliberation-TTS before the reveal, and a mid-trial reconnect must never
+/// flash GUILTY early. (By `executing_sentence` the reveal has happened.)
+fn snapshot_event(s: &AppState) -> DisplayEvent {
+    let snap = s
+        .trial_snapshot
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let revealed = snap.phase == "executing_sentence";
+    DisplayEvent::Snapshot {
+        phase: snap.phase.to_string(),
+        charge: snap.charge,
+        plea: snap.plea,
+        cross_question: snap.cross_question,
+        verdict_guilty: snap.verdict.as_ref().filter(|_| revealed).map(|v| v.guilty),
+        verdict_remarks: snap
+            .verdict
+            .as_ref()
+            .filter(|_| revealed)
+            .map(|v| v.remarks.clone()),
+        verdict_key_factor: snap
+            .verdict
+            .as_ref()
+            .filter(|_| revealed)
+            .and_then(|v| v.key_factor.clone()),
+        deadline_ms: snap
+            .deadline
+            .map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis() as u64),
+        maintenance: s.maintenance.load(Ordering::Relaxed),
+    }
 }
 
 /// The active persona's robot params as a display event (for connect-push and
@@ -856,7 +925,7 @@ async fn ws_session(mut socket: WebSocket, state: AppState, my_gen: usize) {
     info!("ws client connected");
     let _ = socket
         .send(Message::Text(
-            serde_json::to_string(&DisplayEvent::Idle).unwrap().into(),
+            serde_json::to_string(&snapshot_event(&state)).unwrap().into(),
         ))
         .await;
     // Seed this audio client with the active persona's robot params.

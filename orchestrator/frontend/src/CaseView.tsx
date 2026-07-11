@@ -1,4 +1,5 @@
 import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { resumeAudio } from './audio';
 import {
   charge,
   connect,
@@ -189,7 +190,14 @@ export function CaseContent() {
 
 export default function CaseView() {
   onMount(() => {
-    connect({ readOnly: true });
+    // /case?audio=1 makes this kiosk the booth's speakers: it receives and
+    // plays the TTS PCM + theater pad, decoupling show audio from the
+    // operator laptop. Launch the kiosk browser with
+    // --autoplay-policy=no-user-gesture-required (or click once) so the
+    // AudioContext may start.
+    const wantAudio = new URLSearchParams(location.search).has('audio');
+    connect({ readOnly: true, audio: wantAudio });
+    if (wantAudio) window.addEventListener('pointerdown', resumeAudio);
   });
   return (
     <div class={`case-view ${theaterActive() ? 'theater-active' : ''}`}>

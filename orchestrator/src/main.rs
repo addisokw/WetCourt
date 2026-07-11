@@ -331,6 +331,7 @@ async fn main() -> Result<()> {
         event_tx: event_tx.clone(),
         display_bcast: display_bcast.clone(),
         ws_generation: Arc::new(AtomicUsize::new(0)),
+        audio_generation: Arc::new(AtomicUsize::new(0)),
         plea_buffer: Arc::new(Mutex::new(Vec::new())),
         personas,
         crimes,

@@ -95,10 +95,13 @@ impl State {
     }
 }
 
-/// Read-only mirror of the trial for `GET /trial/state` — the lawyer-phone
-/// service polls it at call start so the AI lawyer knows the live charge.
-/// Derived from whatever the `State` variant happens to carry; fields the
-/// current phase doesn't know are simply absent.
+/// Read-only mirror of the trial, refreshed on every FSM transition. Serves
+/// two consumers: `GET /trial/state` (the lawyer-phone service polls it at
+/// call start so the AI lawyer knows the live charge) and the WebSocket
+/// connect-time `Snapshot` event (so a console or audience monitor that
+/// (re)connects mid-trial resyncs instead of showing stale idle). Derived from
+/// whatever the `State` variant happens to carry; fields the current phase
+/// doesn't know are simply absent.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TrialSnapshot {
     pub phase: &'static str,
@@ -107,43 +110,80 @@ pub struct TrialSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plea: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cross_question: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<VerdictSnapshot>,
+    /// Absolute deadline of the current window (plea/answer/sentence hold),
+    /// when the phase has one. Not serialized — the WS layer converts it to a
+    /// remaining-ms countdown at connect time.
+    #[serde(skip)]
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VerdictSnapshot {
     pub guilty: bool,
     pub remarks: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_factor: Option<String>,
 }
 
 impl From<&State> for TrialSnapshot {
     fn from(state: &State) -> Self {
         let phase = state.name();
-        let (charge, plea, verdict) = match state {
-            State::DisplayingCharge { charge, .. } => (Some(charge.clone()), None, None),
-            State::AwaitingPlea { charge, .. } | State::FlushingPlea { charge, .. } => {
-                (Some(charge.clone()), None, None)
+        let mut snap = TrialSnapshot { phase, ..Default::default() };
+        match state {
+            State::DisplayingCharge { charge, until, .. } => {
+                snap.charge = Some(charge.clone());
+                snap.deadline = Some(*until);
             }
-            State::Transcribing { charge, .. } => (Some(charge.clone()), None, None),
-            State::CrossGeneratingQuestion { charge, plea, .. }
-            | State::CrossSpeaking { charge, plea, .. }
-            | State::CrossAwaitingAnswer { charge, plea, .. }
-            | State::CrossFlushingAnswer { charge, plea, .. }
-            | State::CrossTranscribing { charge, plea, .. }
-            | State::Deliberating { charge, plea, .. } => {
-                (Some(charge.clone()), Some(plea.clone()), None)
+            State::AwaitingPlea { charge, deadline } => {
+                snap.charge = Some(charge.clone());
+                snap.deadline = Some(*deadline);
             }
-            State::PronouncingVerdict { verdict, .. }
-            | State::ExecutingSentence { verdict, .. } => (
-                None,
-                None,
-                Some(VerdictSnapshot {
-                    guilty: verdict.guilty,
-                    remarks: verdict.remarks.clone(),
-                }),
-            ),
-            _ => (None, None, None),
-        };
-        Self { phase, charge, plea, verdict }
+            State::FlushingPlea { charge, .. } | State::Transcribing { charge, .. } => {
+                snap.charge = Some(charge.clone());
+            }
+            State::CrossGeneratingQuestion { charge, plea, .. } => {
+                snap.charge = Some(charge.clone());
+                snap.plea = Some(plea.clone());
+            }
+            State::CrossSpeaking { charge, plea, question, .. } => {
+                snap.charge = Some(charge.clone());
+                snap.plea = Some(plea.clone());
+                snap.cross_question = Some(question.clone());
+            }
+            State::CrossAwaitingAnswer { charge, plea, question, deadline } => {
+                snap.charge = Some(charge.clone());
+                snap.plea = Some(plea.clone());
+                snap.cross_question = Some(question.clone());
+                snap.deadline = Some(*deadline);
+            }
+            State::CrossFlushingAnswer { charge, plea, question, .. }
+            | State::CrossTranscribing { charge, plea, question, .. } => {
+                snap.charge = Some(charge.clone());
+                snap.plea = Some(plea.clone());
+                snap.cross_question = Some(question.clone());
+            }
+            State::Deliberating { charge, plea, .. } => {
+                snap.charge = Some(charge.clone());
+                snap.plea = Some(plea.clone());
+            }
+            State::PronouncingVerdict { verdict, .. } => {
+                snap.verdict = Some(VerdictSnapshot::from(verdict));
+            }
+            State::ExecutingSentence { verdict, deadline, .. } => {
+                snap.verdict = Some(VerdictSnapshot::from(verdict));
+                snap.deadline = Some(*deadline);
+            }
+            _ => {}
+        }
+        snap
+    }
+}
+
+impl From<&Verdict> for VerdictSnapshot {
+    fn from(v: &Verdict) -> Self {
+        Self { guilty: v.guilty, remarks: v.remarks.clone(), key_factor: v.key_factor.clone() }
     }
 }
