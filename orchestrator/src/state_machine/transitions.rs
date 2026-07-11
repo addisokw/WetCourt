@@ -12,6 +12,29 @@ use super::states::{CrossExam, State, Verdict, NO_DEFENSE};
 /// Sentinel for an empty/unintelligible cross-examination answer.
 const NO_ANSWER: &str = "[no answer given]";
 
+/// Extra headroom the FSM gives the verdict service beyond its own stream
+/// budget (`verdict_total_timeout_secs`) before speaking a fallback. The two
+/// used to share the same value: when the FSM Tick won that race it spoke a
+/// fallback verdict while `verdict::real` was still streaming its own 3-segment
+/// TTS — two overlapping judge voices. The service's internal timeout always
+/// resolves first now; this Tick escape only fires if the service task died.
+const VERDICT_FALLBACK_GRACE_SECS: u64 = 10;
+
+/// Watchdog for `ExecutingSentence`: if no HardwareAck/Error arrives (e.g. MCU
+/// disconnected with the TCP driver), the Tick handler escapes to Idle. Sized
+/// for the full sentence sequence — lights + squirt burst + ack round-trips
+/// with headroom.
+const SENTENCE_WATCHDOG_SECS: u64 = 60;
+
+/// Escape hatch for `PronouncingVerdict`, sized to the spoken verdict: the
+/// deliberation body at a conservative TTS pace (~12 chars/sec) plus the
+/// preamble, theater beat, and margin. Normally `TtsFinished` (browser ack or
+/// the TTS self-ack timer) arrives long before this; it exists so a lost event
+/// can never wedge the trial.
+fn pronounce_watchdog(deliberation: &str) -> Duration {
+    Duration::from_secs(30 + deliberation.len() as u64 / 12)
+}
+
 pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (State, Vec<Command>) {
     use Event::*;
     use State::*;
@@ -218,7 +241,8 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
 
         (Deliberating { .. }, VerdictReady(v)) => begin_pronouncing(v),
         (Deliberating { started_at, charge, plea }, Tick) => {
-            if started_at.elapsed() > Duration::from_secs(cfg.inference.verdict_total_timeout_secs) {
+            let escape = cfg.inference.verdict_total_timeout_secs + VERDICT_FALLBACK_GRACE_SECS;
+            if started_at.elapsed() > Duration::from_secs(escape) {
                 begin_pronouncing(fallbacks::verdicts::random(cfg.trial.guilty_bias))
             } else {
                 (Deliberating { started_at, charge, plea }, vec![])
@@ -229,19 +253,12 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         }
         (s @ Deliberating { .. }, _) => (s, vec![]),
 
-        (PronouncingVerdict { verdict, .. }, TtsFinished) => {
-            let mut cmds = sentence_commands(&verdict, cfg);
-            // Watchdog: if no HardwareAck/Error arrives (e.g. MCU disconnected
-            // with the TCP driver), the Tick handler below escapes to Idle.
-            // Sized for the full sentence sequence — lights + chained squirt
-            // bursts at max intensity + ack round-trips with some headroom.
-            const SENTENCE_WATCHDOG_SECS: u64 = 60;
-            let deadline = Instant::now() + Duration::from_secs(SENTENCE_WATCHDOG_SECS);
-            cmds.push(Command::Display(DisplayEvent::PhaseDeadline {
-                phase: "executing_sentence".into(),
-                deadline_ms: SENTENCE_WATCHDOG_SECS * 1000,
-            }));
-            (ExecutingSentence { verdict, deadline, hardware_done: false }, cmds)
+        (PronouncingVerdict { verdict, .. }, TtsFinished) => begin_executing_sentence(verdict, cfg),
+        // Watchdog: TtsFinished normally arrives from the browser or the TTS
+        // self-ack timer, but if that task dies the trial must not wedge here —
+        // proceed to the sentence as if the audio had finished.
+        (PronouncingVerdict { verdict, watchdog_at }, Tick) if Instant::now() >= watchdog_at => {
+            begin_executing_sentence(verdict, cfg)
         }
         (s @ PronouncingVerdict { .. }, _) => (s, vec![]),
 
@@ -331,7 +348,8 @@ fn begin_deliberating(
         Command::Display(DisplayEvent::TranscriptReady { text: plea.clone() }),
         Command::Display(DisplayEvent::PhaseDeadline {
             phase: "deliberating".into(),
-            deadline_ms: cfg.inference.verdict_total_timeout_secs * 1000,
+            deadline_ms: (cfg.inference.verdict_total_timeout_secs + VERDICT_FALLBACK_GRACE_SECS)
+                * 1000,
         }),
     ];
     // Begin the turret's pre-verdict lock-on: arm as the judge deliberates so the
@@ -438,7 +456,20 @@ fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
         cmds.push(Command::Speak(v.deliberation.clone()));
     }
     cmds.push(Command::Hardware(HardwareCommand::Gavel));
-    (State::PronouncingVerdict { verdict: v, audio_done: false }, cmds)
+    let watchdog_at = Instant::now() + pronounce_watchdog(&v.deliberation);
+    (State::PronouncingVerdict { verdict: v, watchdog_at }, cmds)
+}
+
+/// The `PronouncingVerdict → ExecutingSentence` edge, shared by the normal
+/// `TtsFinished` path and the pronounce watchdog.
+fn begin_executing_sentence(verdict: Verdict, cfg: &Config) -> (State, Vec<Command>) {
+    let mut cmds = sentence_commands(&verdict, cfg);
+    let deadline = Instant::now() + Duration::from_secs(SENTENCE_WATCHDOG_SECS);
+    cmds.push(Command::Display(DisplayEvent::PhaseDeadline {
+        phase: "executing_sentence".into(),
+        deadline_ms: SENTENCE_WATCHDOG_SECS * 1000,
+    }));
+    (State::ExecutingSentence { verdict, deadline, hardware_done: false }, cmds)
 }
 
 fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {
@@ -446,8 +477,10 @@ fn sentence_commands(v: &Verdict, cfg: &Config) -> Vec<Command> {
     if v.guilty {
         cmds.push(Command::Hardware(HardwareCommand::Lights(LightState::Guilty)));
         // Freeze the aim before firing (when trial-targeting): the turret holds
-        // where vision locked it and the fire gate goes transparent, so the shot
-        // lands on the defendant. Ordered before Fire — dispatched sequentially.
+        // where vision locked it, so the shot lands on the defendant. Ordered
+        // before Fire — dispatched sequentially. The hardware adapter still
+        // holds the shot unless vision has a fresh lock (no lock, no fire), and
+        // rewrites the duration to the calibrated squirt fire_ms.
         if cfg.vision.trial_targeting {
             cmds.push(Command::Targeting(TargetingCue::Freeze));
         }
@@ -529,7 +562,7 @@ mod tests {
             .iter()
             .position(|c| matches!(c, Command::Hardware(HardwareCommand::Fire(_))))
             .expect("fire present");
-        assert!(freeze < fire, "freeze must precede fire so the gate is transparent");
+        assert!(freeze < fire, "freeze must precede fire so the gun holds its lock for the shot");
     }
 
     #[test]
@@ -590,6 +623,57 @@ mod tests {
             assert_eq!(c, charge);
             assert_eq!(plea, "i did not");
         } else { panic!("not deliberating"); }
+    }
+
+    #[test]
+    fn pronouncing_verdict_watchdog_escapes_to_sentence() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(
+            State::PronouncingVerdict {
+                verdict: guilty_verdict(false),
+                watchdog_at: Instant::now(),
+            },
+            Event::Tick,
+            &cfg,
+            false,
+        );
+        assert!(matches!(s, State::ExecutingSentence { .. }));
+        // The escape runs the full sentence edge, not a bare state swap.
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Display(DisplayEvent::ExecuteSentence { .. }))));
+    }
+
+    #[test]
+    fn pronouncing_verdict_holds_until_watchdog() {
+        let cfg = test_cfg();
+        let (s, _) = step(
+            State::PronouncingVerdict {
+                verdict: guilty_verdict(true),
+                watchdog_at: Instant::now() + Duration::from_secs(60),
+            },
+            Event::Tick,
+            &cfg,
+            false,
+        );
+        assert!(matches!(s, State::PronouncingVerdict { .. }));
+    }
+
+    #[test]
+    fn deliberating_fallback_waits_out_the_stream_budget() {
+        let cfg = test_cfg(); // verdict_total_timeout_secs = 30
+        let total = cfg.inference.verdict_total_timeout_secs;
+        // Just past the verdict service's own stream budget: the FSM must NOT
+        // speak a fallback yet — the service is still resolving (possibly mid-TTS).
+        let started_at = Instant::now() - Duration::from_secs(total + 1);
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at };
+        let (s, _) = step(s, Event::Tick, &cfg, false);
+        assert!(matches!(s, State::Deliberating { .. }));
+        // Past the grace too → fallback verdict.
+        let started_at = Instant::now() - Duration::from_secs(total + VERDICT_FALLBACK_GRACE_SECS + 1);
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at };
+        let (s, _) = step(s, Event::Tick, &cfg, false);
+        assert!(matches!(s, State::PronouncingVerdict { .. }));
     }
 
     #[test]

@@ -8,9 +8,11 @@
 //!
 //! The arm/disarm flag is set **synchronously** so it is ordered against the
 //! commands around it (notably: `Freeze` disarms before the guilty `Fire` is
-//! dispatched, so the gate is transparent for the shot). The slower bits — the
-//! best-effort vision POST and the turret recenter — are spawned fire-and-forget
-//! so a downed vision process can never stall the state-machine loop.
+//! dispatched, so the gun holds its lock instead of chasing new aim). The fire
+//! gate is independent of the arm flag — the shot still requires a fresh lock
+//! (see `hardware::gate`). The slower bits — the best-effort vision POST and
+//! the turret recenter — are spawned fire-and-forget so a downed vision process
+//! can never stall the state-machine loop.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -55,9 +57,11 @@ impl TargetingController {
                 debug!("targeting: acquire (armed, aim reset to center)");
             }
             TargetingCue::Freeze => {
-                // Disarm in place: vision stops driving the turret (it holds the aim
-                // it locked) and the fire gate goes transparent, so the guilty shot
-                // lands where the gun is pointed. Synchronous — ordered before Fire.
+                // Disarm in place: vision stops driving the turret, so the gun holds
+                // the aim it locked and the guilty shot lands there. Synchronous —
+                // ordered before Fire. The fire gate still requires a fresh lock
+                // (vision keeps posting fire_ok while tracking), so if there was no
+                // lock the shot is held rather than fired blind.
                 self.targeting_armed.store(false, Ordering::Relaxed);
                 debug!("targeting: freeze (disarmed in place)");
             }

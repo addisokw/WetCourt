@@ -127,7 +127,7 @@ export default function App() {
       </Show>
       <Show when={fireHeldReason()}>
         <div class="fire-held-banner">
-          <span class="dot" /> Shot held for safety — vision was armed without a fresh fire_ok
+          <span class="dot" /> Shot held for safety — no fresh target lock at sentencing
           ({fireHeldReason()}). The sentence advanced without firing.
         </div>
       </Show>

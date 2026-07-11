@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
-import { calibrations, fetchCalibrations, sendCommand } from '../maintenance';
+import { calibrations, fetchCalibrations, maintenanceActive, sendCommand } from '../maintenance';
 import { AckChip, useAck } from './common';
 import VisionFeed from './VisionFeed';
 
@@ -235,7 +235,16 @@ export default function VisionPanel() {
           <label>auto-fire</label>
           <Show
             when={autoFire()}
-            fallback={<button class="mini" onClick={() => void enableAutoFire(true)}>Enable</button>}
+            fallback={
+              <button
+                class="mini"
+                disabled={!maintenanceActive()}
+                title={maintenanceActive() ? undefined : 'requires maintenance mode'}
+                onClick={() => void enableAutoFire(true)}
+              >
+                Enable
+              </button>
+            }
           >
             <button class="mini active" onClick={() => void enableAutoFire(false)}>Disable</button>
           </Show>
@@ -251,7 +260,11 @@ export default function VisionPanel() {
             />
             s locked
           </label>
-          <span class="muted small">fires once each time the lock holds this long</span>
+          <span class="muted small">
+            {maintenanceActive()
+              ? 'fires once each time the lock holds this long'
+              : '🔒 tuning tool — enabling requires maintenance mode'}
+          </span>
         </div>
 
         <Show when={autoFire()}>

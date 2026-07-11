@@ -205,6 +205,13 @@ async fn maintenance_enter(AxumState(s): AxumState<AppState>) -> impl IntoRespon
 
 async fn maintenance_exit(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     info!("maintenance: exit");
+    // Auto-fire is a maintenance-only tuning tool — never let it stay latched
+    // into a live show. (Belt: the aim handler also refuses to act on it
+    // outside maintenance, which covers the e-stop exit path too.)
+    if s.auto_fire.enabled() {
+        s.auto_fire.set(Some(false), None);
+        info!("auto-fire disabled on maintenance exit");
+    }
     if s.event_tx.send(Event::ExitMaintenance).await.is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
     }
@@ -530,8 +537,12 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
     // Auto-fire: once the lock has held for the operator-set dwell (armed +
     // enabled), fire the squirt for its console-configured duration. The dwell
     // timing lives in `AutoFire` (frame-rate, server-side); we just act on the
-    // one-shot trip here.
-    if s.auto_fire.on_frame(armed, aim.fire_ok) {
+    // one-shot trip here. Maintenance-only: outside maintenance mode the frame
+    // is fed as disarmed so the dwell resets and auto-fire can never trip
+    // during a trial (the FSM arms targeting for the pre-verdict lock-on, and
+    // that arm must not be able to squirt anyone before a verdict).
+    let maint = s.maintenance.load(Ordering::Relaxed);
+    if s.auto_fire.on_frame(armed && maint, aim.fire_ok) {
         let fire_ms = {
             let reg = s.calibration.read().await;
             reg.get(Role::Squirt.as_str())
@@ -620,14 +631,19 @@ async fn get_auto_fire(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
 async fn set_auto_fire(
     AxumState(s): AxumState<AppState>,
     Json(body): Json<AutoFirePatch>,
-) -> impl IntoResponse {
+) -> Response {
+    // Enabling is gated on maintenance mode (a tuning tool, not a show
+    // feature); disabling and dwell edits are always allowed.
+    if body.enabled == Some(true) && !s.maintenance.load(Ordering::Relaxed) {
+        return (StatusCode::CONFLICT, "auto-fire requires maintenance mode").into_response();
+    }
     s.auto_fire.set(body.enabled, body.dwell_ms);
     info!(
         enabled = s.auto_fire.enabled(),
         dwell_ms = s.auto_fire.dwell_ms(),
         "vision auto-fire updated"
     );
-    StatusCode::NO_CONTENT
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Forward the operator's targeting-control POSTs (target part, boresight pixel)

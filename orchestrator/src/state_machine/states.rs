@@ -60,7 +60,10 @@ pub enum State {
     /// Transcribing the answer before deliberation.
     CrossTranscribing { charge: String, plea: String, question: String, audio: Vec<u8>, started_at: Instant },
     Deliberating { charge: String, plea: String, started_at: Instant },
-    PronouncingVerdict { verdict: Verdict, audio_done: bool },
+    /// Speaking the verdict. Advances on `TtsFinished` (from the browser or the
+    /// TTS self-ack timer); `watchdog_at` is the escape hatch if that event is
+    /// lost — the only thing standing between a dead TTS task and a wedged trial.
+    PronouncingVerdict { verdict: Verdict, watchdog_at: Instant },
     ExecutingSentence { verdict: Verdict, deadline: Instant, hardware_done: bool },
     Error { message: String, until: Instant },
 }

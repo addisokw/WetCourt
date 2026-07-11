@@ -35,8 +35,9 @@ deliberate_latency_ms = 1200
 tts_latency_ms = 200
 
 [squirt]
-# The squirt gun is binary: every guilty verdict fires for this fixed
-# duration (ms).
+# Fallback fire duration (ms) used only when no squirt calibration exists.
+# The show's guilty shot uses the console-tuned `fire_ms` from
+# calibration/squirt.toml — tune it there, not here.
 duration_ms = 150
 
 [crimes]

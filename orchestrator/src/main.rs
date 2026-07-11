@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
+use std::sync::{atomic::{AtomicBool, AtomicUsize}, Arc};
 
 use anyhow::Result;
 use clap::Parser;
@@ -141,10 +141,11 @@ async fn main() -> Result<()> {
         mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
     let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
-    // Vision targeting arm switch + eye-safety fire gate (m4b), shared between
-    // the HTTP layer (AppState) and the hardware adapter below. `targeting_armed`
-    // gates whether vision drives the turret; `vision_gate` holds the latest
-    // `fire_ok` so a trial FIRE is suppressed when armed without a fresh verdict.
+    // Vision targeting arm switch + lock fire gate, shared between the HTTP
+    // layer (AppState) and the hardware adapter below. `targeting_armed` gates
+    // whether vision drives the turret; `vision_gate` holds the latest
+    // `fire_ok` so a trial FIRE is suppressed without a fresh lock (no lock,
+    // no fire — when trial targeting is enabled).
     let targeting_armed = Arc::new(AtomicBool::new(false));
     let vision_gate = Arc::new(hardware::gate::VisionFireGate::new(
         hardware::gate::FIRE_OK_STALE_MS,
@@ -162,34 +163,41 @@ async fn main() -> Result<()> {
         let presence = display_bcast.clone();
         let (hw_cmd_tx, hw_cmd_rx) = mpsc::channel::<hardware::HardwareCommand>(32);
         // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver.
-        // Two policy edges live here, both keeping policy out of the FSM:
-        //  - the vision fire gate (armed + fresh lock) on the trial FIRE, and
+        // Three policy edges live here, all keeping policy out of the FSM:
+        //  - the vision fire gate (no lock, no fire) on the trial FIRE,
+        //  - the squirt calibration edge — the trial FIRE duration is the
+        //    console-tuned `fire_ms` from squirt.toml (the [squirt] duration_ms
+        //    config is only the fallback when no calibration exists), and
         //  - the gavel calibration edge — the FSM emits a bare `Gavel` and we
         //    resolve its geometry from `gavel.toml` into a `GavelStrike` so real
         //    verdict strikes honour the console-tuned values (mirroring how the
         //    maintenance handler resolves AIM degrees→raw at its own edge).
-        let gate_armed = targeting_armed.clone();
         let gate = vision_gate.clone();
         let gate_event_tx = event_tx.clone();
         let gate_bcast = display_bcast.clone();
         let calibration_for_adapter = calibration.clone();
+        let cfg_for_adapter = cfg.clone();
         tokio::spawn(async move {
             use hardware::HardwareCommand;
             let mut hardware_rx = hardware_rx;
             while let Some(cmd) = hardware_rx.recv().await {
                 let state_machine::Command::Hardware(hc) = cmd else { continue };
-                // Eye-safety: while targeting is armed, a trial FIRE only reaches
-                // the squirt on a fresh `fire_ok`. Otherwise suppress the wire
-                // send but synthesize an ack so `ExecutingSentence` still advances
-                // (mirrors the absent-role handling — never stall the trial), and
-                // tell the console the shot was held.
+                // No lock, no fire: with trial targeting on, the guilty FIRE only
+                // reaches the squirt on a fresh `fire_ok` — the trial's Freeze
+                // disarms the aim relay just before this, so arm state is
+                // irrelevant; freshness is the whole check. Otherwise suppress
+                // the wire send but synthesize an ack so `ExecutingSentence`
+                // still advances (mirrors the absent-role handling — never stall
+                // the trial), and tell the console the shot was held.
+                // (With trial_targeting off the operator owns aim + shot: ungated.)
                 if matches!(hc, HardwareCommand::Fire(_))
-                    && !gate.fire_allowed(gate_armed.load(Ordering::Relaxed))
+                    && cfg_for_adapter.vision.trial_targeting
+                    && !gate.fresh_fire_ok()
                 {
-                    tracing::warn!("vision gate: holding trial FIRE (armed, no fresh fire_ok)");
+                    tracing::warn!("vision gate: holding trial FIRE (no fresh lock)");
                     let _ = gate_bcast.send(DisplayMessage::Json(
                         display::events::DisplayEvent::FireHeld {
-                            reason: "no fresh fire_ok".into(),
+                            reason: "no fresh target lock".into(),
                         },
                     ));
                     let _ = gate_event_tx
@@ -199,9 +207,18 @@ async fn main() -> Result<()> {
                         .await;
                     continue;
                 }
-                // Gavel calibration edge: resolve the bare `Gavel` into a
-                // `GavelStrike` from gavel.toml (firmware default if uncalibrated).
+                // Calibration edges: trial FIRE duration from squirt.toml; bare
+                // `Gavel` into a `GavelStrike` from gavel.toml (firmware default
+                // if uncalibrated).
                 let hc = match hc {
+                    HardwareCommand::Fire(fallback_ms) => {
+                        let reg = calibration_for_adapter.read().await;
+                        let ms = reg
+                            .get("squirt")
+                            .and_then(|c| c.fire_ms)
+                            .unwrap_or(fallback_ms);
+                        HardwareCommand::Fire(ms)
+                    }
                     HardwareCommand::Gavel => {
                         let reg = calibration_for_adapter.read().await;
                         match reg.get("gavel").and_then(|c| c.gavel.as_ref()) {
