@@ -16,12 +16,41 @@ import {
   recording,
   startTrial,
 } from './ws';
-import JudgeFace from './JudgeFace';
+import VisionFeed from './panels/VisionFeed';
 import { CaseContent } from './CaseView';
 
 function fmt(ts: number): string {
   const d = new Date(ts);
   return `${d.toLocaleTimeString('en-US', { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+
+// Read-only turret camera monitor for the operator console (the judge's face
+// moved to the physical LED matrix, so this pane shows what the turret sees
+// instead). Controls live in the Vision tab; this only polls /vision/state to
+// tell "offline" apart from a dropped frame.
+function TurretMonitor() {
+  const [online, setOnline] = createSignal(false);
+  let timer = 0;
+  async function poll() {
+    try {
+      setOnline((await fetch('/vision/state')).ok);
+    } catch {
+      setOnline(false);
+    }
+  }
+  onMount(() => {
+    void poll();
+    timer = window.setInterval(poll, 2000);
+  });
+  onCleanup(() => {
+    if (timer) window.clearInterval(timer);
+  });
+  return (
+    <VisionFeed online={online()}>
+      <p>vision process offline</p>
+      <p class="muted small">use the Vision tab to set up targeting</p>
+    </VisionFeed>
+  );
 }
 
 function PhaseCountdown() {
@@ -109,9 +138,9 @@ export default function App() {
         </div>
       </Show>
       <section class="monitors">
-        <div class="monitor-pane monitor-face">
-          <div class="monitor-tag">FACE</div>
-          <JudgeFace />
+        <div class="monitor-pane monitor-vision">
+          <div class="monitor-tag">TURRET</div>
+          <TurretMonitor />
         </div>
         <div class="monitor-pane monitor-case">
           <div class="monitor-tag">CASE</div>

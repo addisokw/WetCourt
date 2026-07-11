@@ -751,7 +751,7 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| ws_session(socket, state, my_gen))
 }
 
-/// Read-only WebSocket for presentational monitors (judge face, case info).
+/// Read-only WebSocket for presentational monitors (the `/case` view).
 /// Subscribes to the display broadcast but forwards only JSON events (no PCM
 /// binary frames) and ignores anything the client sends. Doesn't participate
 /// in the single-client budget that `/ws` enforces, so multiple read-only

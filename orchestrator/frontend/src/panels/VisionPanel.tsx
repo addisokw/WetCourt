@@ -1,12 +1,11 @@
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { calibrations, fetchCalibrations, sendCommand } from '../maintenance';
 import { AckChip, useAck } from './common';
+import VisionFeed from './VisionFeed';
 
-// The turret camera, reverse-proxied by the orchestrator at /vision/* (so it
-// stays same-origin and works through the tunnel for remote operators). Plus the
-// targeting controls: pick a body part, calibrate the boresight by clicking the
-// feed, and ARM to let vision drive the turret (the orchestrator only relays aim
-// while armed). No firing yet.
+// The turret camera feed (see VisionFeed) plus the targeting controls: pick a
+// body part, calibrate the boresight by clicking the feed, and ARM to let
+// vision drive the turret (the orchestrator only relays aim while armed).
 interface VisionState {
   ts: number;
   person?: boolean;
@@ -37,11 +36,6 @@ async function post(url: string, body: unknown) {
 export default function VisionPanel() {
   const [online, setOnline] = createSignal(false);
   const [state, setState] = createSignal<VisionState | null>(null);
-  // Snapshot polling instead of the MJPEG /feed stream: Safari's <img> renders
-  // single JPEGs everywhere but errors on the endless multipart/x-mixed-replace
-  // stream when it's proxied through the orchestrator's keep-alive connection.
-  // We chain requests on each frame's load, so it self-paces to ~15–25 fps.
-  const [snapUrl, setSnapUrl] = createSignal('/vision/snapshot?t=0');
   const [armed, setArmed] = createSignal(false);
   const [boresightMode, setBoresightMode] = createSignal(false);
   // Auto-fire: the gun fires once vision holds a lock for `dwell`. `dwellLocal`
@@ -65,25 +59,6 @@ export default function VisionPanel() {
   const tolVal = () => tol() ?? state()?.gains?.tolerance;
 
   let timer: number | undefined;
-  let snapTimer: number | undefined;
-  let stopped = false;
-  let seq = 0;
-
-  // Self-driving snapshot loop: request the next frame as soon as the current
-  // one paints (onLoad), so it runs as fast as the network/decoder allow without
-  // ever queueing requests. A transient error just retries slower; whether the
-  // process is offline is decided by /state polling, not a dropped frame.
-  function nextSnapshot() {
-    if (stopped) return;
-    seq += 1;
-    setSnapUrl(`/vision/snapshot?t=${Date.now()}.${seq}`);
-  }
-  function onSnapLoad() {
-    if (!stopped) snapTimer = window.setTimeout(nextSnapshot, 40);
-  }
-  function onSnapError() {
-    if (!stopped) snapTimer = window.setTimeout(nextSnapshot, 500);
-  }
 
   async function poll() {
     try {
@@ -119,9 +94,7 @@ export default function VisionPanel() {
     timer = window.setInterval(poll, 700);
   });
   onCleanup(() => {
-    stopped = true;
     if (timer) clearInterval(timer);
-    if (snapTimer) clearTimeout(snapTimer);
   });
 
   async function arm(on: boolean) {
@@ -204,18 +177,13 @@ export default function VisionPanel() {
       </header>
 
       <section class="panel-section">
-        <div class={`vision-feed ${boresightMode() ? 'crosshair' : ''}`}>
-          <img src={snapUrl()} alt="turret camera" onClick={onFeedClick} onLoad={onSnapLoad} onError={onSnapError} />
-          <Show when={!online()}>
-            <div class="vision-offline">
-              <p>vision process offline</p>
-              <p class="muted small">
-                start it on the booth PC: <code>cd vision &amp;&amp; uv run vision.py</code>
-              </p>
-              <button onClick={() => void poll()}>Retry</button>
-            </div>
-          </Show>
-        </div>
+        <VisionFeed online={online()} class={boresightMode() ? 'crosshair' : ''} onFeedClick={onFeedClick}>
+          <p>vision process offline</p>
+          <p class="muted small">
+            start it on the booth PC: <code>cd vision &amp;&amp; uv run vision.py</code>
+          </p>
+          <button onClick={() => void poll()}>Retry</button>
+        </VisionFeed>
       </section>
 
       {/* Targeting */}

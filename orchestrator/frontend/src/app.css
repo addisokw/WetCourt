@@ -171,15 +171,6 @@ button.plea.recording:hover { background: #8b2326; }
   display: inline-block;
 }
 
-.judge-face {
-  padding: 1rem 2rem;
-  display: flex;
-  justify-content: center;
-  background: #0a0d12;
-  height: 100%;
-  align-items: center;
-}
-
 /* ---------- Operator split-monitor preview ---------- */
 .monitors {
   display: grid;
@@ -208,15 +199,26 @@ button.plea.recording:hover { background: #8b2326; }
   pointer-events: none;
   z-index: 2;
 }
-.monitor-face .judge-face {
+/* Turret feed fills its pane, letterboxed rather than cropped so the operator
+   always sees the full camera frame (the boresight lives in the Vision tab). */
+.monitor-vision .vision-feed {
   flex: 1;
-  width: 100%;
-  padding: 0.5rem;
+  display: flex;
+  min-width: 0;
 }
-/* Face is a fixed 48-col grid; scale font-size to the pane width so both
-   eyes fit on screen at any viewport. ~3cqw matches the 48 cols × ~0.6em
-   character width, with a clamp() floor/ceiling. */
-.monitor-face .face-stack { font-size: clamp(0.55rem, 2.8cqw, 1.4rem); }
+.monitor-vision .vision-feed img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+  border: none;
+  border-radius: 0;
+}
+.monitor-vision .vision-offline {
+  border: none;
+  border-radius: 0;
+}
 
 .case-embed {
   flex: 1;
@@ -259,47 +261,10 @@ button.plea.recording:hover { background: #8b2326; }
 .case-embed .verdict-word { font-size: clamp(2rem, 4vw, 3.5rem); }
 .case-embed .verdict-remarks { font-size: clamp(0.85rem, 1.2vw, 1.1rem); }
 
-.face-view {
-  position: fixed;
-  inset: 0;
-  background: #05070a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: none;
-}
-.face-view .judge-face {
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-.face-view .face-stack {
-  font-size: clamp(1.5rem, 4.5vw, 4rem);
-  line-height: 1.0;
-}
-.face-view .face-features {
-  text-shadow: 0 0 18px currentColor, 0 0 36px currentColor;
-}
-
 /* ---------- Deliberation theater ---------- */
 /* The 3-second beat between the preamble and the verdict word — case view
-   dims, face features pulse, operator audio plays an ambient pad. Triggered
-   by server TheaterStart / TheaterEnd events, not by state. */
-.judge-face.theater-active .face-features {
-  animation: theater-eye-pulse 2.2s ease-in-out infinite;
-}
-@keyframes theater-eye-pulse {
-  0%, 100% { text-shadow: 0 0 6px currentColor, 0 0 14px currentColor; }
-  50%      { text-shadow: 0 0 16px currentColor, 0 0 38px currentColor; filter: brightness(1.3); }
-}
-.face-view .judge-face.theater-active .face-features {
-  animation: theater-eye-pulse-fullscreen 2.2s ease-in-out infinite;
-}
-@keyframes theater-eye-pulse-fullscreen {
-  0%, 100% { text-shadow: 0 0 18px currentColor, 0 0 36px currentColor; }
-  50%      { text-shadow: 0 0 36px currentColor, 0 0 80px currentColor; filter: brightness(1.4); }
-}
-
+   dims, operator audio plays an ambient pad. Triggered by server
+   TheaterStart / TheaterEnd events, not by state. */
 .case-view {
   transition: background 800ms ease, filter 800ms ease;
 }
@@ -504,30 +469,6 @@ button.plea.recording:hover { background: #8b2326; }
 }
 .case-embed .verdict-key-factor { gap: 0.2rem; }
 .case-embed .key-factor-value { font-size: clamp(1rem, 2vw, 1.6rem); }
-.face-stack {
-  position: relative;
-  display: inline-block;
-  line-height: 1.05;
-  font-size: 1.6rem;
-}
-.face-stack pre {
-  margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: 0.05em;
-  white-space: pre;
-}
-.face-noise {
-  color: #2a3038;
-}
-.face-features {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  transition: color 250ms ease;
-  text-shadow: 0 0 6px currentColor;
-}
-
 .deliberation {
   padding: 1.5rem 2rem;
   border-bottom: 1px solid #30363d;

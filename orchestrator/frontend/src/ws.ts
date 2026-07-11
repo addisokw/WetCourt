@@ -21,11 +21,6 @@ export const [log, setLog] = createSignal<LogEntry[]>([]);
 export const [deliberation, setDeliberation] = createSignal<string>('');
 export const [pleaWindowOpen, setPleaWindowOpen] = createSignal(false);
 export const [recording, setRecording] = createSignal(false);
-// Face-driving signals — monotonic timestamps the JudgeFace component samples
-// each frame to drive mouth lip-sync and "thinking" beats.
-export const [ttsActive, setTtsActive] = createSignal(false);
-export const [lastTtsChunkAt, setLastTtsChunkAt] = createSignal(0);
-export const [lastTokenAt, setLastTokenAt] = createSignal(0);
 export const [lastVerdictGuilty, setLastVerdictGuilty] = createSignal<boolean | null>(null);
 // Case-view signals — captured from display events for the presentational viewer.
 export const [charge, setCharge] = createSignal<string>('');
@@ -158,7 +153,6 @@ function handleEvent(ev: DisplayEvent) {
     case 'idle':
       setDeliberation('');
       setLastVerdictGuilty(null);
-      setTtsActive(false);
       setCharge('');
       setPleaTranscript('');
       setVerdictRemarks('');
@@ -186,18 +180,14 @@ function handleEvent(ev: DisplayEvent) {
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
       nextBinaryIsAudio = true;
-      setTtsActive(true);
-      setLastTtsChunkAt(performance.now());
       if (!readOnly) startTtsSession();
       break;
     case 'tts_end':
       nextBinaryIsAudio = false;
-      setTtsActive(false);
       if (!readOnly) endTtsSession(() => socket?.send(JSON.stringify({ type: 'tts_finished' })));
       break;
     case 'deliberation_token':
       setDeliberation((prev) => prev + (ev.text as string));
-      setLastTokenAt(performance.now());
       break;
     case 'verdict':
       setLastVerdictGuilty(Boolean(ev.guilty));

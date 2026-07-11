@@ -4,7 +4,7 @@ The booth's brain: a Rust state machine driving the full trial pipeline —
 charge selection (curated list), plea recording (browser mic), transcription
 (STT), deliberation (streamed LLM), verdict pronunciation (pipelined TTS),
 and the sentence (squirt hardware) — plus an axum HTTP/WS server and a
-SolidJS frontend with operator console, judge face, and case view.
+SolidJS frontend with operator console and case view.
 
 See `../docs/architecture.md` for the full design. All phases through 4
 (WiFi hardware) are implemented; only the USB-serial hardware driver remains
@@ -108,17 +108,16 @@ Everything is served on `:8080` (`display.listen_addr`):
 
 | URL | View | Audience |
 |---|---|---|
-| `/` | Operator console: state banner, Start/Plea/E-Stop, judge-face + case-view preview panes, event log, persona panel | Operator |
-| `/face` | Standalone animated ASCII judge face (moods track listening/thinking/speaking/verdict) | Visitor-facing monitor |
+| `/` | Operator console: state banner, Start/Plea/E-Stop, turret-feed + case-view preview panes, event log, persona panel | Operator |
 | `/case` | Standalone case view: charge, plea countdown, transcript, verdict | Visitor-facing monitor |
 
 Keyboard on the console: **Space** starts a trial, **P** starts/stops plea
 recording (browser asks for mic permission on first use). Plea audio is
 captured with MediaRecorder and uploaded over the WS as binary.
 
-The console uses the single-client `/ws` socket (read+write); `/face` and
-`/case` use the multi-client read-only `/ws/view`, so you can mirror them on
-as many monitors as you like. During the verdict reveal the frontend runs a
+The console uses the single-client `/ws` socket (read+write); `/case` uses
+the multi-client read-only `/ws/view`, so you can mirror it on as many
+monitors as you like. During the verdict reveal the frontend runs a
 "deliberation theater" beat — an ambient synth pad and dimmed visuals over a
 held silence before the guilty/not-guilty word lands.
 
