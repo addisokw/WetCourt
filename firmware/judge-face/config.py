@@ -6,7 +6,7 @@
 
 import os
 
-FW_VERSION = "0.2"
+FW_VERSION = "0.3"
 
 # Physical panel (as wired to the HUB75 header) — logical orientation comes
 # from ROTATION. 90 = portrait (32 wide x 64 tall), 0 = landscape.
