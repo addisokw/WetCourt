@@ -150,3 +150,46 @@ limits — revisit on an S3):
 feature-detected with a per-pixel fallback; the esp32spi socket-pool
 non-blocking `recv_into` semantics are handled defensively in
 `inputs.py:_service`. Report actual FPS from the serial console.
+
+## Troubleshooting a dead face
+
+What the blank-vs-not distinction tells you before you touch anything:
+
+- **Panel animating but no orchestrator registration** → the board is fine,
+  the *link* is down. Query `OTALOG <token>` (raw TCP line to
+  `<face-ip>:8266`) for the link's last error + layered net probe, and see
+  the socketpool note below.
+- **Panel frozen on one frame** → `code.py` is wedged mid-loop (it drives
+  `display.refresh()` manually). Serial console shows where.
+- **Panel showing tiny text** → `code.py` crashed with a Python exception;
+  CircuitPython paints the traceback to the framebuffer. Read it there or
+  over serial.
+- **Panel completely blank AND absent from the LAN** → `code.py` never ran:
+  **safe mode**, no power, or a corrupted filesystem. A Python bug can't
+  produce this combination — don't start by reading firmware diffs.
+
+The quickest network check runs from the orchestrator host (it's on the
+booth LAN): `ping`-sweep the subnet or `arp -a | grep 192.168.123` — the
+NanoC6 fixtures show up as `squirt.lan`, `gavel.lan`, etc.; the face's
+AirLift has no mDNS name, so probe candidate IPs on `:8266` instead.
+
+**Recovery ladder** (proven 2026-07-12: booth trial found the panel blank
+and off-network; step 1 fixed it):
+
+1. **Press RESET once.** Safe mode is CircuitPython's response to a hard
+   fault, watchdog, or brownout — it deliberately doesn't run `code.py`
+   (blank panel, no WiFi) until a manual reset. The status NeoPixel blinks
+   **yellow** in safe mode. The HUB75 panel's current draw makes brownout
+   the usual suspect here, so a one-off safe-mode trip is expected booth
+   life, not a firmware bug.
+2. **If it recurs**: USB to a computer, `screen /dev/cu.usbmodem* 115200` —
+   CircuitPython prints the safe-mode reason at the top of the console.
+   Repeated brownouts = fix the 5 V supply, not the code.
+3. **If CIRCUITPY looks damaged** (missing/garbled files — possible after a
+   power cut mid-OTA-write, since OTA mode keeps the drive code-writable):
+   hold **UP while pressing RESET** (USB deploy mode) and re-run
+   `./deploy.sh`. `boot.py` is on the OTA forbidden list, so this escape
+   hatch always survives.
+4. **Confirm recovery**: the eye animates (demo mode counts), the
+   orchestrator logs `registry: judge_face connected`, and `OTALOG` answers
+   on `:8266`.
