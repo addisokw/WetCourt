@@ -378,6 +378,50 @@ export default function PrintPanel() {
                               </label>
                             </Show>
                           </div>
+                          <div class="row-line">
+                            <label class="mini-label" title="<1 brightens mid-tones; blank = printer default">gamma</label>
+                            <input
+                              type="number"
+                              min="0.2"
+                              max="4"
+                              step="0.05"
+                              placeholder={printerInfo().image_gamma.toFixed(2)}
+                              value={im().gamma ?? ''}
+                              onInput={(e) => {
+                                const raw = e.currentTarget.value;
+                                const v = Number(raw);
+                                update(i, { gamma: raw === '' || !Number.isFinite(v) ? null : v });
+                              }}
+                            />
+                            <label class="mini-label" title="+ lightens (luma offset); blank = printer default">brightness</label>
+                            <input
+                              type="number"
+                              min="-128"
+                              max="128"
+                              step="5"
+                              placeholder={String(printerInfo().image_brightness)}
+                              value={im().brightness ?? ''}
+                              onInput={(e) => {
+                                const raw = e.currentTarget.value;
+                                const v = Number(raw);
+                                update(i, { brightness: raw === '' || !Number.isFinite(v) ? null : v });
+                              }}
+                            />
+                            <label class="mini-label" title="<1 flattens (lifts shadows, tames highlights); blank = printer default">contrast</label>
+                            <input
+                              type="number"
+                              min="0.2"
+                              max="3"
+                              step="0.05"
+                              placeholder={printerInfo().image_contrast.toFixed(2)}
+                              value={im().contrast ?? ''}
+                              onInput={(e) => {
+                                const raw = e.currentTarget.value;
+                                const v = Number(raw);
+                                update(i, { contrast: raw === '' || !Number.isFinite(v) ? null : v });
+                              }}
+                            />
+                          </div>
                           <Show when={previews()[im()._uid]?.error}>
                             <span class="err">{previews()[im()._uid]?.error}</span>
                           </Show>

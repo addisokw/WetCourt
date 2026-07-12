@@ -200,6 +200,32 @@ pub struct PrinterConfig {
     /// 400/360". A printer whose feeds are true 203-dpi dots would be 203.
     #[serde(default = "d_feed_units")]
     pub feed_units_per_inch: u32,
+    /// Paper the cutter mechanism advances on its own before a partial cut, in
+    /// 203-dpi dots — subtracted from the closing fill of size-bounded prints
+    /// so cut-to-cut lands on target. Calibrate by printing bounded strips at
+    /// two lengths: the constant excess shared by both is this advance.
+    #[serde(default)]
+    pub cut_advance_dots: u32,
+    /// Default gamma applied to every rasterized image (custom-print blocks
+    /// and the keepsake capture photo) before dithering. `<1.0` brightens
+    /// mid-tones; thermal heads run dark, so ~0.7–0.8 is typical. Per-printer:
+    /// calibrate with a tone-ladder strip.
+    #[serde(default = "d_image_gamma")]
+    pub image_gamma: f32,
+    /// Default brightness offset in luma units (−128..128, `+` = lighter),
+    /// applied with `image_gamma`. Per-printer.
+    #[serde(default)]
+    pub image_brightness: f32,
+    /// Default contrast multiplier around mid-gray (`1.0` = none, `<1`
+    /// flattens — lifts shadows and tames highlights, useful against thermal
+    /// dot gain; `>1` punchier). Per-printer.
+    #[serde(default = "d_image_contrast")]
+    pub image_contrast: f32,
+    /// Default dither for rasterized images: "fs" | "atkinson" | "bayer" |
+    /// "none". Atkinson prints sparser/lighter — often better against thermal
+    /// dot gain. Per-printer.
+    #[serde(default = "d_image_dither")]
+    pub image_dither: String,
 }
 
 impl Default for PrinterConfig {
@@ -213,6 +239,11 @@ impl Default for PrinterConfig {
             booth_location: d_printer_loc(),
             head_to_cutter_dots: d_head_to_cutter(),
             feed_units_per_inch: d_feed_units(),
+            cut_advance_dots: 0,
+            image_gamma: d_image_gamma(),
+            image_brightness: 0.0,
+            image_contrast: d_image_contrast(),
+            image_dither: d_image_dither(),
         }
     }
 }
@@ -226,6 +257,9 @@ fn d_printer_width() -> u32 { 576 }
 fn d_head_to_cutter() -> u32 { 136 }
 // Measured: vertical commands move in 1/360" Epson-default units, not dots.
 fn d_feed_units() -> u32 { 360 }
+fn d_image_gamma() -> f32 { 1.0 }
+fn d_image_contrast() -> f32 { 1.0 }
+fn d_image_dither() -> String { "fs".into() }
 fn d_printer_qr() -> String { "https://wetcourt.lol".into() }
 fn d_printer_loc() -> String { "Find the Wet Court near you".into() }
 

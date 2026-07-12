@@ -123,13 +123,22 @@ pub enum Block {
     Image {
         /// Base64 PNG/JPEG (no `data:` prefix).
         data_b64: String,
-        #[serde(default = "d_dither")]
-        dither: String, // "fs" | "atkinson" | "bayer" | "none"
+        /// `None` = the printer's configured default (`[printer] image_dither`).
+        #[serde(default)]
+        dither: Option<String>, // "fs" | "atkinson" | "bayer" | "none"
         #[serde(default = "d_100")]
         width_pct: u8, // 10..=100 of printable width
         /// Bounded mode only: allow scaling down to make the strip fit.
         #[serde(default)]
         shrink: bool,
+        /// Tone overrides; `None` = the printer's configured defaults
+        /// (`[printer] image_gamma` / `image_brightness`).
+        #[serde(default)]
+        gamma: Option<f32>, // 0.2..=4.0, <1 brightens
+        #[serde(default)]
+        brightness: Option<f32>, // -128..=128 luma, + lighter
+        #[serde(default)]
+        contrast: Option<f32>, // 0.2..=3.0, <1 flattens (lifts shadows)
     },
 }
 
@@ -141,7 +150,6 @@ fn d_ecc() -> String { "m".into() }
 fn d_sym() -> String { "code128".into() }
 fn d_bar_h() -> u8 { 80 }
 fn d_bar_w() -> u8 { 3 }
-fn d_dither() -> String { "fs".into() }
 fn d_100() -> u8 { 100 }
 
 // ---- validation ---------------------------------------------------------------
@@ -182,11 +190,22 @@ pub fn validate(doc: &PrintDoc) -> anyhow::Result<()> {
                 anyhow::ensure!((24..=200).contains(height), at("barcode height out of range (24-200)".into()));
                 anyhow::ensure!((2..=6).contains(width), at("barcode width out of range (2-6)".into()));
             }
-            Block::Image { data_b64, dither, width_pct, .. } => {
+            Block::Image { data_b64, dither, width_pct, gamma, brightness, contrast, .. } => {
                 images += 1;
                 anyhow::ensure!(images <= 4, at("too many images (max 4)".into()));
                 anyhow::ensure!((10..=100).contains(width_pct), at("width_pct out of range (10-100)".into()));
-                parse_dither(dither).map_err(at)?;
+                if let Some(d) = dither {
+                    parse_dither(d).map_err(at)?;
+                }
+                if let Some(g) = gamma {
+                    anyhow::ensure!((0.2..=4.0).contains(g), at("gamma out of range (0.2-4.0)".into()));
+                }
+                if let Some(br) = brightness {
+                    anyhow::ensure!((-128.0..=128.0).contains(br), at("brightness out of range (-128-128)".into()));
+                }
+                if let Some(c) = contrast {
+                    anyhow::ensure!((0.2..=3.0).contains(c), at("contrast out of range (0.2-3.0)".into()));
+                }
                 // ~4MB decoded ceiling, checked on the base64 length (4/3 ratio).
                 anyhow::ensure!(data_b64.len() <= 4 * 1024 * 1024 * 4 / 3, at("image too large (max 4MB)".into()));
             }
@@ -248,7 +267,7 @@ fn parse_ecc(s: &str) -> Result<qrcode::EcLevel, String> {
     }
 }
 
-fn parse_dither(s: &str) -> Result<Dither, String> {
+pub(crate) fn parse_dither(s: &str) -> Result<Dither, String> {
     match s {
         "fs" => Ok(Dither::FloydSteinberg),
         "atkinson" => Ok(Dither::Atkinson),
@@ -269,12 +288,22 @@ fn glyph_height(f: Font) -> u32 {
 
 /// Dither an uploaded image exactly as an [`Block::Image`] would print it —
 /// the console preview shows these very pixels.
-pub fn preview_image_raster(bytes: &[u8], width_dots: u32, pct: u8, dither: &str) -> anyhow::Result<Raster> {
+pub fn preview_image_raster(
+    bytes: &[u8],
+    width_dots: u32,
+    pct: u8,
+    dither: &str,
+    gamma: f32,
+    brightness: f32,
+    contrast: f32,
+) -> anyhow::Result<Raster> {
     anyhow::ensure!((10..=100).contains(&pct), "width_pct out of range (10-100)");
     anyhow::ensure!(bytes.len() <= 4 * 1024 * 1024, "image too large (max 4MB)");
     let opts = raster::Options {
         dither: parse_dither(dither).map_err(anyhow::Error::msg)?,
-        ..Default::default()
+        gamma,
+        brightness,
+        contrast,
     };
     image_raster(bytes, width_dots, pct as u32, opts)
 }
@@ -341,7 +370,7 @@ impl Prep {
     }
 }
 
-fn prepare(blk: &Block, width_dots: u32) -> anyhow::Result<Prep> {
+fn prepare(blk: &Block, width_dots: u32, cfg: &PrinterConfig) -> anyhow::Result<Prep> {
     Ok(match blk {
         Block::Text { text, align, bold, underline, inverse, font, size_w, size_h } => {
             let font = parse_font(font).map_err(anyhow::Error::msg)?;
@@ -399,14 +428,17 @@ fn prepare(blk: &Block, width_dots: u32) -> anyhow::Result<Prep> {
             };
             Prep::Barcode { data: data.clone(), sym, height: *height, width: *width }
         }
-        Block::Image { data_b64, dither, width_pct, shrink } => {
+        Block::Image { data_b64, dither, width_pct, shrink, gamma, brightness, contrast } => {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(data_b64.trim())
                 .map_err(|e| anyhow::anyhow!("image base64: {e}"))?;
             anyhow::ensure!(bytes.len() <= 4 * 1024 * 1024, "image too large (max 4MB)");
             let opts = raster::Options {
-                dither: parse_dither(dither).map_err(anyhow::Error::msg)?,
-                ..Default::default()
+                dither: parse_dither(dither.as_deref().unwrap_or(&cfg.image_dither))
+                    .map_err(anyhow::Error::msg)?,
+                gamma: gamma.unwrap_or(cfg.image_gamma),
+                brightness: brightness.unwrap_or(cfg.image_brightness),
+                contrast: contrast.unwrap_or(cfg.image_contrast),
             };
             let raster = image_raster(&bytes, width_dots, *width_pct as u32, opts)?;
             Prep::Raster {
@@ -564,7 +596,7 @@ pub fn render_with_layout(doc: &PrintDoc, cfg: &PrinterConfig) -> anyhow::Result
         .blocks
         .iter()
         .enumerate()
-        .map(|(i, blk)| prepare(blk, w).map_err(|e| anyhow::anyhow!("block {}: {e}", i + 1)))
+        .map(|(i, blk)| prepare(blk, w, cfg).map_err(|e| anyhow::anyhow!("block {}: {e}", i + 1)))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let mut layout = Layout { content_dots: 0, fill_dots: 0 };
@@ -582,7 +614,11 @@ pub fn render_with_layout(doc: &PrintDoc, cfg: &PrinterConfig) -> anyhow::Result
         );
         fit(&mut preps, length_dots - dead)?;
         layout.content_dots = preps.iter().map(|p| p.height(true)).sum();
-        layout.fill_dots = length_dots - layout.content_dots;
+        // The cutter feeds `cut_advance_dots` on its own before the blade
+        // drops, so the commanded fill stops that far short of the target.
+        layout.fill_dots = length_dots
+            .saturating_sub(cfg.cut_advance_dots)
+            .saturating_sub(layout.content_dots);
     } else {
         layout.content_dots = preps.iter().map(|p| p.height(false)).sum();
     }
@@ -602,8 +638,8 @@ pub fn render_with_layout(doc: &PrintDoc, cfg: &PrinterConfig) -> anyhow::Result
         cmd_units += adv.cmd_units;
     }
     if let Some(mm) = doc.length_mm {
-        let length_dots = mm_to_dots(mm);
-        let target_units = to_units(length_dots.saturating_sub(raster_dots), upi);
+        let feed_dots = mm_to_dots(mm).saturating_sub(cfg.cut_advance_dots);
+        let target_units = to_units(feed_dots.saturating_sub(raster_dots), upi);
         feed_units_exact(&mut b, target_units.saturating_sub(cmd_units));
         b.partial_cut();
     } else {
@@ -740,7 +776,7 @@ mod tests {
                 Block::Feed { lines: 2, flex: 0 },
                 Block::Qr { data: "https://wetcourt.lol".into(), module: 6, ecc: "m".into() },
                 Block::Barcode { data: "CASE-0042".into(), symbology: "code128".into(), height: 80, width: 3 },
-                Block::Image { data_b64: tiny_png(), dither: "fs".into(), width_pct: 50, shrink: false },
+                Block::Image { data_b64: tiny_png(), dither: Some("fs".into()), width_pct: 50, shrink: false, gamma: None, brightness: None, contrast: None },
             ],
             length_mm: None,
         };
@@ -837,6 +873,24 @@ mod tests {
     }
 
     #[test]
+    fn cut_advance_is_subtracted_from_the_closing_fill() {
+        // A cutter that self-feeds before the blade drops (dev LAN printer:
+        // ~2.65mm = 21 dots) must shorten the commanded feed by that much so
+        // the physical cut-to-cut still lands on the target.
+        let doc = PrintDoc { blocks: vec![text("one line")], length_mm: Some(50.0) };
+        let mut c = cfg();
+        c.cut_advance_dots = 21;
+        let (bytes, layout) = render_with_layout(&doc, &c).unwrap();
+        let advance = physical_advance_dots(&bytes, c.feed_units_per_inch);
+        let target = (mm_to_dots(50.0) - 21) as f64;
+        assert!(
+            (advance - target).abs() < 3.0,
+            "strip advances {advance:.1} dots, want {target}"
+        );
+        assert_eq!(layout.fill_dots, mm_to_dots(50.0) - 21 - layout.content_dots);
+    }
+
+    #[test]
     fn oversize_line_spacing_tops_up_with_feeds() {
         // 8×-tall Font A: spacing = 198 dots = 351 units at 1/360" — past
         // ESC 3's u8 range, so each line must be topped up with ESC J.
@@ -896,7 +950,7 @@ mod tests {
         let doc = PrintDoc {
             blocks: vec![
                 text("photo strip"),
-                Block::Image { data_b64: tiny_png(), dither: "none".into(), width_pct: 100, shrink: true },
+                Block::Image { data_b64: tiny_png(), dither: Some("none".into()), width_pct: 100, shrink: true, gamma: None, brightness: None, contrast: None },
             ],
             length_mm: Some(50.0),
         };
@@ -910,7 +964,7 @@ mod tests {
     fn unshrinkable_overflow_errors() {
         let doc = PrintDoc {
             blocks: vec![
-                Block::Image { data_b64: tiny_png(), dither: "none".into(), width_pct: 100, shrink: false },
+                Block::Image { data_b64: tiny_png(), dither: Some("none".into()), width_pct: 100, shrink: false, gamma: None, brightness: None, contrast: None },
             ],
             length_mm: Some(50.0),
         };

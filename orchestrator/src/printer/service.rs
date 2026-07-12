@@ -16,7 +16,7 @@ use crate::config::PrinterConfig;
 use crate::display::events::DisplayEvent;
 use crate::display::DisplayMessage;
 
-use super::custom::{render_custom, PrintDoc};
+use super::custom::{self, render_custom, PrintDoc};
 use super::{render, ReportOpts, TrialRecord};
 
 /// A unit of work for the printer task.
@@ -105,6 +105,13 @@ fn print_trial(
         width_dots: cfg.width_dots,
         qr_url: &cfg.qr_url,
         booth_location: &cfg.booth_location,
+        image_gamma: cfg.image_gamma,
+        image_brightness: cfg.image_brightness,
+        image_contrast: cfg.image_contrast,
+        image_dither: custom::parse_dither(&cfg.image_dither).unwrap_or_else(|e| {
+            warn!("bad [printer] image_dither ({e}); falling back to Floyd-Steinberg");
+            thermal_printer::raster::Dither::FloydSteinberg
+        }),
     };
     let bytes = render(rec, &opts).build();
     let label = format!("keepsake for case {}", rec.case_no);

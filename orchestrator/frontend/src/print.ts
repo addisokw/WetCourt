@@ -60,6 +60,10 @@ export interface ImageBlock {
   dither: DitherKind;
   width_pct: number;
   shrink: boolean;
+  /** Tone overrides; null = the printer's configured default. */
+  gamma: number | null;
+  brightness: number | null;
+  contrast: number | null;
   _name?: string;
   _uid: string;
 }
@@ -74,6 +78,11 @@ export interface PrinterInfo {
   mode: string;
   width_dots: number;
   head_to_cutter_dots: number;
+  /** Printer-default tone applied when an image block doesn't override. */
+  image_gamma: number;
+  image_brightness: number;
+  image_contrast: number;
+  image_dither: DitherKind;
 }
 
 export interface PrintResult {
@@ -103,6 +112,10 @@ export const [printerInfo, setPrinterInfo] = createSignal<PrinterInfo>({
   mode: 'mock',
   width_dots: 576,
   head_to_cutter_dots: 136,
+  image_gamma: 1.0,
+  image_brightness: 0,
+  image_contrast: 1.0,
+  image_dither: 'fs',
 });
 
 export function newBlock(type: PrintBlock['type']): PrintBlock {
@@ -119,7 +132,7 @@ export function newBlock(type: PrintBlock['type']): PrintBlock {
     case 'barcode':
       return { type, data: '', symbology: 'code128', height: 80, width: 3, _uid };
     case 'image':
-      return { type, data_b64: '', dither: 'fs', width_pct: 100, shrink: false, _uid };
+      return { type, data_b64: '', dither: printerInfo().image_dither, width_pct: 100, shrink: false, gamma: null, brightness: null, contrast: null, _uid };
   }
 }
 
@@ -384,6 +397,9 @@ export async function refreshPreview(b: QrBlock | ImageBlock): Promise<void> {
         data_b64: b.data_b64,
         dither: b.dither,
         width_pct: b.width_pct,
+        gamma: b.gamma,
+        brightness: b.brightness,
+        contrast: b.contrast,
       }));
     }
   } catch (e) {

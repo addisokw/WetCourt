@@ -104,6 +104,21 @@ net_addr = "192.168.123.100"
 width_dots = 576
 qr_url = "https://wetcourt.lol"
 booth_location = "Find the Wet Court near you"
+# Calibrated 2026-07-12 against this LAN printer (three bounded strips at
+# 50/100/200mm, measured 46.1/89.5/176.5mm — perfectly linear): vertical motion
+# unit is 1/414.5" (not the Epson 1/360" the USB dev POS-80 uses), the cutter
+# self-feeds ~2.65mm before the blade drops, and the head-to-blade gap is
+# 15.9mm. These three constants are per-printer — don't copy them to another.
+feed_units_per_inch = 414
+head_to_cutter_dots = 127
+cut_advance_dots = 21
+# Image tone, picked from a 12-rung ladder against a real capture frame
+# 2026-07-12: this head crushes shadows (dot gain), so lift mid-tones hard
+# (gamma), flatten slightly (contrast), and dither with Atkinson — its sparser
+# dot placement keeps shadow detail FS smears into solid black.
+image_gamma = 0.5
+image_contrast = 0.85
+image_dither = "atkinson"
 
 # Guilty "moment of justice" capture: on a guilty verdict, grab a short burst of
 # un-annotated frames from the vision service (/clean) around the blast, save

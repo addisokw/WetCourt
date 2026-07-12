@@ -30,6 +30,13 @@ pub struct ReportOpts<'a> {
     pub qr_url: &'a str,
     /// Human-readable "find us here" line, printed under the QR. Editable on-site.
     pub booth_location: &'a str,
+    /// Tone curve for the captured blast frame (per-printer; thermal heads run
+    /// dark). Mirrors `[printer] image_gamma` / `image_brightness` /
+    /// `image_contrast`.
+    pub image_gamma: f32,
+    pub image_brightness: f32,
+    pub image_contrast: f32,
+    pub image_dither: raster::Dither,
 }
 
 impl Default for ReportOpts<'_> {
@@ -38,6 +45,10 @@ impl Default for ReportOpts<'_> {
             width_dots: WIDTH_DOTS_80MM,
             qr_url: "https://wetcourt.lol",
             booth_location: "Find the Wet Court near you",
+            image_gamma: 1.0,
+            image_brightness: 0.0,
+            image_contrast: 1.0,
+            image_dither: raster::Dither::FloydSteinberg,
         }
     }
 }
@@ -74,7 +85,7 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
     heavy_rule(&mut b, cols);
 
     if rec.guilty {
-        moment_of_justice(&mut b, w, rec.still_jpeg.as_deref());
+        moment_of_justice(&mut b, w, rec.still_jpeg.as_deref(), opts);
     }
 
     footer(&mut b, rec, opts);
@@ -169,11 +180,19 @@ fn verdict(b: &mut Builder, rec: &TrialRecord) {
 /// Reserved photo slot (guilty only). M1 draws a framed reticle placeholder so
 /// the layout and paper feed match the final receipt; M3 replaces the frame
 /// with the dithered firing-still from the vision service.
-fn moment_of_justice(b: &mut Builder, w: u32, still: Option<&[u8]>) {
+fn moment_of_justice(b: &mut Builder, w: u32, still: Option<&[u8]>, opts: &ReportOpts) {
     b.align(Align::Center).bold(true).line("-- MOMENT OF JUSTICE --").bold(false);
     // Dither the captured blast frame to 1-bit at printer width; fall back to the
     // reticle placeholder when there's no still (capture off / failed).
-    let captured = still.and_then(|bytes| raster::from_bytes(bytes, w, raster::Options::default()).ok());
+    let captured = still.and_then(|bytes| {
+        let tone = raster::Options {
+            gamma: opts.image_gamma,
+            brightness: opts.image_brightness,
+            contrast: opts.image_contrast,
+            dither: opts.image_dither,
+        };
+        raster::from_bytes(bytes, w, tone).ok()
+    });
     match captured {
         Some(r) => {
             b.align(Align::Center)

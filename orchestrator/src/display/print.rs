@@ -48,6 +48,10 @@ struct PrinterInfo {
     mode: String,
     width_dots: u32,
     head_to_cutter_dots: u32,
+    image_gamma: f32,
+    image_brightness: f32,
+    image_contrast: f32,
+    image_dither: String,
 }
 
 async fn printer_info(AxumState(s): AxumState<AppState>) -> Response {
@@ -55,6 +59,10 @@ async fn printer_info(AxumState(s): AxumState<AppState>) -> Response {
         mode: s.printer_cfg.mode.clone(),
         width_dots: s.printer_cfg.width_dots,
         head_to_cutter_dots: s.printer_cfg.head_to_cutter_dots,
+        image_gamma: s.printer_cfg.image_gamma,
+        image_brightness: s.printer_cfg.image_brightness,
+        image_contrast: s.printer_cfg.image_contrast,
+        image_dither: s.printer_cfg.image_dither.clone(),
     })
     .into_response()
 }
@@ -103,13 +111,20 @@ async fn print_custom(
 #[derive(Deserialize)]
 struct PreviewImageReq {
     data_b64: String,
-    #[serde(default = "d_dither")]
-    dither: String,
+    /// `None` = the printer's configured default dither.
+    #[serde(default)]
+    dither: Option<String>,
     #[serde(default = "d_100")]
     width_pct: u8,
+    /// Tone overrides; absent/null = the printer's configured defaults.
+    #[serde(default)]
+    gamma: Option<f32>,
+    #[serde(default)]
+    brightness: Option<f32>,
+    #[serde(default)]
+    contrast: Option<f32>,
 }
 
-fn d_dither() -> String { "fs".into() }
 fn d_100() -> u8 { 100 }
 
 async fn preview_image(
@@ -121,9 +136,14 @@ async fn preview_image(
         Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, format!("image base64: {e}")).into_response(),
     };
     let width = s.printer_cfg.width_dots;
+    let gamma = req.gamma.unwrap_or(s.printer_cfg.image_gamma);
+    let brightness = req.brightness.unwrap_or(s.printer_cfg.image_brightness);
+    let contrast = req.contrast.unwrap_or(s.printer_cfg.image_contrast);
+    let dither = req.dither.unwrap_or_else(|| s.printer_cfg.image_dither.clone());
     // Dithering a large photo is CPU-bound — keep it off the async workers.
     let out = tokio::task::spawn_blocking(move || {
-        custom::preview_image_raster(&bytes, width, req.width_pct, &req.dither).map(|r| raster_png(&r))
+        custom::preview_image_raster(&bytes, width, req.width_pct, &dither, gamma, brightness, contrast)
+            .map(|r| raster_png(&r))
     })
     .await;
     match out {
