@@ -1092,3 +1092,101 @@ button.plea.recording:hover { background: #8b2326; }
   border-radius: 8px;
   overflow: hidden;
 }
+
+/* ---- Print panel (custom thermal prints) ---- */
+.print-panel .panel-body { padding: 0.75rem; }
+.print-columns { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+.print-editor { flex: 1 1 24rem; min-width: 22rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.print-preview { flex: 0 0 auto; position: sticky; top: 0.5rem; }
+.print-preview-caption { margin-bottom: 0.35rem; max-width: 26rem; }
+
+.print-block-card {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #161b22;
+  padding: 0.45rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.print-block-head { justify-content: space-between; }
+.print-block-kind {
+  color: #58a6ff;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+.print-block-tools { display: flex; gap: 0.25rem; }
+.print-block-card textarea { width: 100%; resize: vertical; }
+.print-block-card input[type='number'] { width: 4rem; }
+.mini-label { color: #8b949e; font-size: 0.75rem; }
+.print-mm { width: 5rem; }
+.print-go {
+  background: #238636;
+  border-color: #2ea043;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.35rem 1.4rem;
+}
+.print-go:disabled { background: #21262d; color: #8b949e; }
+
+/* The paper strip: white like the receipt, black ink, exact dot-scaled sizes. */
+.print-paper {
+  background: #f5f5f0;
+  color: #111;
+  border: 1px solid #30363d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.print-dead-zone {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    rgba(180, 60, 60, 0.25) 5px,
+    rgba(180, 60, 60, 0.25) 10px
+  );
+  border-bottom: 1px dashed rgba(180, 60, 60, 0.6);
+}
+.print-text { white-space: pre; overflow: hidden; }
+.print-text > div { min-height: 1em; }
+.print-inverse { background: #111; color: #f5f5f0; display: inline-block; }
+.print-feed { position: relative; }
+.print-feed.flex {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 6px,
+    rgba(88, 166, 255, 0.12) 6px,
+    rgba(88, 166, 255, 0.12) 12px
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.print-feed.flex span { color: #4a6a8a; font-size: 0.7rem; }
+.print-raster { display: flex; flex-direction: column; align-items: center; }
+.print-raster img { image-rendering: pixelated; display: block; }
+.print-placeholder {
+  border: 1px dashed #999;
+  color: #999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+}
+.print-barcode {
+  background: repeating-linear-gradient(
+    90deg,
+    #111,
+    #111 2px,
+    transparent 2px,
+    transparent 4px,
+    #111 4px,
+    #111 7px,
+    transparent 7px,
+    transparent 9px
+  );
+}
+.print-hri { font-size: 0.7rem; color: #111; }

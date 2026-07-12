@@ -8,6 +8,7 @@ use tracing::info;
 
 use crate::config::Config;
 use crate::personas::PersonaRegistry;
+use crate::printer::service::PrintJob;
 use crate::printer::{Casebook, TrialRecord};
 
 pub mod commands;
@@ -46,7 +47,7 @@ pub struct Runtime {
     /// recorded verdict (so aborted trials don't consume numbers).
     next_case_no: AtomicU64,
     /// Finalized records go here for the printer service to render + emit.
-    print_tx: mpsc::Sender<TrialRecord>,
+    print_tx: mpsc::Sender<PrintJob>,
     /// Accumulates the in-flight trial's pieces; `None` between trials.
     draft: Option<TrialDraft>,
     /// Drives the turret aiming sequence during trials (arm on deliberation,
@@ -93,7 +94,7 @@ impl Runtime {
         display_tx: mpsc::Sender<Command>,
         personas: Arc<RwLock<PersonaRegistry>>,
         casebook: Arc<Casebook>,
-        print_tx: mpsc::Sender<TrialRecord>,
+        print_tx: mpsc::Sender<PrintJob>,
         targeting: Option<Arc<crate::targeting::TargetingController>>,
         capture: Option<Arc<crate::capture::CaptureController>>,
         lawyer_enabled: Arc<AtomicBool>,
@@ -321,7 +322,7 @@ impl Runtime {
 
         if let Some(c) = &cap {
             c.spawn(record, self.print_tx.clone());
-        } else if let Err(e) = self.print_tx.try_send(record) {
+        } else if let Err(e) = self.print_tx.try_send(PrintJob::Trial(record)) {
             // Non-blocking: a backed-up printer drops the receipt rather than
             // stalling the trial loop. The casebook line is already durable.
             tracing::warn!("keepsake not queued for print: {e}");
@@ -419,7 +420,7 @@ mod tests {
         let (inf_tx, _inf_rx) = mpsc::channel::<Command>(16);
         let (hw_tx, _hw_rx) = mpsc::channel::<Command>(16);
         let (disp_tx, _disp_rx) = mpsc::channel::<Command>(64);
-        let (print_tx, mut print_rx) = mpsc::channel::<TrialRecord>(8);
+        let (print_tx, mut print_rx) = mpsc::channel::<PrintJob>(8);
 
         let mut rt = Runtime::new(
             Arc::new(mk_cfg()),
@@ -459,7 +460,9 @@ mod tests {
         rt.handle(Event::TtsFinished).await; // → ExecutingSentence → finalize
 
         // Queued for printing, with every field harvested from the right place.
-        let rec = print_rx.try_recv().expect("a record was queued for print");
+        let PrintJob::Trial(rec) = print_rx.try_recv().expect("a record was queued for print") else {
+            panic!("trial finalization queued a non-trial job");
+        };
         assert_eq!(rec.case_no, 1);
         assert_eq!(rec.charge, "the CHARGE");
         assert_eq!(rec.plea, "the PLEA");

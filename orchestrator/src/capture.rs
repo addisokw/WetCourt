@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use crate::config::CaptureConfig;
 use crate::printer::record::TrialRecord;
+use crate::printer::service::PrintJob;
 
 pub struct CaptureController {
     http: reqwest::Client,
@@ -35,7 +36,7 @@ impl CaptureController {
 
     /// Grab the burst, attach the chosen receipt still to `record`, then queue it
     /// for print. Spawned per guilty trial; never blocks the caller.
-    pub fn spawn(self: &Arc<Self>, mut record: TrialRecord, print_tx: mpsc::Sender<TrialRecord>) {
+    pub fn spawn(self: &Arc<Self>, mut record: TrialRecord, print_tx: mpsc::Sender<PrintJob>) {
         let this = self.clone();
         tokio::spawn(async move {
             let frames = this.grab_burst(&record).await;
@@ -48,7 +49,7 @@ impl CaptureController {
                 frames = frames.len(),
                 "moment-of-justice burst captured"
             );
-            if let Err(e) = print_tx.send(record).await {
+            if let Err(e) = print_tx.send(PrintJob::Trial(record)).await {
                 warn!("capture: keepsake not queued for print: {e}");
             }
         });

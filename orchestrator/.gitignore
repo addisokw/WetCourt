@@ -7,3 +7,4 @@ crates/crimes-editor/frontend/node_modules
 crates/crimes-editor/frontend/dist
 booth.log
 transcripts.jsonl
+print_templates.json

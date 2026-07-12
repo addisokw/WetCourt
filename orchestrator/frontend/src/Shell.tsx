@@ -13,8 +13,9 @@ import GavelPanel from './panels/GavelPanel';
 import TurretPanel from './panels/TurretPanel';
 import VisionPanel from './panels/VisionPanel';
 import LawyerPanel from './panels/LawyerPanel';
+import PrintPanel from './panels/PrintPanel';
 
-type Tab = 'operator' | 'judge_mind' | 'vision' | 'lawyer' | 'judge_body' | 'gavel' | 'turret';
+type Tab = 'operator' | 'judge_mind' | 'vision' | 'lawyer' | 'print' | 'judge_body' | 'gavel' | 'turret';
 type Kind = 'operator' | 'config' | 'hardware';
 
 // 'config' tabs hit the /operator/* endpoints and are safe live (ungated).
@@ -25,6 +26,7 @@ const TABS: Array<{ id: Tab; label: string; kind: Kind }> = [
   { id: 'judge_mind', label: 'Judge Mind', kind: 'config' },
   { id: 'vision', label: 'Vision', kind: 'config' },
   { id: 'lawyer', label: 'Lawyer', kind: 'config' },
+  { id: 'print', label: 'Print', kind: 'config' },
   { id: 'judge_body', label: 'Judge Body', kind: 'hardware' },
   { id: 'gavel', label: 'Gavel', kind: 'hardware' },
   { id: 'turret', label: 'Turret', kind: 'hardware' },
@@ -124,6 +126,13 @@ export default function Shell() {
         <Show when={tab() === 'lawyer'}>
           <div class="maint-tab">
             <LawyerPanel />
+          </div>
+        </Show>
+
+        {/* Custom prints — compose + print through /operator/print, safe live. */}
+        <Show when={tab() === 'print'}>
+          <div class="maint-tab">
+            <PrintPanel />
           </div>
         </Show>
 

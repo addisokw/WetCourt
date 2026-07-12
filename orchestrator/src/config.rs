@@ -188,6 +188,18 @@ pub struct PrinterConfig {
     /// "Find us here" footer line. Editable on-site as the booth moves.
     #[serde(default = "d_printer_loc")]
     pub booth_location: String,
+    /// Distance from the print head to the cutter blade, in 203-dpi dots. Sets
+    /// the unprintable dead zone at the top of size-bounded custom prints and
+    /// the minimum trailing feed before their closing cut. Calibrate by
+    /// printing a fixed-length strip and measuring top-edge-to-first-line.
+    #[serde(default = "d_head_to_cutter")]
+    pub head_to_cutter_dots: u32,
+    /// The printer's vertical motion unit (what ESC J feeds and ESC 3 line
+    /// spacing count in), as units per inch. The booth POS-80 uses the Epson
+    /// default 1/360" — a strip commanded as 400 "dots" measured 28.2mm, i.e.
+    /// 400/360". A printer whose feeds are true 203-dpi dots would be 203.
+    #[serde(default = "d_feed_units")]
+    pub feed_units_per_inch: u32,
 }
 
 impl Default for PrinterConfig {
@@ -199,6 +211,8 @@ impl Default for PrinterConfig {
             width_dots: d_printer_width(),
             qr_url: d_printer_qr(),
             booth_location: d_printer_loc(),
+            head_to_cutter_dots: d_head_to_cutter(),
+            feed_units_per_inch: d_feed_units(),
         }
     }
 }
@@ -206,6 +220,12 @@ impl Default for PrinterConfig {
 fn d_printer_mode() -> String { "mock".into() }
 fn d_printer_transport() -> String { "usb".into() }
 fn d_printer_width() -> u32 { 576 }
+// Measured on the booth POS-80: 17.0mm from the cut edge to the first printed
+// line (~136 dots @ 203dpi). The crate's CUTTER_CLEARANCE_DOTS (110) was the
+// pre-calibration guess.
+fn d_head_to_cutter() -> u32 { 136 }
+// Measured: vertical commands move in 1/360" Epson-default units, not dots.
+fn d_feed_units() -> u32 { 360 }
 fn d_printer_qr() -> String { "https://wetcourt.lol".into() }
 fn d_printer_loc() -> String { "Find the Wet Court near you".into() }
 

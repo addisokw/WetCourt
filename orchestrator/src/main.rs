@@ -124,6 +124,22 @@ async fn main() -> Result<()> {
 
     let print_tx = printer::service::spawn(cfg.printer.clone(), display_bcast.clone());
 
+    // Custom-print templates: same convention as personas/crimes — a JSON file
+    // next to the config so it travels with the deployment.
+    let templates_path = cli
+        .config
+        .parent()
+        .map(|p| p.join("print_templates.json"))
+        .unwrap_or_else(|| PathBuf::from("print_templates.json"));
+    let print_templates = printer::templates::TemplateStore::load_from_file(&templates_path)
+        .map_err(|e| anyhow::anyhow!("loading print templates from {}: {e:#}", templates_path.display()))?;
+    tracing::info!(
+        path = %templates_path.display(),
+        count = print_templates.list().len(),
+        "print templates ready"
+    );
+    let print_templates = Arc::new(tokio::sync::RwLock::new(print_templates));
+
     // Maintenance direct-control sink + shared device-presence snapshot. The
     // hardware driver consumes `maint_cmd_rx` and keeps `devices` in sync as
     // devices connect/disconnect (the mock driver seeds all roles present).
@@ -361,6 +377,9 @@ async fn main() -> Result<()> {
         lawyer_enabled: lawyer_enabled.clone(),
         lawyer_call_active: lawyer_call_active.clone(),
         lawyer_base_url: cfg.lawyer.base_url.clone(),
+        print_job_tx: print_tx.clone(),
+        print_templates,
+        printer_cfg: cfg.printer.clone(),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;

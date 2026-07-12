@@ -179,3 +179,57 @@ Order of operations matters: the print is dispatched at finalize, so the still
 must be captured *before* `finalize_trial()` sends the record — i.e. fetch the
 frame during the `ExecutingSentence` entry, attach it to the draft, then
 finalize.
+
+## Custom prints — the console Print panel
+
+The operator console has a **Print** tab (config-kind, safe live): a block
+editor (text / rule / feed / QR / barcode / image) with a dot-scaled live
+preview, named templates, and a Print button. Backend pieces:
+
+- `orchestrator/src/printer/custom.rs` — `PrintDoc` block schema, validation,
+  the deterministic height model, and `render_custom`. QR codes are rasterized
+  locally (`qrcode` crate) so heights are exact and previews pixel-true;
+  images are dithered via `raster::from_bytes`.
+- `orchestrator/src/printer/service.rs` — the queue now carries
+  `PrintJob::{Trial, Custom}`; custom jobs reply over a oneshot so
+  `POST /operator/print` returns `{"status":"printed"|"mock"|"off","bytes":N}`.
+- `orchestrator/src/display/print.rs` — `/operator/print` (print, `config`,
+  `preview_image`, `preview_qr`, `templates` CRUD). These routes carry a 10MB
+  body limit for base64 images; everything else keeps axum's 2MB default.
+- Templates persist in `print_templates.json` next to the config
+  (gitignored, same convention as the crimes list).
+
+### Size-bounded mode (fixed cut-to-cut strips)
+
+`length_mm` on the document guarantees an exact strip length — e.g. the
+80×50mm plaque insert. The renderer keeps a dot ledger (explicit line spacing,
+`feed_dots`, known raster heights; HRI disabled on barcodes), distributes
+leftover length into `flex` feed spacers (springs — one above and below
+centers content), optionally shrinks `shrink: true` images, then emits a
+precise fill feed + bare partial cut. Overflow is a 422 listing per-block
+heights in mm.
+
+**Physics:** the blade sits `head_to_cutter_dots` (default 110 ≈ 13.7mm)
+past the head and the POS-80 can't reverse-feed, so the top ~13.7mm of every
+fixed strip is unprintable (hatched in the preview). A 50mm strip has ~36mm
+printable.
+
+**Calibration (done 2026-07-11, one confirmation pass pending):** the first
+50mm strip came out 28.6mm with a 17mm top dead zone. Findings, now encoded in
+code + `config.toml`:
+
+- The POS-80 interprets ESC J (feed) and ESC 3 (line spacing) in **1/360"
+  Epson-default motion units**, not 203-dpi dots (400 commanded dots printed
+  400/360" = 28.2mm). `render_custom` now converts every vertical command via
+  `[printer] feed_units_per_inch` (360) and keeps a unit-exact ledger so the
+  cut-to-cut total lands on target. Raster rows are physical dots and are not
+  converted.
+- Head-to-blade distance measured 17.0mm -> `head_to_cutter_dots = 136`.
+- Springs fill the *entire* printable window by design: with a trailing flex
+  spacer the last block sits flush against the bottom cut. Add a fixed feed
+  before the end (or weight the springs) if the plaque needs a bottom margin.
+
+To re-verify after any hardware change: print a fixed 50mm strip with a rule
+as first and last block; calipers should read 50.0mm cut-to-cut and 17.0mm to
+the first rule. A barcode inside a bounded strip is the one unverified height
+(GS h is assumed to be real dots) — check it once before relying on it.

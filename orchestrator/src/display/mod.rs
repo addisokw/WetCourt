@@ -30,6 +30,7 @@ use crate::state_machine::{Command, Event};
 pub mod assets;
 pub mod autofire;
 pub mod events;
+pub mod print;
 
 use autofire::AutoFire;
 use events::{ClientEvent, DisplayEvent};
@@ -113,6 +114,14 @@ pub struct AppState {
     /// Base URL of the lawyer-phone service (`counsel`); `/lawyer/*` proxies
     /// there, same pattern as vision (reuses `vision_http`).
     pub lawyer_base_url: String,
+    /// Job sink shared with the trial path — custom prints queue behind
+    /// keepsakes on the one physical printer.
+    pub print_job_tx: mpsc::Sender<crate::printer::service::PrintJob>,
+    /// Named custom-print templates (`print_templates.json` next to the config).
+    pub print_templates: Arc<RwLock<crate::printer::templates::TemplateStore>>,
+    /// Printer tunables the print handlers need directly (dot width for
+    /// previews; the service holds its own copy for rendering).
+    pub printer_cfg: crate::config::PrinterConfig,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -135,6 +144,8 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
         .route("/operator/cross_exam", get(get_cross_exam).post(set_cross_exam))
+        // ---- Custom prints (own sub-router: raised body limit for images) ----
+        .merge(print::router())
         // ---- Maintenance / hardware test plane ----
         .route("/maintenance/enter", post(maintenance_enter))
         .route("/maintenance/exit", post(maintenance_exit))

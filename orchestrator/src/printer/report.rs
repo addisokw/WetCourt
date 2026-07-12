@@ -17,6 +17,7 @@ use thermal_printer::escpos::{Align, Builder, Font, QrEcc, WIDTH_DOTS_80MM};
 use thermal_printer::raster::{self, Raster};
 use thermal_printer::text::{cols_for, wrap};
 
+use super::asciify;
 use super::record::TrialRecord;
 use crate::state_machine::states::{CrossExam, NO_DEFENSE};
 
@@ -219,23 +220,6 @@ fn plea_text(rec: &TrialRecord) -> String {
     } else {
         format!("\"{}\"", asciify(rec.plea.trim()))
     }
-}
-
-/// Fold the smart punctuation that LLM/STT output is full of down to the ASCII
-/// the printer can render — otherwise [`Builder::text`] would stamp each curly
-/// quote / em-dash as a literal `?`.
-fn asciify(s: &str) -> String {
-    let s = s.replace('\u{2026}', "..."); // ellipsis
-    s.chars()
-        .map(|c| match c {
-            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{2032}' => '\'',
-            '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{2033}' => '"',
-            '\u{2013}' | '\u{2014}' | '\u{2212}' => '-',
-            '\u{00A0}' => ' ',
-            c if c.is_ascii() => c,
-            _ => ' ', // anything else we can't print: a space beats a '?'
-        })
-        .collect()
 }
 
 // ---- drawn imagery ----------------------------------------------------------
