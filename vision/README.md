@@ -51,9 +51,20 @@ each frame, if a target part is set and a person is detected:
 
 Operator workflow (in the console **Vision** tab): pick a target part, click the
 feed to set the boresight, watch the overlay track (gun still still), then
-**Arm** to let it drive the turret. **Tune `--gain-pan/--gain-tilt` and their
-sign** on the real rig so the target converges without oscillating — the sign
-depends on servo direction + camera orientation. Disarm stops the gun instantly.
+**Arm** to let it drive the turret. **Tune the gains and their sign** on the
+real rig so the target converges without oscillating — the sign depends on
+servo direction + camera orientation. Disarm stops the gun instantly.
+
+**Tuning persists host-side, like the servo calibrations.** This process holds
+gains/tolerance/boresight/target only in memory (seeded from CLI flags), so on
+its own it forgets them on every restart. The deliberate flow: tune live in
+the console (edits apply immediately), then **Save tuning** — the orchestrator
+stores them in `orchestrator/calibration/vision.toml` and re-pushes them to
+this process every time it (re)appears on `/health` (orchestrator launch or a
+vision restart). The CLI `--gain-*`/`--tolerance` flags are only the pre-seed
+defaults; the saved tuning overrides them within seconds of startup. The trial
+FSM also acquires the *saved* `target_part` (chest|head) at deliberation, and
+the auto-fire dwell rides along in the same file.
 
 ## Run (dev, booth PC)
 
@@ -85,8 +96,7 @@ an offline booth.
 | `POST /aimpoint` | `{"x","y"}` — click-to-aim: one-shot open-loop nudge putting the clicked pixel on the boresight (gain-converted, ±20°/click, stops the body servo; the held aim streams ~0.8s with `fire_ok:false`) |
 | `POST /select` | `{"x","y"}` — click-to-track: select the person track at/nearest the pixel and servo onto *them*; `{"clear":true}` deselects. A selected-but-lost track HOLDS the gun (never migrates to a bystander) |
 | `POST /boresight` | `{"x":int,"y":int}` — set the boresight pixel |
-| `POST /gains` | `{gain_pan?,gain_tilt?,tolerance?}` — live-tune the servo |
-| `POST /confirm_head` | `{"enabled":bool}` — operator gate for head shots |
+| `POST /gains` | `{gain_pan?,gain_tilt?,tolerance?}` — live-tune the servo (in-memory; Save in the console to persist) |
 | `POST /center` | stop tracking, reset aim integrator, clear selection (recovery) |
 | `GET /health` | `ok` |
 

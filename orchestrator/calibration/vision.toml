@@ -1,0 +1,12 @@
+role = "vision"
+
+[vision]
+gain_pan = 0.01
+gain_tilt = 0.01
+tolerance = 40
+boresight = [
+    320,
+    240,
+]
+target_part = "head"
+autofire_dwell_ms = 2000

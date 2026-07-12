@@ -24,6 +24,18 @@ export interface GavelCal {
   strikes: number;
 }
 
+// Vision targeting-servo tuning (role "vision"). Mirrors the backend
+// `VisionCal` (src/calibration/mod.rs); pushed to the vision process by the
+// orchestrator whenever it (re)connects.
+export interface VisionCal {
+  gain_pan: number;
+  gain_tilt: number;
+  tolerance: number;
+  boresight?: [number, number] | null;
+  target_part: string; // "chest" | "head"
+  autofire_dwell_ms?: number | null;
+}
+
 export interface Calibration {
   role: string;
   pan?: ServoCal | null;
@@ -32,6 +44,7 @@ export interface Calibration {
   // time. Absent on roles that don't fire.
   fire_ms?: number | null;
   gavel?: GavelCal | null;
+  vision?: VisionCal | null;
 }
 
 export interface DeviceInfo {

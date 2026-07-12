@@ -19,12 +19,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, RwLock};
-use tracing::debug;
+use tracing::{debug, info, warn};
 
-use crate::calibration::CalibrationRegistry;
+use crate::calibration::{CalibrationRegistry, VisionCal};
 use crate::hardware::maintenance::{MaintenanceCommand, Role};
 use crate::hardware::protocol::HardwareCommand;
 use crate::state_machine::TargetingCue;
+
+/// How often the tuning seeder probes the vision process's `/health`.
+const SEED_PROBE_SECS: u64 = 3;
 
 pub struct TargetingController {
     targeting_armed: Arc<AtomicBool>,
@@ -48,12 +51,20 @@ impl TargetingController {
     pub async fn execute(&self, cue: TargetingCue) {
         match cue {
             TargetingCue::Acquire => {
-                // Reset the vision aim integrator to center (via /target head, which
-                // also re-selects the head target) so the gun visibly sweeps from
+                // Reset the vision aim integrator to center (via /target, which
+                // also re-selects the target part) so the gun visibly sweeps from
                 // idle onto the defendant, then arm so the orchestrator relays that
-                // aim to the turret.
+                // aim to the turret. The part comes from the saved vision tuning
+                // (vision.toml, console "Save tuning"); "head" if none saved.
                 self.targeting_armed.store(true, Ordering::Relaxed);
-                self.spawn_vision_post("target", serde_json::json!({ "part": "head" }));
+                let part = {
+                    let reg = self.calibration.read().await;
+                    reg.get("vision")
+                        .and_then(|c| c.vision.as_ref())
+                        .map(|v| v.target_part.clone())
+                        .unwrap_or_else(|| "head".into())
+                };
+                self.spawn_vision_post("target", serde_json::json!({ "part": part }));
                 debug!("targeting: acquire (armed, aim reset to center)");
             }
             TargetingCue::Freeze => {
@@ -74,6 +85,97 @@ impl TargetingController {
                 debug!("targeting: idle (disarmed, turret centering)");
             }
         }
+    }
+
+    /// Push the saved vision tuning to the vision process whenever it
+    /// (re)appears. The vision process holds gains/tolerance/boresight only in
+    /// memory (seeded from its CLI defaults), so every vision — or orchestrator —
+    /// restart used to silently revert the console's tuning. This watches
+    /// `/health` and, on each offline→online transition (including the first
+    /// sighting after launch), applies the tuning saved in `vision.toml`.
+    ///
+    /// Deliberately transition-only: while vision stays up, live unsaved tuning
+    /// is never clobbered by a reconcile.
+    pub fn spawn_tuning_seeder(self: &Arc<Self>) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            let mut online = false;
+            loop {
+                let up = this.vision_healthy().await;
+                if up && !online {
+                    let saved = {
+                        let reg = this.calibration.read().await;
+                        reg.get("vision").and_then(|c| c.vision.clone())
+                    };
+                    match saved {
+                        Some(v) => this.apply_tuning(&v).await,
+                        None => debug!("vision up; no saved tuning (vision.toml) to seed"),
+                    }
+                }
+                online = up;
+                tokio::time::sleep(Duration::from_secs(SEED_PROBE_SECS)).await;
+            }
+        });
+    }
+
+    async fn vision_healthy(&self) -> bool {
+        let url = format!("{}/health", self.vision_base_url.trim_end_matches('/'));
+        matches!(
+            self.vision_http
+                .get(url)
+                .timeout(Duration::from_secs(2))
+                .send()
+                .await,
+            Ok(resp) if resp.status().is_success()
+        )
+    }
+
+    /// Apply a saved tuning to the live vision process (gains + tolerance,
+    /// boresight when calibrated, resting target part). Failures warn — the
+    /// next offline→online transition retries.
+    pub async fn apply_tuning(&self, v: &VisionCal) {
+        let base = self.vision_base_url.trim_end_matches('/').to_string();
+        let posts: Vec<(&str, serde_json::Value)> = [
+            Some((
+                "gains",
+                serde_json::json!({
+                    "gain_pan": v.gain_pan,
+                    "gain_tilt": v.gain_tilt,
+                    "tolerance": v.tolerance,
+                }),
+            )),
+            v.boresight
+                .map(|[x, y]| ("boresight", serde_json::json!({ "x": x, "y": y }))),
+            Some(("target", serde_json::json!({ "part": v.target_part }))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        for (path, body) in posts {
+            let res = self
+                .vision_http
+                .post(format!("{base}/{path}"))
+                .timeout(Duration::from_secs(2))
+                .json(&body)
+                .send()
+                .await;
+            match res {
+                Ok(resp) if resp.status().is_success() => {}
+                Ok(resp) => warn!("vision tuning seed: /{path} rejected ({})", resp.status()),
+                Err(e) => {
+                    warn!("vision tuning seed: /{path} failed: {e}");
+                    return; // it just went away again; the next transition retries
+                }
+            }
+        }
+        info!(
+            gain_pan = v.gain_pan,
+            gain_tilt = v.gain_tilt,
+            tolerance = v.tolerance,
+            boresight = ?v.boresight,
+            target_part = %v.target_part,
+            "vision tuning seeded from saved calibration"
+        );
     }
 
     /// Best-effort POST to the vision process, detached so a slow/down vision

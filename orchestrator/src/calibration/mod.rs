@@ -136,9 +136,86 @@ impl GavelCal {
     }
 }
 
+/// The vision targeting servo's tuning — the "firmware" here is the vision
+/// process, which holds these live in memory (seeded from its CLI flags) and
+/// loses them on restart. The host owns the saved copy, same as servo
+/// calibration: the console tunes live, then deliberately saves; the
+/// orchestrator re-seeds the vision process whenever it (re)appears.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VisionCal {
+    /// Degrees of pan per pixel of boresight error. Sign is hardware-dependent
+    /// (negative flips the servo direction). f64 so console-typed decimals
+    /// (0.05) round-trip through the toml without float noise.
+    pub gain_pan: f64,
+    /// Degrees of tilt per pixel of error.
+    pub gain_tilt: f64,
+    /// Pixel error within which the target counts as LOCKED.
+    pub tolerance: u32,
+    /// The camera pixel the gun actually points at ([x, y]); `None` = frame
+    /// center. Calibrated by clicking the feed where the stream lands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boresight: Option<[u32; 2]>,
+    /// Body part the trial's Acquire cue targets ("chest" | "head" — never
+    /// "none": a guilty verdict must always have something to lock onto).
+    #[serde(default = "default_target_part")]
+    pub target_part: String,
+    /// Auto-fire dwell (ms) — how long a lock must hold before the tuning
+    /// tool fires. The enabled flag is deliberately NOT persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autofire_dwell_ms: Option<u64>,
+}
+
+fn default_target_part() -> String {
+    "head".into()
+}
+
+impl VisionCal {
+    /// |gain| ceiling (deg/px): at 640 px wide even 0.5 deg/px is a wild slew;
+    /// 1.0 rejects nonsense while leaving generous tuning room either sign.
+    const GAIN_MAX: f64 = 1.0;
+    const TOLERANCE_MAX: u32 = 200;
+    /// Matches `autofire::MAX_DWELL_MS`.
+    const DWELL_MAX_MS: u64 = 60_000;
+    /// Sanity bound for a boresight coordinate (any plausible camera mode).
+    const BORESIGHT_MAX: u32 = 8192;
+
+    fn validate(&self) -> Result<()> {
+        for (name, g) in [("gain_pan", self.gain_pan), ("gain_tilt", self.gain_tilt)] {
+            if !g.is_finite() || g.abs() > Self::GAIN_MAX {
+                bail!("vision.{name} ({g}) must be finite and within ±{}", Self::GAIN_MAX);
+            }
+        }
+        if self.tolerance < 1 || self.tolerance > Self::TOLERANCE_MAX {
+            bail!(
+                "vision.tolerance ({}) must be within [1, {}]",
+                self.tolerance,
+                Self::TOLERANCE_MAX
+            );
+        }
+        if let Some([x, y]) = self.boresight {
+            if x > Self::BORESIGHT_MAX || y > Self::BORESIGHT_MAX {
+                bail!("vision.boresight ({x}, {y}) out of range (max {})", Self::BORESIGHT_MAX);
+            }
+        }
+        if !matches!(self.target_part.as_str(), "chest" | "head") {
+            bail!(
+                "vision.target_part ('{}') must be \"chest\" or \"head\"",
+                self.target_part
+            );
+        }
+        if let Some(ms) = self.autofire_dwell_ms {
+            if ms > Self::DWELL_MAX_MS {
+                bail!("vision.autofire_dwell_ms ({ms}) must be ≤ {}", Self::DWELL_MAX_MS);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// All calibration for one device role. Axes are optional (the gavel has none),
 /// `fire_ms` is the squirt board's relay-open duration (ms) — the single
-/// test-fire time set from the console, `gavel` is the gavel's strike geometry.
+/// test-fire time set from the console, `gavel` is the gavel's strike geometry,
+/// `vision` is the targeting servo's tuning (role "vision").
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Calibration {
     pub role: String,
@@ -150,6 +227,8 @@ pub struct Calibration {
     pub fire_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gavel: Option<GavelCal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vision: Option<VisionCal>,
 }
 
 static ROLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -178,6 +257,9 @@ impl Calibration {
         }
         if let Some(g) = &self.gavel {
             g.validate()?;
+        }
+        if let Some(v) = &self.vision {
+            v.validate()?;
         }
         Ok(())
     }
@@ -293,6 +375,7 @@ mod tests {
             tilt: Some(pan_cal()),
             fire_ms: None, // turret aims; the squirt board owns fire_ms
             gavel: None,
+            vision: None,
         }
     }
 
@@ -346,6 +429,7 @@ mod tests {
             tilt: None,
             fire_ms: None,
             gavel: Some(gavel_cal()),
+            vision: None,
         };
         assert!(gavel.aim_to_raw(0.0, 0.0).is_err());
     }
@@ -358,6 +442,7 @@ mod tests {
             tilt: None,
             fire_ms: None,
             gavel: Some(gavel_cal()),
+            vision: None,
         };
         let text = toml::to_string_pretty(&cal).unwrap();
         let back: Calibration = toml::from_str(&text).unwrap();
@@ -403,6 +488,80 @@ settle_dwell_ms = 160
 ";
         let cal: Calibration = toml::from_str(text).unwrap();
         assert_eq!(cal.gavel.unwrap().strikes, 1);
+    }
+
+    fn vision_cal() -> VisionCal {
+        VisionCal {
+            gain_pan: 0.025,
+            gain_tilt: -0.03,
+            tolerance: 12,
+            boresight: Some([320, 260]),
+            target_part: "head".into(),
+            autofire_dwell_ms: Some(2000),
+        }
+    }
+
+    #[test]
+    fn vision_cal_roundtrips_through_toml() {
+        let cal = Calibration {
+            role: "vision".into(),
+            pan: None,
+            tilt: None,
+            fire_ms: None,
+            gavel: None,
+            vision: Some(vision_cal()),
+        };
+        let text = toml::to_string_pretty(&cal).unwrap();
+        let back: Calibration = toml::from_str(&text).unwrap();
+        assert_eq!(back, cal);
+        assert!(back.validate().is_ok());
+    }
+
+    #[test]
+    fn vision_cal_rejects_nonsense() {
+        let mut v = vision_cal();
+        v.gain_pan = f64::NAN;
+        assert!(v.validate().is_err());
+        v = vision_cal();
+        v.gain_tilt = 5.0; // beyond the ±1 deg/px ceiling
+        assert!(v.validate().is_err());
+        v = vision_cal();
+        v.tolerance = 0;
+        assert!(v.validate().is_err());
+        v = vision_cal();
+        v.target_part = "none".into(); // trials must always have a real target
+        assert!(v.validate().is_err());
+        v = vision_cal();
+        v.autofire_dwell_ms = Some(120_000);
+        assert!(v.validate().is_err());
+        assert!(vision_cal().validate().is_ok());
+    }
+
+    #[test]
+    fn vision_cal_backfills_target_part() {
+        let text = "\
+role = \"vision\"
+[vision]
+gain_pan = 0.025
+gain_tilt = 0.025
+tolerance = 12
+";
+        let cal: Calibration = toml::from_str(text).unwrap();
+        let v = cal.vision.unwrap();
+        assert_eq!(v.target_part, "head");
+        assert!(v.boresight.is_none());
+        assert!(v.autofire_dwell_ms.is_none());
+    }
+
+    #[test]
+    fn shipped_vision_toml_parses() {
+        // Keep the seed calibration/vision.toml loadable — the registry refuses
+        // to start on an invalid file.
+        let text = include_str!("../../calibration/vision.toml");
+        let cal: Calibration = toml::from_str(text).unwrap();
+        assert_eq!(cal.role, "vision");
+        assert!(cal.validate().is_ok());
+        assert!(cal.vision.is_some());
     }
 
     #[test]

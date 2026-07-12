@@ -206,8 +206,17 @@ async fn main() -> Result<()> {
     let vision_gate = Arc::new(hardware::gate::VisionFireGate::new(
         hardware::gate::FIRE_OK_STALE_MS,
     ));
-    // Targeting-panel auto-fire, off by default with a 2 s default dwell.
-    let auto_fire = Arc::new(display::autofire::AutoFire::new(2000));
+    // Targeting-panel auto-fire, off by default; the dwell comes from the
+    // saved vision tuning (vision.toml) so it survives restarts — 2 s when
+    // nothing is saved. The enabled flag is deliberately never persisted.
+    let saved_dwell_ms = {
+        let reg = calibration.read().await;
+        reg.get("vision")
+            .and_then(|c| c.vision.as_ref())
+            .and_then(|v| v.autofire_dwell_ms)
+            .unwrap_or(2000)
+    };
+    let auto_fire = Arc::new(display::autofire::AutoFire::new(saved_dwell_ms));
 
     // Hardware driver (mock or tcp registry). Owns both command sources — the
     // trial state machine (via the Command::Hardware adapter) and the
@@ -335,6 +344,10 @@ async fn main() -> Result<()> {
         calibration.clone(),
         maint_cmd_tx.clone(),
     ));
+    // Re-seed the vision process with the saved tuning (gains/tolerance/
+    // boresight/target) whenever it (re)appears — vision holds those only in
+    // memory, so without this every restart reverted the console's tuning.
+    targeting.spawn_tuning_seeder();
 
     // Guilty "moment of justice" burst capture (feeds the keepsake receipt).
     let capture = Arc::new(capture::CaptureController::new(

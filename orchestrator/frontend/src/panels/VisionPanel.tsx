@@ -1,5 +1,13 @@
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
-import { calibrations, fetchCalibrations, maintenanceActive, sendCommand } from '../maintenance';
+import { createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js';
+import {
+  calibrations,
+  fetchCalibrations,
+  maintenanceActive,
+  saveCalibration,
+  sendCommand,
+  updateCalibration,
+  VisionCal,
+} from '../maintenance';
 import { AckChip, useAck } from './common';
 import VisionFeed from './VisionFeed';
 
@@ -177,6 +185,103 @@ export default function VisionPanel() {
 
   const tgt = () => state()?.targets;
   const part = () => state()?.target_part ?? 'none';
+
+  // --- Tuning persistence (mirrors the device panels' Apply/Save flow). Live
+  // edits above take effect immediately in the vision process but die with it;
+  // Save writes them into calibration/vision.toml, and the orchestrator
+  // re-seeds the vision process from there whenever it (re)connects.
+  const savedTuning = createMemo<VisionCal | null>(() => calibrations().vision?.vision ?? null);
+  const [tuneStatus, setTuneStatus] = createSignal('');
+  const [tuneError, setTuneError] = createSignal('');
+
+  /** The tuning as currently live (what Save would persist). */
+  function liveTuning(): VisionCal | null {
+    const p = panVal();
+    const t = tiltVal();
+    const tolv = tolVal();
+    if (p == null || t == null || tolv == null) return null; // vision offline, nothing to capture
+    const bs = state()?.boresight;
+    // "none" is a transient console state, never a trial target — keep the
+    // saved part (or the head default) in that case.
+    const livePart = part();
+    const target_part =
+      livePart === 'chest' || livePart === 'head'
+        ? livePart
+        : savedTuning()?.target_part ?? 'head';
+    return {
+      gain_pan: p,
+      gain_tilt: t,
+      tolerance: tolv,
+      boresight:
+        bs && bs.length === 2
+          ? [Math.round(bs[0]), Math.round(bs[1])]
+          : savedTuning()?.boresight ?? null,
+      target_part,
+      autofire_dwell_ms: dwellMs(),
+    };
+  }
+
+  const tuningDirty = createMemo<boolean>(() => {
+    const live = liveTuning();
+    const saved = savedTuning();
+    if (!live) return false;
+    if (!saved) return true;
+    return (
+      round3(live.gain_pan) !== round3(saved.gain_pan) ||
+      round3(live.gain_tilt) !== round3(saved.gain_tilt) ||
+      live.tolerance !== saved.tolerance ||
+      live.target_part !== saved.target_part ||
+      String(live.boresight ?? '') !== String(saved.boresight ?? '') ||
+      live.autofire_dwell_ms !== (saved.autofire_dwell_ms ?? live.autofire_dwell_ms)
+    );
+  });
+
+  async function saveTuning() {
+    const live = liveTuning();
+    if (!live) return;
+    setTuneError('');
+    setTuneStatus('saving…');
+    try {
+      const base = calibrations().vision ?? { role: 'vision' };
+      await updateCalibration('vision', { ...base, vision: live });
+      await saveCalibration('vision');
+      setTuneStatus('saved to disk');
+    } catch (e) {
+      setTuneError(String(e));
+      setTuneStatus('');
+    }
+  }
+
+  /** Push the saved tuning back into the live vision process. */
+  async function reapplySaved() {
+    const saved = savedTuning();
+    if (!saved) return;
+    setTuneError('');
+    setTuneStatus('re-applying…');
+    try {
+      await post('/vision/gains', {
+        gain_pan: saved.gain_pan,
+        gain_tilt: saved.gain_tilt,
+        tolerance: saved.tolerance,
+      });
+      if (saved.boresight) {
+        await post('/vision/boresight', { x: saved.boresight[0], y: saved.boresight[1] });
+      }
+      await post('/vision/target', { part: saved.target_part });
+      if (saved.autofire_dwell_ms != null) {
+        await post('/vision/autofire', { dwell_ms: saved.autofire_dwell_ms });
+        setDwellLocal(null);
+      }
+      setGainPan(null);
+      setGainTilt(null);
+      setTol(null);
+      await poll();
+      setTuneStatus('saved tuning re-applied');
+    } catch (e) {
+      setTuneError(String(e));
+      setTuneStatus('');
+    }
+  }
 
   return (
     <div class="panel-card">
@@ -357,6 +462,26 @@ export default function VisionPanel() {
           <span class="muted small">px error for LOCKED</span>
         </div>
 
+        <div class="vision-row">
+          <label>tuning</label>
+          <button disabled={!online() || !liveTuning()} onClick={() => void saveTuning()}>
+            Save tuning
+          </button>
+          <button disabled={!online() || !savedTuning()} onClick={() => void reapplySaved()}>
+            Re-apply saved
+          </button>
+          <Show
+            when={tuningDirty()}
+            fallback={<span class="muted small">{savedTuning() ? 'matches saved' : 'nothing saved yet'}</span>}
+          >
+            <span class="af-warn">unsaved changes — lost if vision restarts</span>
+          </Show>
+        </div>
+        <div class="status-line">
+          <Show when={tuneStatus()}><span class="status">{tuneStatus()}</span></Show>
+          <Show when={tuneError()}><span class="err">{tuneError()}</span></Show>
+        </div>
+
         <ul class="vision-state">
           <li>
             lock:{' '}
@@ -371,8 +496,11 @@ export default function VisionPanel() {
         </ul>
         <p class="muted small">
           Tune the gains live until the target converges on the boresight without oscillating —
-          if the gun runs <em>away</em> from the target, flip that axis's gain sign. Firing +
-          eye-safety come next.
+          if the gun runs <em>away</em> from the target, flip that axis's gain sign. Edits apply
+          immediately but live only in the vision process; <b>Save tuning</b> persists them
+          (gains, tolerance, boresight, target, auto-fire dwell) to <code>vision.toml</code>,
+          and the orchestrator re-seeds vision from there on every (re)connect. Trials acquire
+          the <em>saved</em> target part.
         </p>
       </section>
 
