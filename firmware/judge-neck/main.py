@@ -28,8 +28,8 @@ CH_TILT = 1                  # channel 1 = tilt
 
 # Absolute safety clamp on pulse width (µs). The host already clamps to the
 # per-axis calibration range; this is a hard backstop against a bad line.
-PULSE_MIN = 1000
-PULSE_MAX = 2000
+PULSE_MIN = 500
+PULSE_MAX = 2500
 PULSE_CENTER = 1500
 
 i2c = I2C(0, scl=Pin(1), sda=Pin(2), freq=100000)   # NanoC6 Grove: SCL=1, SDA=2
