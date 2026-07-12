@@ -13,6 +13,7 @@ import rgbmatrix
 from adafruit_ticks import ticks_ms, ticks_diff
 
 import config
+import ota
 from eye_face import EyeFace
 from inputs import DemoSource, OrchestratorLink
 
@@ -32,6 +33,9 @@ display = framebufferio.FramebufferDisplay(
 eye = EyeFace(display, persona=config.BOOT_PERSONA)
 link = None if config.FORCE_DEMO else OrchestratorLink()
 demo = DemoSource()
+# WiFi firmware pushes (otapush.py). Rides the link's radio, so forced-demo
+# mode (no link, no WiFi) has no OTA — deploy over USB there anyway.
+ota_srv = ota.server_from_settings() if link else None
 
 last = ticks_ms()
 frames = 0
@@ -47,6 +51,8 @@ while True:
         dt = 0.25
 
     connected = link.poll(eye, now) if link else False
+    if ota_srv:
+        ota_srv.poll(link, now)    # self-rate-limits; near-free when idle
     if connected:
         if not was_connected:
             eye.set_phase("idle")     # host owns state now; drop demo leftovers

@@ -23,6 +23,9 @@ guilty verdict and blooms green on an innocent one. Five judge personas
 | `personas.py` | the 5 persona ramps + tone sampling |
 | `inputs.py` | `OrchestratorLink` (TCP line protocol) + `DemoSource` (fake inputs) |
 | `config.py` | display constants + settings.toml accessors |
+| `ota.py` | WiFi firmware updates (CircuitPython port of `../micropython/ota.py`) |
+| `boot.py` | filesystem arbitration: code-writable (OTA) vs host-writable (USB) |
+| `otafiles.txt` | default file set `otapush.py` sends from this dir |
 | `settings.toml.example` | template for WiFi/orchestrator config (copy → `settings.toml`) |
 | `lib/` | vendored CircuitPython libraries (exact `.mpy` files the board runs) |
 | `deploy.sh` | copy firmware + libs + settings onto a mounted `CIRCUITPY` drive |
@@ -36,8 +39,37 @@ guilty verdict and blooms green on an innocent one. Five judge personas
 2. **Config**: copy `settings.toml.example` → `settings.toml`, fill in WiFi +
    orchestrator host.
 3. **Deploy**: `./deploy.sh` (with the `CIRCUITPY` drive mounted). It copies
-   the five `.py` files, `settings.toml`, and `lib/`, then the board
+   the `.py` files, `settings.toml`, and `lib/`, then the board
    auto-reloads; the serial console prints FPS every 5 s and link status.
+   **After the first deploy that includes `boot.py`, the drive defaults to
+   OTA mode (read-only to your Mac) — hold UP while pressing reset to get a
+   writable drive back for `deploy.sh`.**
+
+## OTA updates (no cable)
+
+Same staged/verified protocol and push client as the NanoC6 fleet
+(`../micropython/README.md`), with two platform twists: the CIRCUITPY drive
+belongs to exactly one writer, and the AirLift doesn't do mDNS.
+
+- `boot.py` arbitrates at reset: **default = OTA mode** (filesystem writable
+  to `ota.py`, read-only to a USB host); **UP held at reset = USB deploy
+  mode** (`deploy.sh` works, OTA answers `read_only_fs`). `boot.py` itself is
+  on the OTA forbidden list, so recovery over USB can never be pushed away.
+- Push from this directory to the board's IP (find it in the serial log's
+  `wifi: up, <ip>` line):
+
+  ```sh
+  cd firmware/judge-face
+  python3 ../micropython/otapush.py 192.168.50.77              # otafiles.txt set
+  python3 ../micropython/otapush.py 192.168.50.77 eye_face.py  # just one file
+  ```
+
+  Credentials come from `./settings.toml` (`OTA_TOKEN`, `OTA_PORT`; empty
+  token = OTA disabled). Files stage as `*.new`, sizes + sha256 digests are
+  verified at commit, then swapped in and the board resets. `settings.toml`
+  itself only travels over USB.
+- The listener rides the orchestrator link's WiFi, so it works with the
+  orchestrator down — but not in forced demo mode (`EYE_DEMO = 1`, no radio).
 
 `lib/` vendors the exact `.mpy` dependencies the board runs —
 `adafruit_esp32spi` (AirLift WiFi), `adafruit_connection_manager`, and
@@ -56,7 +88,7 @@ strobe reads as a glitch out of context); exercise those by sending
 
 ## Protocol
 
-Dials the orchestrator, `HELLO judge-face 0.2`, then services (one ack per
+Dials the orchestrator, `HELLO judge-face 0.3`, then services (one ack per
 command):
 
 | Command | Effect |

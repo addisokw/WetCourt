@@ -6,6 +6,12 @@ WIFI_PASS = "your-password"
 ORCH_HOST = "192.168.1.50"   # orchestrator LAN IP
 ORCH_PORT = 8090
 
+# WiFi firmware pushes (../micropython/otapush.py). Empty/unset = OTA off.
+# The board must be in OTA mode — the default; hold UP at reset for USB
+# deploy mode instead (see boot.py).
+OTA_TOKEN = "pick-a-long-random-string"
+OTA_PORT = 8266
+
 # Optional:
 # EYE_DEMO = 1               # force demo mode (never dial the orchestrator)
 # EYE_PERSONA = "honorable"  # boot persona: honorable | magistrate | cosmic

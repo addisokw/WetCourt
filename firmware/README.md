@@ -32,7 +32,11 @@ deployed per board by its `deploy.sh`: `wetline.py` (the protocol client;
 also advertises the board over mDNS as `<role>.local`) and `ota.py`
 (token-gated, staged, sha256-verified **WiFi updates** via `otapush.py
 <role>.local` — no cable after first deploy). The judge face stays
-CircuitPython for displayio.
+CircuitPython for displayio; it carries its own `ota.py` port speaking the
+same protocol (same `otapush.py` client, credentials from `settings.toml`,
+push to the board's IP — no mDNS on the AirLift). Its `boot.py` hands the
+CIRCUITPY drive to on-device code by default so OTA can write; **hold UP at
+reset** for a host-writable drive (`deploy.sh` / recovery).
 
 Each device dials the orchestrator over TCP and identifies with `HELLO <role>`;
 the host routes commands per role. `LIGHTS` is deferred (no owner); e-stop is the

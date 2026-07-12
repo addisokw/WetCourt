@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""otapush.py — push firmware to a Wet Court NanoC6 over WiFi (no cable).
+"""otapush.py — push firmware to a Wet Court board over WiFi (no cable).
 
-Run from a board's firmware directory (it reads OTA_TOKEN/OTA_PORT from the
-./secrets.py you deployed to that board):
+Run from a board's firmware directory. Credentials come from that dir's
+./secrets.py (NanoC6 fleet) or ./settings.toml (judge-face, CircuitPython):
 
     cd firmware/judge-neck
     python3 ../micropython/otapush.py 192.168.50.61              # main.py + shared libs
     python3 ../micropython/otapush.py 192.168.50.61 main.py      # just one file
     python3 ../micropython/otapush.py 192.168.50.61 secrets.py   # config change
+
+    cd firmware/judge-face
+    python3 ../micropython/otapush.py 192.168.50.77              # ./otafiles.txt set
+
+With no file arguments, the set pushed is ./otafiles.txt (one name per line,
+`#` comments) when the board dir has one, else main.py + the shared libs.
 
 Files stage as *.new on the board, every
 sha256 is verified, and only then are they swapped in and the board reset —
@@ -26,17 +32,35 @@ CHUNK = 2048
 DEFAULT_FILES = ["main.py", HERE / "wetline.py", HERE / "ota.py"]
 
 
-def read_secrets():
+def read_config():
+    """OTA_TOKEN/OTA_PORT from ./secrets.py, or ./settings.toml (CircuitPython)."""
     cfg = {}
-    path = Path("secrets.py")
-    if not path.exists():
-        sys.exit("No ./secrets.py — run from a board dir (e.g. firmware/judge-neck)")
-    exec(path.read_text(), cfg)
+    secrets = Path("secrets.py")
+    toml = Path("settings.toml")
+    if secrets.exists():
+        exec(secrets.read_text(), cfg)
+        source = secrets
+    elif toml.exists():
+        import tomllib
+        cfg = tomllib.loads(toml.read_text())
+        source = toml
+    else:
+        sys.exit("No ./secrets.py or ./settings.toml — run from a board dir "
+                 "(e.g. firmware/judge-neck, firmware/judge-face)")
     token = cfg.get("OTA_TOKEN")
     if not token:
-        sys.exit("OTA_TOKEN missing/empty in ./secrets.py — OTA is disabled on "
-                 "this board. Set it and redeploy once over USB (./deploy.sh).")
+        sys.exit("OTA_TOKEN missing/empty in ./%s — OTA is disabled on "
+                 "this board. Set it and redeploy once over USB (./deploy.sh)." % source)
     return token, int(cfg.get("OTA_PORT", 8266))
+
+
+def default_files():
+    """./otafiles.txt (one name per line, # comments) if present, else fleet set."""
+    manifest = Path("otafiles.txt")
+    if manifest.exists():
+        names = [ln.strip() for ln in manifest.read_text().splitlines()]
+        return [Path(n) for n in names if n and not n.startswith("#")]
+    return [Path(p) for p in DEFAULT_FILES]
 
 
 class Link:
@@ -63,9 +87,9 @@ def main():
     if not args:
         sys.exit(__doc__)
     host, names = args[0], args[1:]
-    token, port = read_secrets()
+    token, port = read_config()
 
-    paths = [Path(n) for n in names] if names else [Path(p) for p in DEFAULT_FILES]
+    paths = [Path(n) for n in names] if names else default_files()
     for p in paths:
         if not p.exists():
             sys.exit("no such file: %s" % p)

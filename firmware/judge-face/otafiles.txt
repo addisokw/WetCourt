@@ -1,0 +1,10 @@
+# Default file set for `python3 ../micropython/otapush.py <board-ip>` run from
+# this directory. boot.py is deliberately absent (the device refuses it — it
+# owns the USB-recovery arbitration); settings.toml carries site credentials
+# and is only ever deployed over USB.
+code.py
+eye_face.py
+inputs.py
+personas.py
+config.py
+ota.py

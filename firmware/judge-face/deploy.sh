@@ -16,13 +16,22 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
     echo "error: $SRC/settings.toml missing — copy settings.toml.example and fill it in" >&2
     exit 1
 }
+# boot.py gives the drive to on-device code by default (OTA mode), which makes
+# it read-only to this Mac — probe before a half-finished copy.
+if ! (touch "$DEST/.wc_write_probe" 2>/dev/null && rm -f "$DEST/.wc_write_probe"); then
+    echo "error: $DEST is read-only (board is in OTA mode)." >&2
+    echo "       Hold the UP button while pressing reset for USB deploy mode," >&2
+    echo "       or push over WiFi instead: python3 ../micropython/otapush.py <board-ip>" >&2
+    exit 1
+fi
 
 echo "deploying to $DEST ..."
 mkdir -p "$DEST/lib"
 cp -R "$SRC/lib/." "$DEST/lib/"
 cp "$SRC/personas.py" "$SRC/eye_face.py" "$SRC/inputs.py" "$SRC/config.py" \
-   "$SRC/settings.toml" "$DEST/"
+   "$SRC/ota.py" "$SRC/boot.py" "$SRC/settings.toml" "$DEST/"
 cp "$SRC/code.py" "$DEST/code.py"    # last: triggers the auto-reload
+# boot.py takes effect on the NEXT hard reset (auto-reload doesn't re-run it).
 # FAT volumes grow macOS ._* AppleDouble turds; they're harmless to CP but tidy up.
 find "$DEST/lib" "$DEST" -maxdepth 1 -name "._*" -delete 2>/dev/null || true
 sync

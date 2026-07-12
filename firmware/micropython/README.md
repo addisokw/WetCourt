@@ -45,3 +45,10 @@ How it stays safe:
 The listener is polled from `wetline.py`'s idle points, so OTA works whether
 or not the orchestrator is up. The device resets itself after a successful
 commit and rejoins the fleet on the new code.
+
+The **judge-face** (CircuitPython) speaks the same protocol via its own
+`ota.py` port — `otapush.py` handles it too: it reads `OTA_TOKEN`/`OTA_PORT`
+from `./settings.toml` when a board dir has no `secrets.py`, and with no file
+arguments it pushes the dir's `otafiles.txt` set when one exists. See
+`../judge-face/README.md` for the CIRCUITPY drive-ownership twist (`boot.py`,
+hold UP at reset for USB mode).
