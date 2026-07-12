@@ -1,10 +1,10 @@
 role = "gavel"
 
 [gavel]
-rest = 1800
-raise = 1100
-strike = 1950
+rest = 1100
+raise = 800
+strike = 700
 raise_dwell_ms = 500
 strike_dwell_ms = 500
-settle_dwell_ms = 200
-strikes = 2
+settle_dwell_ms = 50
+strikes = 1

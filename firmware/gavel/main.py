@@ -43,8 +43,8 @@ GAVEL_STRIKES = 1  # raps per sequence
 # also bounds how long one GAVEL can block the loop (the rap is synchronous;
 # the ack goes out after the swing), and STRIKES_MAX caps how many raps that
 # blocking swing can chain.
-PULSE_MIN = 1000
-PULSE_MAX = 2000
+PULSE_MIN = 500
+PULSE_MAX = 2500
 DWELL_MAX_MS = 2000
 STRIKES_MAX = 10
 
@@ -78,12 +78,12 @@ def handle_gavel(args):
         vals += list(defaults[len(vals) :])
         rest, raise_, strike, rd, sd, td, strikes = vals
     strikes = min(max(strikes, 1), STRIKES_MAX)
-    servo_pulse(raise_)
+    # servo_pulse(raise_)
     _dwell(rd)
     for _ in range(strikes):
         servo_pulse(strike)
         _dwell(sd)
-        servo_pulse(rest)
+        servo_pulse(raise_)
         _dwell(rd)
     servo_pulse(rest)
     _dwell(td)
