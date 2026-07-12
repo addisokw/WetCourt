@@ -952,6 +952,8 @@ button.plea.recording:hover { background: #8b2326; }
 .aim-control { display: flex; flex-direction: column; gap: 0.7rem; }
 .aim-row { display: flex; flex-direction: column; gap: 0.3rem; }
 .aim-row > span { color: #8b949e; font-variant-numeric: tabular-nums; }
+/* The raw servo value the host will send — the number calibration cares about. */
+.aim-raw { color: #d29922; margin-left: 0.5rem; }
 .aim-row input[type='range'] { width: 100%; height: 28px; }
 
 .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }

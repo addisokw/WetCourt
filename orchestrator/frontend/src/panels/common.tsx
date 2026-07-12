@@ -171,3 +171,18 @@ export function stickToDeg(v: number, servo: ServoCal | null | undefined): numbe
   // Positive stick → toward limit_max_deg, negative → limit_min_deg, 0 → 0°.
   return v >= 0 ? v * servo.limit_max_deg : -v * servo.limit_min_deg;
 }
+
+/**
+ * Logical degrees → the raw servo value (µs) the device receives — a mirror
+ * of `ServoCal::to_raw` (orchestrator/src/calibration/mod.rs), so the panels
+ * can show exactly what the host will send without a round-trip.
+ */
+export function degToRaw(deg: number, servo: ServoCal | null | undefined): number | null {
+  if (!servo) return null;
+  const spanDeg = servo.limit_max_deg - servo.limit_min_deg;
+  if (spanDeg === 0) return servo.center;
+  const d = Math.min(Math.max(deg, servo.limit_min_deg), servo.limit_max_deg);
+  const unitsPerDeg = (servo.max - servo.min) / spanDeg;
+  const raw = servo.center + (servo.invert ? -d : d) * unitsPerDeg;
+  return Math.min(Math.max(Math.round(raw), servo.min), servo.max);
+}

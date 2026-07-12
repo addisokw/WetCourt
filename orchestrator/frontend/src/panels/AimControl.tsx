@@ -1,7 +1,7 @@
 import { createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { calibrations, Role, sendCommand } from '../maintenance';
 import { startGamepad } from '../gamepad';
-import { stickToDeg } from './common';
+import { degToRaw, stickToDeg } from './common';
 
 /**
  * Pan/tilt aim control: touch sliders + left-stick gamepad mapping. Sends
@@ -40,7 +40,9 @@ export default function AimControl(props: { role: Role }) {
     <div class="aim-control">
       <Show when={panCal() && tiltCal()} fallback={<div class="muted small">no pan/tilt axes</div>}>
         <label class="aim-row">
-          <span>pan {pan()}°</span>
+          <span>
+            pan {pan()}° <span class="aim-raw">{degToRaw(pan(), panCal())} µs</span>
+          </span>
           <input
             type="range"
             min={panCal()!.limit_min_deg}
@@ -51,7 +53,9 @@ export default function AimControl(props: { role: Role }) {
           />
         </label>
         <label class="aim-row">
-          <span>tilt {tilt()}°</span>
+          <span>
+            tilt {tilt()}° <span class="aim-raw">{degToRaw(tilt(), tiltCal())} µs</span>
+          </span>
           <input
             type="range"
             min={tiltCal()!.limit_min_deg}
