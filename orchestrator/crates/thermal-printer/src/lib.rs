@@ -62,7 +62,8 @@ impl Printer {
 
     /// Send a finished builder to the printer.
     pub fn send(&self, b: &Builder) -> Result<()> {
-        self.transport.write(b.bytes())
+        // build(), not bytes(): a flip-mode builder only materializes there.
+        self.transport.write(&b.build())
     }
 
     /// Build → send in one shot via a closure.

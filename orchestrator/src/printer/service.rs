@@ -112,6 +112,7 @@ fn print_trial(
             warn!("bad [printer] image_dither ({e}); falling back to Floyd-Steinberg");
             thermal_printer::raster::Dither::FloydSteinberg
         }),
+        upside_down: cfg.upside_down,
     };
     let bytes = render(rec, &opts).build();
     let label = format!("keepsake for case {}", rec.case_no);

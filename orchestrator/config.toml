@@ -88,6 +88,10 @@ booth_location = "Find the Wet Court near you"
 # move in Epson-default 1/360" units, not 203-dpi dots.
 head_to_cutter_dots = 136
 feed_units_per_inch = 360
+# The booth unit is mounted upside down: rotate every print 180° (reversed
+# content order + ESC { per-line rotation) so the emerging receipt reads
+# correctly in the mount.
+upside_down = true
 
 # Call-your-lawyer phone service (counsel). On the Spark both run with host
 # networking, so localhost reaches it; the console proxies /lawyer/* there.

@@ -112,6 +112,10 @@ booth_location = "Find the Wet Court near you"
 feed_units_per_inch = 414
 head_to_cutter_dots = 127
 cut_advance_dots = 21
+# The booth unit is mounted upside down: rotate every print 180° (reversed
+# content order + ESC { per-line rotation) so the emerging receipt reads
+# correctly in the mount.
+upside_down = true
 # Image tone, picked from a 12-rung ladder against a real capture frame
 # 2026-07-12: this head crushes shadows (dot gain), so lift mid-tones hard
 # (gamma), flatten slightly (contrast), and dither with Atkinson — its sparser

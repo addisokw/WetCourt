@@ -37,6 +37,8 @@ pub struct ReportOpts<'a> {
     pub image_brightness: f32,
     pub image_contrast: f32,
     pub image_dither: raster::Dither,
+    /// Rotate the whole record 180° for an upside-down-mounted printer.
+    pub upside_down: bool,
 }
 
 impl Default for ReportOpts<'_> {
@@ -49,6 +51,7 @@ impl Default for ReportOpts<'_> {
             image_brightness: 0.0,
             image_contrast: 1.0,
             image_dither: raster::Dither::FloydSteinberg,
+            upside_down: false,
         }
     }
 }
@@ -59,7 +62,7 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
     let w = opts.width_dots;
     let cols = cols_for(w, Font::A);
 
-    let mut b = Builder::new().with_width(w);
+    let mut b = Builder::new().with_width(w).with_flip(opts.upside_down);
     b.init();
 
     seal(&mut b);
@@ -341,6 +344,21 @@ mod tests {
             let printer = thermal_printer::Printer::connect().expect("open USB printer");
             printer.transport().write(&guilty).expect("print guilty receipt");
         }
+    }
+
+    #[test]
+    fn upside_down_keepsake_is_reversed_under_flip_mode() {
+        let mut opts = ReportOpts::default();
+        opts.upside_down = true;
+        let bytes = render(&TrialRecord::sample_guilty(), &opts).build();
+        // ESC { 1 right after init.
+        assert_eq!(&bytes[..5], &[0x1B, b'@', 0x1B, b'{', 1]);
+        // Content order reversed: the footer tag prints before the masthead.
+        let masthead = bytes.windows(9).position(|w| w == b"WET COURT").unwrap();
+        let tag = bytes.windows(9).position(|w| w == b"#WetCourt").unwrap();
+        assert!(tag < masthead, "footer must print before the masthead");
+        // The cut is still the physically-last command.
+        assert_eq!(&bytes[bytes.len() - 4..bytes.len() - 1], &[0x1D, b'V', 66]);
     }
 
     #[test]

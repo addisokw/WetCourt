@@ -226,6 +226,11 @@ pub struct PrinterConfig {
     /// dot gain. Per-printer.
     #[serde(default = "d_image_dither")]
     pub image_dither: String,
+    /// Set when the printer is physically mounted upside down: every print is
+    /// rotated 180° (ESC { per-line rotation + reversed content order +
+    /// software-rotated rasters) so the emerging receipt reads correctly.
+    #[serde(default)]
+    pub upside_down: bool,
 }
 
 impl Default for PrinterConfig {
@@ -244,6 +249,7 @@ impl Default for PrinterConfig {
             image_brightness: 0.0,
             image_contrast: d_image_contrast(),
             image_dither: d_image_dither(),
+            upside_down: false,
         }
     }
 }

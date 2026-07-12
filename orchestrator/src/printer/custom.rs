@@ -624,26 +624,44 @@ pub fn render_with_layout(doc: &PrintDoc, cfg: &PrinterConfig) -> anyhow::Result
     }
 
     let upi = cfg.feed_units_per_inch.max(1);
-    let mut b = Builder::new().with_width(w);
+    let flip = cfg.upside_down;
+    let mut b = Builder::new().with_width(w).with_flip(flip);
     b.init();
     // Two-channel advance ledger: raster rows are physical dots; text/feed
     // commands advance in motion units. The closing fill is computed in units
     // against the exact command total, so per-command rounding never drifts
-    // the cut-to-cut length.
-    let mut raster_dots = 0u32;
-    let mut cmd_units = 0u32;
-    for p in &preps {
-        let adv = emit(&mut b, p, bounded, upi);
-        raster_dots += adv.raster_dots;
-        cmd_units += adv.cmd_units;
-    }
-    if let Some(mm) = doc.length_mm {
+    // the cut-to-cut length. Advances are deterministic, so the ledger is
+    // summed up front — the fill can then go on either side of the content.
+    let (raster_dots, cmd_units) = preps.iter().fold((0u32, 0u32), |(rd, cu), p| {
+        let a = advance_of(p, bounded, upi);
+        (rd + a.raster_dots, cu + a.cmd_units)
+    });
+    let fill_units = doc.length_mm.map(|mm| {
         let feed_dots = mm_to_dots(mm).saturating_sub(cfg.cut_advance_dots);
-        let target_units = to_units(feed_dots.saturating_sub(raster_dots), upi);
-        feed_units_exact(&mut b, target_units.saturating_sub(cmd_units));
-        b.partial_cut();
-    } else {
-        b.align(Align::Left).feed(2).cut();
+        to_units(feed_dots.saturating_sub(raster_dots), upi).saturating_sub(cmd_units)
+    });
+    // Flip mode: the Builder replays content segments in reverse, so the
+    // bounded fill is emitted FIRST — reversal lands it right before the cut,
+    // keeping the blade clearance that stops the last printed line from being
+    // cut off (it must travel head_to_cutter_dots to reach the blade).
+    if flip {
+        if let Some(units) = fill_units {
+            feed_units_exact(&mut b, units);
+        }
+    }
+    for p in &preps {
+        emit(&mut b, p, bounded, upi);
+    }
+    match fill_units {
+        Some(units) => {
+            if !flip {
+                feed_units_exact(&mut b, units);
+            }
+            b.partial_cut();
+        }
+        None => {
+            b.align(Align::Left).feed(2).cut();
+        }
     }
 
     let bytes = b.build();
@@ -663,7 +681,26 @@ struct Advance {
     cmd_units: u32,
 }
 
-fn emit(b: &mut Builder, p: &Prep, bounded: bool, upi: u32) -> Advance {
+/// What [`emit`] will advance for `p` — pure, so the ledger can be summed
+/// before anything is emitted.
+fn advance_of(p: &Prep, bounded: bool, upi: u32) -> Advance {
+    match p {
+        Prep::Lines { lines, spacing, .. } => Advance {
+            raster_dots: 0,
+            cmd_units: lines.len() as u32 * to_units(*spacing, upi),
+        },
+        Prep::Raster { raster, .. } => Advance { raster_dots: raster.height as u32, cmd_units: 0 },
+        // GS h height is specced in dots; verify against calipers if a
+        // bounded strip with a barcode comes out long/short.
+        Prep::Barcode { height, .. } => {
+            let _ = bounded; // HRI (continuous-only) advance is uncounted either way
+            Advance { raster_dots: *height as u32, cmd_units: 0 }
+        }
+        Prep::Feed { dots, .. } => Advance { raster_dots: 0, cmd_units: to_units(*dots, upi) },
+    }
+}
+
+fn emit(b: &mut Builder, p: &Prep, bounded: bool, upi: u32) {
     match p {
         Prep::Lines { lines, align, bold, underline, inverse, font, size_w, size_h, spacing } => {
             // Spacing in motion units can exceed ESC 3's u8 (e.g. 8× Font A at
@@ -688,12 +725,10 @@ fn emit(b: &mut Builder, p: &Prep, bounded: bool, upi: u32) -> Advance {
                 .size(1, 1)
                 .font(Font::A)
                 .line_spacing(None);
-            Advance { raster_dots: 0, cmd_units: lines.len() as u32 * s_units }
         }
         Prep::Raster { raster, .. } => {
             b.align(Align::Center)
                 .raster_banded(&raster.bits, raster.width_bytes, raster.height, 64);
-            Advance { raster_dots: raster.height as u32, cmd_units: 0 }
         }
         Prep::Barcode { data, sym, height, width } => {
             b.align(Align::Center).barcode_style(*height, *width);
@@ -703,14 +738,9 @@ fn emit(b: &mut Builder, p: &Prep, bounded: bool, upi: u32) -> Advance {
                 b.raw(&[0x1D, b'H', 0]);
             }
             b.barcode(*sym, data);
-            // GS h height is specced in dots; verify against calipers if a
-            // bounded strip with a barcode comes out long/short.
-            Advance { raster_dots: *height as u32, cmd_units: 0 }
         }
         Prep::Feed { dots, .. } => {
-            let units = to_units(*dots, upi);
-            feed_units_exact(b, units);
-            Advance { raster_dots: 0, cmd_units: units }
+            feed_units_exact(b, to_units(*dots, upi));
         }
     }
 }
@@ -811,7 +841,7 @@ mod tests {
                         total += units_to_dots(bytes[i + 2] as u32);
                         i += 3;
                     }
-                    b'a' | b'M' | b'E' | b'-' => i += 3,
+                    b'a' | b'M' | b'E' | b'-' | b'{' => i += 3,
                     other => panic!("unexpected ESC {other:#x}"),
                 },
                 0x1D => match bytes[i + 1] {
@@ -912,6 +942,56 @@ mod tests {
         let advance = physical_advance_dots(&bytes, c.feed_units_per_inch);
         let target = mm_to_dots(60.0) as f64;
         assert!((advance - target).abs() < 3.0, "advance {advance:.1}, want {target}");
+    }
+
+    #[test]
+    fn flipped_bounded_strip_keeps_exact_length_and_blade_clearance() {
+        let doc = PrintDoc {
+            blocks: vec![
+                Block::Feed { lines: 1, flex: 1 },
+                text("upside-down plaque"),
+                Block::Qr { data: "https://wetcourt.lol".into(), module: 3, ecc: "m".into() },
+            ],
+            length_mm: Some(80.0),
+        };
+        let mut c = cfg();
+        c.upside_down = true;
+        c.cut_advance_dots = 21;
+        let bytes = render_custom(&doc, &c).unwrap();
+        // Upside-down mode is on for the whole stream.
+        assert_eq!(&bytes[..5], &[0x1B, b'@', 0x1B, b'{', 1]);
+        // The advance ledger holds under reversal.
+        let advance = physical_advance_dots(&bytes, c.feed_units_per_inch);
+        let target = (mm_to_dots(80.0) - 21) as f64;
+        assert!(
+            (advance - target).abs() < 3.0,
+            "flipped strip advances {advance:.1} dots, want {target}"
+        );
+        // Blade clearance: the fill feed must still precede the cut — the
+        // final commands are ESC J feeds, then the bare partial cut.
+        assert_eq!(&bytes[bytes.len() - 3..], &[0x1D, b'V', 1]);
+        let before_cut = &bytes[..bytes.len() - 3];
+        assert_eq!(
+            &before_cut[before_cut.len() - 3..before_cut.len() - 1],
+            &[0x1B, b'J'],
+            "fill feed must sit directly before the cut in flip mode"
+        );
+    }
+
+    #[test]
+    fn flipped_continuous_doc_reverses_blocks() {
+        let doc = PrintDoc {
+            blocks: vec![text("alpha"), text("omega")],
+            length_mm: None,
+        };
+        let mut c = cfg();
+        c.upside_down = true;
+        let bytes = render_custom(&doc, &c).unwrap();
+        let a = bytes.windows(5).position(|w| w == b"alpha").unwrap();
+        let o = bytes.windows(5).position(|w| w == b"omega").unwrap();
+        assert!(o < a, "flip must print the last block first");
+        // Still ends with feed-and-cut.
+        assert_eq!(&bytes[bytes.len() - 4..bytes.len() - 1], &[0x1D, b'V', 66]);
     }
 
     #[test]
