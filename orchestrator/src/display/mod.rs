@@ -163,6 +163,8 @@ pub fn router(state: AppState) -> Router {
         .route("/vision/arm", get(get_targeting_arm).post(set_targeting_arm))
         .route("/vision/autofire", get(get_auto_fire).post(set_auto_fire))
         .route("/vision/target", post(vision_target))
+        .route("/vision/aimpoint", post(vision_aimpoint))
+        .route("/vision/select", post(vision_select))
         .route("/vision/boresight", post(vision_boresight))
         .route("/vision/gains", post(vision_gains))
         .route("/vision/center", post(vision_center))
@@ -771,6 +773,16 @@ async fn vision_forward_post(s: &AppState, sub: &str, body: Bytes) -> Response {
 
 async fn vision_target(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
     vision_forward_post(&s, "target", body).await
+}
+
+/// Click-to-aim: one-shot open-loop nudge toward a clicked feed pixel.
+async fn vision_aimpoint(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
+    vision_forward_post(&s, "aimpoint", body).await
+}
+
+/// Click-to-track: select (or clear) the person track under a clicked pixel.
+async fn vision_select(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {
+    vision_forward_post(&s, "select", body).await
 }
 
 async fn vision_boresight(AxumState(s): AxumState<AppState>, body: Bytes) -> Response {

@@ -92,6 +92,22 @@ _aim = {"pan": 0.0, "tilt": 0.0}
 # lock tolerance (px). Seeded from the CLI flags in main(), then editable from
 # the operator console via POST /gains.
 _tune = {"gain_pan": 0.01, "gain_tilt": 0.01, "tolerance": 12}
+# Selected person-track id (click-to-track), or None. When a selection is set
+# but its track is lost, the servo HOLDS rather than falling back to another
+# person — the gun must never migrate to a bystander on its own.
+_selected_id: int | None = None
+# One-shot click-to-aim: stream the held aim until this wall-clock time so the
+# orchestrator relays the nudge (it only trusts fresh values). fire_ok is never
+# sent true on a manual hold.
+_manual_until = 0.0
+# Aim limits, seeded from CLI in main() (the servo clamps with cfg; the
+# /aimpoint endpoint needs them outside the loop).
+_limits = {"pan": 90.0, "tilt": 45.0}
+# Last frame size, for endpoints that need the boresight default (frame center).
+_frame_size = [640, 480]
+# A single click may nudge at most this many degrees per axis — a deliberate
+# act, but a wild gain must not fling the gun across the room.
+_MAX_CLICK_DEG = 20.0
 
 # Cap the per-frame aim change so a too-high gain can't fling the gun across its
 # whole range in one step — softens overshoot while tuning.
@@ -110,6 +126,56 @@ def _px(lm, w, h):
     return (int(lm.x * w), int(lm.y * h))
 
 
+class Tracker:
+    """Greedy nearest-centroid tracker: turns per-frame pose detections into
+    persistent tracks with stable integer ids, so the operator can click a
+    person and the servo can follow *that* person across frames.
+
+    Deliberately simple (≤ a handful of seated/queueing people, high frame
+    rate): match each detection to the nearest live track within `max_jump`
+    of frame width, closest pairs first; leftovers become new tracks; tracks
+    unseen for `ttl` seconds expire. Identity is positional — someone who
+    leaves and returns gets a new id (the operator re-clicks).
+    """
+
+    def __init__(self, max_jump=0.18, ttl=1.2):
+        self._next_id = 1
+        self._tracks = {}  # id -> {"center": (x,y), "last_seen": t, **points}
+        self.max_jump = max_jump
+        self.ttl = ttl
+
+    def update(self, detections, now, frame_w):
+        """detections: list of point-dicts from _pose_points. Returns the live
+        track list [{"id", "center", "box", "targets", "eyes"}, ...]."""
+        max_d = self.max_jump * frame_w
+        pairs = []  # (dist, track_id, det_idx)
+        for tid, tr in self._tracks.items():
+            for di, det in enumerate(detections):
+                dx = tr["center"][0] - det["center"][0]
+                dy = tr["center"][1] - det["center"][1]
+                d = (dx * dx + dy * dy) ** 0.5
+                if d <= max_d:
+                    pairs.append((d, tid, di))
+        pairs.sort(key=lambda p: p[0])
+        used_t, used_d = set(), set()
+        for d, tid, di in pairs:
+            if tid in used_t or di in used_d:
+                continue
+            used_t.add(tid)
+            used_d.add(di)
+            self._tracks[tid] = {**detections[di], "last_seen": now}
+        for di, det in enumerate(detections):
+            if di not in used_d:
+                self._tracks[self._next_id] = {**det, "last_seen": now}
+                self._next_id += 1
+        for tid in [t for t, tr in self._tracks.items() if now - tr["last_seen"] > self.ttl]:
+            del self._tracks[tid]
+        return [
+            {"id": tid, **{k: v for k, v in tr.items() if k != "last_seen"}}
+            for tid, tr in sorted(self._tracks.items())
+        ]
+
+
 def detect_loop(cfg):
     """Capture → detect → annotate → publish, forever."""
     global _latest_jpeg, _latest_clean_jpeg, _latest_state
@@ -123,9 +189,10 @@ def detect_loop(cfg):
         opts = PoseLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=ensure_model(cfg.model)),
             running_mode=RunningMode.VIDEO,
-            num_poses=1,
+            num_poses=cfg.max_poses,
         )
         landmarker = PoseLandmarker.create_from_options(opts)
+    tracker = Tracker()
 
     # Throttled aim sender to the orchestrator (which relays to the turret only
     # when armed). Short timeout + swallow errors so the loop never stalls.
@@ -167,6 +234,9 @@ def detect_loop(cfg):
             with _lock:
                 _latest_clean_jpeg = clean_buf.tobytes()
 
+        _frame_size[0], _frame_size[1] = w, h
+
+        tracks = []
         if landmarker is not None:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -176,8 +246,12 @@ def detect_loop(cfg):
                 ts_ms = last_ts + 1
             last_ts = ts_ms
             result = landmarker.detect_for_video(mp_img, ts_ms)
-            if result.pose_landmarks:
-                _annotate(frame, result.pose_landmarks[0], w, h, state)
+            detections = []
+            for lm in result.pose_landmarks or []:
+                pts = _pose_points(lm, w, h)
+                if pts:
+                    detections.append(pts)
+            tracks = tracker.update(detections, time.time(), w)
 
         # --- Targeting servo (vision-owned). Nudge the commanded aim so the
         # target body part moves onto the boresight pixel; the orchestrator
@@ -187,6 +261,31 @@ def detect_loop(cfg):
             bs = list(_boresight) if _boresight else [w // 2, h // 2]
             aim_pan, aim_tilt = _aim["pan"], _aim["tilt"]
             gp, gt, tol = _tune["gain_pan"], _tune["gain_tilt"], _tune["tolerance"]
+            selected = _selected_id
+            manual_until = _manual_until
+
+        # The servo's subject: the selected track when visible; with no
+        # selection, the track nearest the boresight (the "defendant" seat).
+        # A selected-but-lost track means NO subject — the gun holds rather
+        # than migrating to whoever else is in frame.
+        sel_track = next((t for t in tracks if t["id"] == selected), None)
+        if selected is not None:
+            subject = sel_track
+        else:
+            subject = min(
+                tracks,
+                key=lambda t: (t["center"][0] - bs[0]) ** 2 + (t["center"][1] - bs[1]) ** 2,
+            ) if tracks else None
+
+        if subject:
+            state["person"] = True
+            state["targets"] = subject["targets"]
+            state["eyes"] = subject["eyes"]
+        state["tracks"] = [
+            {"id": t["id"], "center": list(t["center"]), "box": list(t["box"])} for t in tracks
+        ]
+        state["selected"] = selected
+        state["selected_visible"] = sel_track is not None
         state["target_part"] = part
         state["boresight"] = bs
         state["gains"] = {"pan": gp, "tilt": gt, "tolerance": tol}
@@ -215,8 +314,14 @@ def detect_loop(cfg):
         # Stream aim + the safety verdict to the orchestrator (relayed to the
         # turret only while armed; fire_ok gates the trial FIRE). Sent only while
         # actively tracking, so a stale value at the orchestrator ⇒ no fire.
+        # A click-to-aim nudge briefly streams the held aim the same way
+        # (fire_ok always false — a manual point is not a verified person lock).
         if tracking:
             send_aim(aim_pan, aim_tilt, fire_ok, locked)
+        elif time.time() < manual_until:
+            send_aim(aim_pan, aim_tilt, False, False)
+
+        _draw_tracks(frame, tracks, subject, selected, sel_track is not None)
 
         # Boresight marker (where the gun points) + the aim vector to the target.
         cv2.drawMarker(
@@ -269,15 +374,15 @@ def detect_loop(cfg):
                 _latest_state = state
 
 
-def _annotate(frame, lm, w, h, state):
-    """Compute target points from pose landmarks and draw them."""
+def _pose_points(lm, w, h):
+    """Target points + a rough body box for one pose. None if too little of a
+    person is visible (matching the old shoulders-visible gate)."""
 
     def vis(i):
         return lm[i].visibility > 0.5
 
     if not (vis(L_SHOULDER) and vis(R_SHOULDER)):
-        return
-    state["person"] = True
+        return None
 
     ls, rs = _px(lm[L_SHOULDER], w, h), _px(lm[R_SHOULDER], w, h)
     shoulder_mid = _mid(ls, rs)
@@ -299,22 +404,62 @@ def _annotate(frame, lm, w, h, state):
     if vis(R_EYE):
         eyes.append(_px(lm[R_EYE], w, h))
 
-    state["targets"] = {
-        "chest": [round(chest[0]), round(chest[1])],
-        "shoulders": [list(ls), list(rs)],
-        "head": list(head) if head else None,
-    }
-    state["eyes"] = [list(e) for e in eyes] if eyes else None
+    # Rough body box from every confidently-visible landmark, lightly padded —
+    # the click-to-select hit target and the feed's per-person outline.
+    xs = [int(p.x * w) for i, p in enumerate(lm) if vis(i)]
+    ys = [int(p.y * h) for i, p in enumerate(lm) if vis(i)]
+    pad = max(6, int(0.06 * w))
+    box = [
+        _clamp(min(xs) - pad, 0, w - 1),
+        _clamp(min(ys) - pad, 0, h - 1),
+        _clamp(max(xs) + pad, 0, w - 1),
+        _clamp(max(ys) + pad, 0, h - 1),
+    ]
 
-    # --- overlay ---
-    ci = (round(chest[0]), round(chest[1]))
-    cv2.circle(frame, ci, 10, (0, 200, 0), 2)  # chest target (green)
-    cv2.drawMarker(frame, ci, (0, 200, 0), cv2.MARKER_CROSS, 22, 1)
-    cv2.line(frame, ls, rs, (0, 160, 0), 1)
-    if head:
-        cv2.circle(frame, head, 8, (0, 180, 220), 2)  # head (amber) — gated later
-    for e in eyes:
-        cv2.circle(frame, e, 5, (60, 60, 255), -1)  # eyes (red) — exclusion zone later
+    return {
+        "center": (round(chest[0]), round(chest[1])),
+        "box": box,
+        "targets": {
+            "chest": [round(chest[0]), round(chest[1])],
+            "shoulders": [list(ls), list(rs)],
+            "head": list(head) if head else None,
+        },
+        "eyes": [list(e) for e in eyes] if eyes else None,
+    }
+
+
+def _draw_tracks(frame, tracks, subject, selected, sel_visible):
+    """Per-person outlines + ids; detailed target points on the subject only."""
+    for t in tracks:
+        x0, y0, x1, y1 = (int(v) for v in t["box"])
+        is_sel = t["id"] == selected
+        col = (0, 220, 120) if is_sel else (140, 140, 140)
+        cv2.rectangle(frame, (x0, y0), (x1, y1), col, 2 if is_sel else 1)
+        cv2.putText(
+            frame,
+            f"#{t['id']}" + (" SEL" if is_sel else ""),
+            (x0 + 3, max(14, y0 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            col,
+            1 if not is_sel else 2,
+        )
+    if selected is not None and not sel_visible:
+        cv2.putText(
+            frame, f"SELECTED #{selected} LOST", (10, 24),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 40, 255), 2,
+        )
+    if subject:
+        tg = subject["targets"]
+        ci = tuple(tg["chest"])
+        cv2.circle(frame, ci, 10, (0, 200, 0), 2)  # chest target (green)
+        cv2.drawMarker(frame, ci, (0, 200, 0), cv2.MARKER_CROSS, 22, 1)
+        ls, rs = tg["shoulders"]
+        cv2.line(frame, tuple(ls), tuple(rs), (0, 160, 0), 1)
+        if tg["head"]:
+            cv2.circle(frame, tuple(tg["head"]), 8, (0, 180, 220), 2)  # head (amber)
+        for e in subject["eyes"] or []:
+            cv2.circle(frame, tuple(e), 5, (60, 60, 255), -1)  # eyes (red)
 
 
 def _test_pattern(w, h):
@@ -394,7 +539,7 @@ def state():
 @app.route("/target", methods=["POST"])
 def set_target():
     """Choose the body part to track ("none" | "chest" | "head")."""
-    global _target_part
+    global _target_part, _selected_id
     data = request.get_json(force=True, silent=True) or {}
     part = data.get("part", "none")
     if part not in ("none", "chest", "head"):
@@ -403,9 +548,13 @@ def set_target():
         _target_part = part
         if part != "none":
             # Acquire from center each time targeting (re)starts, so the
-            # commanded aim and the gun's actual position stay in sync.
+            # commanded aim and the gun's actual position stay in sync. A
+            # fresh acquisition also means a fresh subject: any operator
+            # person-selection is stale by definition (the trial Acquire cue
+            # lands here — it must never inherit a leftover selection).
             _aim["pan"] = 0.0
             _aim["tilt"] = 0.0
+            _selected_id = None
     return ("", 204)
 
 
@@ -414,12 +563,86 @@ def center():
     """Stop tracking and reset the aim integrator to center. Paired with the
     orchestrator commanding the turret back to 0,0 — a one-click recovery from a
     bad overshoot without entering maintenance."""
-    global _target_part
+    global _target_part, _selected_id, _manual_until
     with _tlock:
         _target_part = "none"
         _aim["pan"] = 0.0
         _aim["tilt"] = 0.0
+        _selected_id = None
+        _manual_until = 0.0
     return ("", 204)
+
+
+@app.route("/aimpoint", methods=["POST"])
+def aimpoint():
+    """Click-to-aim: nudge the commanded aim so the clicked pixel lands on the
+    boresight. One-shot and open-loop — a static pixel can't feed the servo
+    (the camera rides the gun, so a fixed frame coordinate never converges);
+    instead the deg-per-pixel gains convert the click's boresight error into a
+    single aim step, streamed briefly so the orchestrator relays it (armed
+    only, fire_ok never true). Iterate by clicking again. Stops any body-part
+    servo: a manual point is manual mode."""
+    global _target_part, _selected_id, _manual_until
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        x, y = float(data["x"]), float(data["y"])
+    except Exception:
+        return ("need numeric x,y", 400)
+    with _tlock:
+        bs = _boresight or [_frame_size[0] // 2, _frame_size[1] // 2]
+        nudge_pan = _clamp(_tune["gain_pan"] * (x - bs[0]), -_MAX_CLICK_DEG, _MAX_CLICK_DEG)
+        nudge_tilt = _clamp(_tune["gain_tilt"] * (y - bs[1]), -_MAX_CLICK_DEG, _MAX_CLICK_DEG)
+        _aim["pan"] = _clamp(_aim["pan"] + nudge_pan, -_limits["pan"], _limits["pan"])
+        _aim["tilt"] = _clamp(_aim["tilt"] + nudge_tilt, -_limits["tilt"], _limits["tilt"])
+        _target_part = "none"
+        _selected_id = None
+        _manual_until = time.time() + 0.8
+        aim = dict(_aim)
+    return jsonify({"aim": aim})
+
+
+@app.route("/select", methods=["POST"])
+def select():
+    """Click-to-track: pick the person whose track box contains (or whose
+    center is nearest) the clicked pixel, then servo onto *them* until
+    deselected — never falling back to someone else if the track is lost.
+    `{"clear": true}` deselects. A miss keeps the current selection (an
+    errant click must not silently retarget)."""
+    global _selected_id, _target_part
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("clear"):
+        with _tlock:
+            _selected_id = None
+        return jsonify({"selected": None, "hit": True})
+    try:
+        x, y = float(data["x"]), float(data["y"])
+    except Exception:
+        return ("need numeric x,y or clear", 400)
+    with _lock:
+        tracks = list(_latest_state.get("tracks") or [])
+        frame_w = (_latest_state.get("frame") or {}).get("w", _frame_size[0])
+    best = None
+    best_d = 0.25 * frame_w  # generous: near-misses on a moving person still count
+    for t in tracks:
+        x0, y0, x1, y1 = t["box"]
+        cx, cy = t["center"]
+        d = ((cx - x) ** 2 + (cy - y) ** 2) ** 0.5
+        if x0 <= x <= x1 and y0 <= y <= y1:
+            d *= 0.25  # inside the box beats a nearer neighbouring center
+        if d < best_d:
+            best, best_d = t, d
+    if best is None:
+        with _tlock:
+            current = _selected_id
+        return jsonify({"selected": current, "hit": False})
+    with _tlock:
+        _selected_id = int(best["id"])
+        # Selection means "track them": make sure a body-part servo is live
+        # (without resetting the aim integrator — the loop is delta-driven
+        # and converges from wherever the gun currently points).
+        if _target_part == "none":
+            _target_part = "chest"
+    return jsonify({"selected": int(best["id"]), "hit": True})
 
 
 @app.route("/gains", methods=["POST"])
@@ -482,6 +705,12 @@ def main():
         default=os.environ.get("BOOTH_VISION_MODEL", _MODEL_PATH),
         help="pose .task model path (auto-downloaded if missing)",
     )
+    p.add_argument(
+        "--max-poses",
+        type=int,
+        default=int(os.environ.get("BOOTH_VISION_MAX_POSES", 4)),
+        help="people detected per frame (tracker gives them stable ids)",
+    )
     # --- Targeting servo ---
     p.add_argument(
         "--orchestrator",
@@ -515,11 +744,13 @@ def main():
     )
     cfg = p.parse_args()
 
-    # Seed the live-tunable gains from the CLI flags.
+    # Seed the live-tunable gains + aim limits from the CLI flags.
     with _tlock:
         _tune["gain_pan"] = cfg.gain_pan
         _tune["gain_tilt"] = cfg.gain_tilt
         _tune["tolerance"] = cfg.tolerance
+        _limits["pan"] = cfg.pan_limit
+        _limits["tilt"] = cfg.tilt_limit
 
     t = threading.Thread(target=detect_loop, args=(cfg,), daemon=True)
     t.start()

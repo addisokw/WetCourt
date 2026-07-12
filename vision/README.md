@@ -81,23 +81,32 @@ an offline booth.
 | `GET /` | HTML page embedding the live feed |
 | `GET /feed` | annotated MJPEG stream |
 | `GET /state` | latest detection JSON (target pixels, boresight, aim, locked, eyes) |
-| `POST /target` | `{"part":"none"\|"chest"\|"head"}` — choose what to track |
+| `POST /target` | `{"part":"none"\|"chest"\|"head"}` — choose what to track (clears any person selection: fresh acquisition = fresh subject) |
+| `POST /aimpoint` | `{"x","y"}` — click-to-aim: one-shot open-loop nudge putting the clicked pixel on the boresight (gain-converted, ±20°/click, stops the body servo; the held aim streams ~0.8s with `fire_ok:false`) |
+| `POST /select` | `{"x","y"}` — click-to-track: select the person track at/nearest the pixel and servo onto *them*; `{"clear":true}` deselects. A selected-but-lost track HOLDS the gun (never migrates to a bystander) |
 | `POST /boresight` | `{"x":int,"y":int}` — set the boresight pixel |
 | `POST /gains` | `{gain_pan?,gain_tilt?,tolerance?}` — live-tune the servo |
 | `POST /confirm_head` | `{"enabled":bool}` — operator gate for head shots |
-| `POST /center` | stop tracking, reset aim integrator (recovery) |
+| `POST /center` | stop tracking, reset aim integrator, clear selection (recovery) |
 | `GET /health` | `ok` |
 
-The operator drives `/target` and `/boresight` through the orchestrator
-(`/vision/target`, `/vision/boresight`) so the console stays same-origin; aim is
+The operator drives `/target`, `/aimpoint`, `/select`, and `/boresight` through
+the orchestrator (`/vision/*`) so the console stays same-origin; aim is
 streamed to the orchestrator's `/vision/aim` and gated by `/vision/arm`.
+
+Detection runs multi-person (`--max-poses`, default 4) through a greedy
+nearest-centroid tracker with stable integer ids (positional identity —
+someone who leaves and returns gets a new id; the operator re-clicks). With no
+selection, the servo targets the track nearest the boresight.
 
 `/state` shape:
 
 ```json
 { "ts": 1750000000.0, "frame": {"w":640,"h":480}, "person": true,
   "targets": {"chest":[320,300], "shoulders":[[280,240],[360,240]], "head":[320,160]},
-  "eyes": [[305,150],[335,150]] }
+  "eyes": [[305,150],[335,150]],
+  "tracks": [{"id":1, "center":[320,300], "box":[250,120,390,470]}],
+  "selected": 1, "selected_visible": true }
 ```
 
 ## Config (flags or `BOOTH_VISION_*` env)
@@ -110,6 +119,7 @@ streamed to the orchestrator's `/vision/aim` and gated by `/vision/arm`.
 | `--width` / `--height` | `BOOTH_VISION_WIDTH/HEIGHT` | `640` / `480` |
 | `--quality` | `BOOTH_VISION_QUALITY` | `80` |
 | `--orchestrator` | `BOOTH_VISION_ORCH` | `http://localhost:8080` |
+| `--max-poses` | `BOOTH_VISION_MAX_POSES` | `4` (people detected per frame) |
 | `--gain-pan` / `--gain-tilt` | `BOOTH_VISION_GAIN_PAN/TILT` | `0.025` (tune live; sign matters) |
 | `--tolerance` | `BOOTH_VISION_TOL` | `12` (px for LOCKED) |
 | `--eye-pad` | `BOOTH_VISION_EYE_PAD` | `0.8` (eye-zone size; bigger = safer) |

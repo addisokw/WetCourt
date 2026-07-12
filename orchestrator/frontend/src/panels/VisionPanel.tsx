@@ -18,7 +18,13 @@ interface VisionState {
   locked?: boolean;
   gains?: { pan: number; tilt: number; tolerance: number };
   fire_ok?: boolean;
+  tracks?: { id: number; center: number[]; box: number[] }[];
+  selected?: number | null;
+  selected_visible?: boolean;
 }
+
+/** What a click on the feed does. */
+type ClickMode = 'off' | 'aim' | 'select' | 'boresight';
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -37,7 +43,7 @@ export default function VisionPanel() {
   const [online, setOnline] = createSignal(false);
   const [state, setState] = createSignal<VisionState | null>(null);
   const [armed, setArmed] = createSignal(false);
-  const [boresightMode, setBoresightMode] = createSignal(false);
+  const [clickMode, setClickMode] = createSignal<ClickMode>('off');
   // Auto-fire: the gun fires once vision holds a lock for `dwell`. `dwellLocal`
   // holds an in-progress edit; `afStatus` mirrors the server (dwell + how long
   // the current lock has held). `fireAck` tracks the manual Fire-now button.
@@ -118,14 +124,22 @@ export default function VisionPanel() {
   }
 
   function onFeedClick(e: MouseEvent & { currentTarget: HTMLImageElement }) {
-    if (!boresightMode()) return;
+    const mode = clickMode();
+    if (mode === 'off') return;
     const fr = state()?.frame;
     if (!fr) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.round(((e.clientX - rect.left) / rect.width) * fr.w);
     const y = Math.round(((e.clientY - rect.top) / rect.height) * fr.h);
-    void post('/vision/boresight', { x, y });
-    setBoresightMode(false);
+    if (mode === 'boresight') {
+      void post('/vision/boresight', { x, y });
+      setClickMode('off'); // boresight is a one-shot calibration
+    } else if (mode === 'aim') {
+      // One-shot nudge toward the click; stays in aim mode for refinement clicks.
+      void post('/vision/aimpoint', { x, y });
+    } else {
+      void post('/vision/select', { x, y }).then(() => void poll());
+    }
   }
 
   async function recenter() {
@@ -177,7 +191,7 @@ export default function VisionPanel() {
       </header>
 
       <section class="panel-section">
-        <VisionFeed online={online()} class={boresightMode() ? 'crosshair' : ''} onFeedClick={onFeedClick}>
+        <VisionFeed online={online()} class={clickMode() !== 'off' ? 'crosshair' : ''} onFeedClick={onFeedClick}>
           <p>vision process offline</p>
           <p class="muted small">
             start it on the booth PC: <code>cd vision &amp;&amp; uv run vision.py</code>
@@ -201,14 +215,52 @@ export default function VisionPanel() {
         </div>
 
         <div class="vision-row">
-          <label>boresight</label>
-          <button class={`mini ${boresightMode() ? 'active' : ''}`} onClick={() => setBoresightMode(!boresightMode())}>
-            {boresightMode() ? 'click the feed…' : 'set (click feed)'}
-          </button>
+          <label>feed click</label>
+          <div class="btn-row">
+            {(['off', 'aim', 'select', 'boresight'] as const).map((m) => (
+              <button
+                class={`mini ${clickMode() === m ? 'active' : ''}`}
+                onClick={() => setClickMode(clickMode() === m ? 'off' : m)}
+              >
+                {m === 'aim' ? 'aim here' : m === 'select' ? 'select person' : m === 'boresight' ? 'set boresight' : 'off'}
+              </button>
+            ))}
+          </div>
           <span class="muted small">
-            {state()?.boresight ? `at ${fmt(state()!.boresight!)}` : 'defaults to center'}
+            {clickMode() === 'aim'
+              ? armed()
+                ? 'click the feed to point the gun there (click again to refine)'
+                : '⚠ arm targeting — clicks aim, but the gun won’t move until armed'
+              : clickMode() === 'select'
+                ? 'click a person’s box to track them'
+                : clickMode() === 'boresight'
+                  ? 'click where the gun actually points'
+                  : state()?.boresight
+                    ? `boresight at ${fmt(state()!.boresight!)}`
+                    : 'boresight defaults to center'}
           </span>
         </div>
+
+        <Show when={state()?.selected != null || (state()?.tracks?.length ?? 0) > 0}>
+          <div class="vision-row">
+            <label>tracking</label>
+            <Show
+              when={state()?.selected != null}
+              fallback={
+                <span class="muted small">
+                  {state()!.tracks!.length} {state()!.tracks!.length === 1 ? 'person' : 'people'} in frame — nearest to boresight is targeted
+                </span>
+              }
+            >
+              <span class={state()?.selected_visible ? 'sel-badge' : 'sel-badge lost'}>
+                #{state()!.selected} {state()?.selected_visible ? 'selected' : 'LOST — gun holding'}
+              </span>
+              <button class="mini" onClick={() => void post('/vision/select', { clear: true }).then(() => void poll())}>
+                clear
+              </button>
+            </Show>
+          </div>
+        </Show>
 
         <div class="vision-row">
           <label>arm</label>
