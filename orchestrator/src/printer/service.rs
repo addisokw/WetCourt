@@ -66,15 +66,26 @@ fn print_one(
     let bytes = render(rec, &opts).build();
 
     if cfg.mode != "real" {
-        info!(case_no = rec.case_no, bytes = bytes.len(), "keepsake rendered (mock; no USB)");
+        info!(case_no = rec.case_no, bytes = bytes.len(), "keepsake rendered (mock; no I/O)");
         return Ok(());
     }
 
-    let printer = thermal_printer::Printer::connect()?;
+    let printer = match cfg.transport.as_str() {
+        "net" => {
+            if cfg.net_addr.is_empty() {
+                anyhow::bail!("printer.transport = \"net\" but printer.net_addr is not set");
+            }
+            thermal_printer::Printer::connect_net(&cfg.net_addr)?
+        }
+        "usb" => thermal_printer::Printer::connect()?,
+        other => {
+            anyhow::bail!("unknown printer.transport '{other}' (expected \"usb\" or \"net\")")
+        }
+    };
     // Preflight: paper-out / cover-open would otherwise swallow the receipt
-    // silently (the USB write can still "succeed"). Warn the operator, then
+    // silently (the write can still "succeed"). Warn the operator, then
     // attempt the write anyway — some conditions (near-end) still print.
-    match printer.usb().query_status() {
+    match printer.transport().query_status() {
         Ok(st) if !st.is_ready() => {
             let msg = format!(
                 "printer not ready (paper_out={:?} cover_open={:?} online={:?}) —                  receipt for case {} may not print",
@@ -86,7 +97,7 @@ fn print_one(
         Ok(_) => {}
         Err(e) => warn!("printer status query failed (printing anyway): {e:#}"),
     }
-    printer.usb().write(&bytes)?;
+    printer.transport().write(&bytes)?;
     info!(case_no = rec.case_no, bytes = bytes.len(), "keepsake printed");
     Ok(())
 }

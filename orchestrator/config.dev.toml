@@ -97,6 +97,10 @@ transcripts_jsonl = "./transcripts.jsonl"
 # qr_url and booth_location are meant to be edited on-site as the booth moves.
 [printer]
 mode = "mock"
+# In "real" mode: transport = "usb" (direct cable, default) or "net" (LAN
+# printer, raw/JetDirect). net_addr is host[:port]; the port defaults to 9100.
+#transport = "net"
+#net_addr = "192.168.123.100"
 width_dots = 576
 qr_url = "https://wetcourt.lol"
 booth_location = "Find the Wet Court near you"

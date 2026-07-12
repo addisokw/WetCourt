@@ -76,6 +76,10 @@ transcripts_jsonl = "/var/log/booth/transcripts.jsonl"
 # qr_url and booth_location are meant to be edited on-site as the booth moves.
 [printer]
 mode = "real"
+# The printer lives on the booth LAN (raw/JetDirect, port 9100 unless given).
+# Set transport = "usb" to fall back to the direct USB cable.
+transport = "net"
+net_addr = "192.168.123.100"
 width_dots = 576
 qr_url = "https://wetcourt.lol"
 booth_location = "Find the Wet Court near you"

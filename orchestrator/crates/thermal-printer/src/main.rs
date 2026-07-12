@@ -11,7 +11,9 @@
 //!   tp all                  Run the full capability tour
 //!   tp dump <out.bin> <cmd> Write the bytes for <cmd> to a file (no printer)
 //!
-//! Global flag: --width <dots>  (default 576 for 80mm)
+//! Global flags: --width <dots>  (default 576 for 80mm)
+//!               --net <host[:port]>  LAN printer instead of USB (port: 9100)
+//!               --usb           force USB even when tp.conf sets net_addr
 
 use anyhow::{anyhow, Result};
 use std::io::{Read, Write};
@@ -47,6 +49,22 @@ fn run() -> Result<()> {
         args.drain(i..=i + 1);
     }
 
+    // Transport: tp.conf's `net_addr` is the default; `--net host[:port]`
+    // overrides it, `--usb` forces the cable even when the conf says LAN.
+    let mut net: Option<String> = cfg.net_addr.clone();
+    if let Some(i) = args.iter().position(|a| a == "--net") {
+        net = Some(
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| anyhow!("--net needs a host[:port]"))?,
+        );
+        args.drain(i..=i + 1);
+    }
+    if let Some(i) = args.iter().position(|a| a == "--usb") {
+        net = None;
+        args.remove(i);
+    }
+
     let cmd = args.first().cloned().unwrap_or_else(|| "help".into());
     let rest = &args[args.len().min(1)..];
 
@@ -61,20 +79,24 @@ fn run() -> Result<()> {
         _ => {}
     }
 
-    let printer = Printer::connect()?.with_width(width);
+    let printer = match &net {
+        Some(addr) => Printer::connect_net(addr)?,
+        None => Printer::connect()?,
+    }
+    .with_width(width);
 
     match cmd.as_str() {
         "info" => {
-            println!("connected: {}", printer.usb().describe());
+            println!("connected: {}", printer.transport().describe());
             println!("width: {} dots", printer.width_dots());
-            if printer.usb().has_status_channel() {
-                println!("status channel: available (bulk-IN present)");
+            if printer.transport().has_status_channel() {
+                println!("status channel: available");
             } else {
-                println!("status channel: none");
+                println!("status channel: none (no bulk-IN endpoint)");
             }
         }
         "status" => {
-            let s = printer.usb().query_status()?;
+            let s = printer.transport().query_status()?;
             let yn = |b: Option<bool>| match b {
                 Some(true) => "yes",
                 Some(false) => "no",
@@ -164,14 +186,14 @@ fn run() -> Result<()> {
             })?;
             // 2) Let the raster physically finish printing while the handle stays open.
             let dots = r.height as u64 + warmup as u64 + 200;
-            printer.usb().drain(dots * 1000 / 250 + 800);
+            printer.transport().drain(dots * 1000 / 250 + 800);
             // 3) Send the cut as its own small write — the printer is now idle, so
             //    this takes the same reliable path as `tp feedcut`. Bundling the cut
             //    into the giant raster transfer is what was dropping it.
             printer.print(|b| {
                 b.feed(2).cut();
             })?;
-            printer.usb().drain(900);
+            printer.transport().drain(900);
             println!(
                 "printed {} ({}x{} dots, dither={:?} gamma={} contrast={} brightness={})",
                 path,
@@ -194,11 +216,11 @@ fn run() -> Result<()> {
                 b.raster_banded(&r.bits, r.width_bytes, r.height, cfg.image_band_rows);
                 b.feed(1).line(pattern);
             })?;
-            printer.usb().drain(r.height as u64 * 1000 / 250 + 800);
+            printer.transport().drain(r.height as u64 * 1000 / 250 + 800);
             printer.print(|b| {
                 b.feed(2).cut();
             })?;
-            printer.usb().drain(1000);
+            printer.transport().drain(1000);
             println!("generated `{pattern}` ({}x{} dots, seed {seed})", canvas.width, canvas.height);
         }
         "all" => printer.print(|b| {
@@ -483,12 +505,12 @@ fn print_text(printer: &Printer, input: &str, plain: bool, do_cut: bool) -> Resu
     }
     b.feed(2);
     printer.send(&b)?;
-    printer.usb().drain(estimate_drain_ms(&b));
+    printer.transport().drain(estimate_drain_ms(&b));
     if do_cut {
         printer.print(|c| {
             c.cut();
         })?;
-        printer.usb().drain(1000);
+        printer.transport().drain(1000);
     }
     Ok(b.bytes().len())
 }
@@ -553,6 +575,10 @@ fn show_config(path: &Path, cfg: &Config) -> Result<()> {
         println!("config: wrote sample to {} (edit and re-run)", path.display());
     }
     println!("  width_dots       = {}", cfg.width_dots);
+    println!(
+        "  net_addr         = {}",
+        cfg.net_addr.as_deref().unwrap_or("(unset — USB)")
+    );
     println!("  warmup_feed_dots = {}", cfg.warmup_feed_dots);
     println!("  image_band_rows  = {}", cfg.image_band_rows);
     println!("  image_gamma      = {}", cfg.image.gamma);
@@ -592,7 +618,7 @@ fn print_help() {
         r#"tp — thermal printer playground
 
 USAGE:
-  tp <command> [args] [--width DOTS]
+  tp <command> [args] [--width DOTS] [--net HOST[:PORT]] [--usb]
 
 COMMANDS:
   info                    Show connection details (no printing)
@@ -619,9 +645,11 @@ COMMANDS:
 
 GLOBAL:
   --width DOTS            Printable width (overrides config; 576/512)
+  --net HOST[:PORT]       LAN printer over raw TCP (port defaults to 9100)
+  --usb                   Force USB even when tp.conf sets net_addr
 
-Image tone & dither defaults live in tp.conf (run `tp config`). CLI flags on
-`tp image` override them per-print.
+Image tone & dither defaults — and the printer's `net_addr` — live in tp.conf
+(run `tp config`). CLI flags override them per-print.
 "#
     );
 }

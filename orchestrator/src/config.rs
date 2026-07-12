@@ -167,10 +167,18 @@ fn d_no_repeat_window() -> usize { 15 }
 /// governs the physical receipt.
 #[derive(Debug, Deserialize, Clone)]
 pub struct PrinterConfig {
-    /// "off" (no receipt), "mock" (render + log the byte count, no USB), or
-    /// "real" (render + send to the USB printer).
+    /// "off" (no receipt), "mock" (render + log the byte count, no I/O), or
+    /// "real" (render + send to the printer).
     #[serde(default = "d_printer_mode")]
     pub mode: String,
+    /// How to reach the printer in `real` mode: "usb" (direct libusb) or
+    /// "net" (raw TCP / JetDirect to `net_addr`).
+    #[serde(default = "d_printer_transport")]
+    pub transport: String,
+    /// LAN printer `host[:port]` for `transport = "net"`; the port defaults
+    /// to 9100.
+    #[serde(default)]
+    pub net_addr: String,
     /// ESC/POS dot width — 576 for a standard 80mm head (512 on some clones).
     #[serde(default = "d_printer_width")]
     pub width_dots: u32,
@@ -186,6 +194,8 @@ impl Default for PrinterConfig {
     fn default() -> Self {
         Self {
             mode: d_printer_mode(),
+            transport: d_printer_transport(),
+            net_addr: String::new(),
             width_dots: d_printer_width(),
             qr_url: d_printer_qr(),
             booth_location: d_printer_loc(),
@@ -194,6 +204,7 @@ impl Default for PrinterConfig {
 }
 
 fn d_printer_mode() -> String { "mock".into() }
+fn d_printer_transport() -> String { "usb".into() }
 fn d_printer_width() -> u32 { 576 }
 fn d_printer_qr() -> String { "https://wetcourt.lol".into() }
 fn d_printer_loc() -> String { "Find the Wet Court near you".into() }

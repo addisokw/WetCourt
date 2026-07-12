@@ -336,7 +336,7 @@ mod tests {
         // Opt-in real-hardware proof: `WETCOURT_PRINT_USB=1 cargo test ...`.
         if std::env::var("WETCOURT_PRINT_USB").is_ok() {
             let printer = thermal_printer::Printer::connect().expect("open USB printer");
-            printer.usb().write(&guilty).expect("print guilty receipt");
+            printer.transport().write(&guilty).expect("print guilty receipt");
         }
     }
 

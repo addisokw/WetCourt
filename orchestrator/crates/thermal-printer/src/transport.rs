@@ -1,11 +1,15 @@
-//! USB transport for a generic ESC/POS printer.
+//! Transports for a generic ESC/POS printer.
 //!
-//! Talks to the printer's bulk-OUT endpoint directly via libusb (rusb), so it
-//! does not depend on a CUPS queue or any OS print path. This is the layer the
-//! art project will build on.
+//! - [`Usb`] talks to the printer's bulk-OUT endpoint directly via libusb
+//!   (rusb), so it does not depend on a CUPS queue or any OS print path.
+//! - [`Net`] talks raw TCP to a LAN printer on the JetDirect port (9100) —
+//!   the same byte stream, no driver anywhere.
+//! - [`Transport`] wraps either so callers don't care which cable it is.
 
 use anyhow::{anyhow, Context, Result};
 use rusb::{Device, DeviceHandle, Direction, GlobalContext, TransferType};
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 /// Your printer, discovered earlier: `usb://Printer/POS-80?serial=6746046E3632`.
@@ -209,6 +213,122 @@ impl Drop for Usb {
     fn drop(&mut self) {
         if self.claimed {
             let _ = self.handle.release_interface(self.iface);
+        }
+    }
+}
+
+/// Default raw-printing TCP port (HP JetDirect convention; POS LAN boards
+/// speak the same ESC/POS bytes over it).
+pub const NET_PORT: u16 = 9100;
+
+/// A LAN printer reached over raw TCP. The socket is bidirectional, so
+/// `DLE EOT` real-time status works the same as over USB bulk-IN (on printers
+/// that implement it; unanswered queries just decode to `None`s).
+pub struct Net {
+    stream: TcpStream,
+    peer: String,
+}
+
+impl Net {
+    /// Connect to `host[:port]`; the port defaults to 9100.
+    pub fn connect(addr: &str) -> Result<Self> {
+        let full = if addr.contains(':') { addr.to_string() } else { format!("{addr}:{NET_PORT}") };
+        let sock = full
+            .to_socket_addrs()
+            .with_context(|| format!("resolving printer address {full}"))?
+            .next()
+            .ok_or_else(|| anyhow!("printer address {full} resolved to nothing"))?;
+        let stream = TcpStream::connect_timeout(&sock, Duration::from_secs(4))
+            .with_context(|| format!("connecting to printer at {full}"))?;
+        stream.set_nodelay(true).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        Ok(Self { stream, peer: full })
+    }
+
+    /// Write raw bytes to the printer.
+    pub fn write(&self, data: &[u8]) -> Result<()> {
+        // `impl Write for &TcpStream` keeps the &self surface identical to Usb.
+        (&self.stream)
+            .write_all(data)
+            .with_context(|| format!("TCP write to printer {} failed", self.peer))
+    }
+
+    /// Query real-time printer status via `DLE EOT n` (n = 1..4) and decode it.
+    pub fn query_status(&self) -> Result<Status> {
+        // Drop any stale unread bytes so the four answers pair with the four
+        // queries below rather than with some earlier traffic.
+        self.stream.set_read_timeout(Some(Duration::from_millis(10))).ok();
+        let mut junk = [0u8; 32];
+        while matches!((&self.stream).read(&mut junk), Ok(n) if n > 0) {}
+
+        let q = |n: u8| -> Option<u8> {
+            self.write(&[0x10, 0x04, n]).ok()?;
+            self.read_one(Duration::from_millis(800))
+        };
+        Ok(Status::decode([q(1), q(2), q(3), q(4)]))
+    }
+
+    fn read_one(&self, timeout: Duration) -> Option<u8> {
+        self.stream.set_read_timeout(Some(timeout)).ok();
+        let mut buf = [0u8; 1];
+        match (&self.stream).read(&mut buf) {
+            Ok(n) if n >= 1 => Some(buf[0]),
+            _ => None,
+        }
+    }
+
+    /// See [`Usb::drain`] — same purpose: let the mech finish before the
+    /// socket closes and the printer's buffer is at the mercy of its firmware.
+    pub fn drain(&self, ms: u64) {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+
+    pub fn describe(&self) -> String {
+        format!("tcp {} (raw/JetDirect)", self.peer)
+    }
+}
+
+/// Either cable, one surface — what [`crate::Printer`] holds.
+pub enum Transport {
+    Usb(Usb),
+    Net(Net),
+}
+
+impl Transport {
+    pub fn write(&self, data: &[u8]) -> Result<()> {
+        match self {
+            Transport::Usb(u) => u.write(data),
+            Transport::Net(n) => n.write(data),
+        }
+    }
+
+    pub fn query_status(&self) -> Result<Status> {
+        match self {
+            Transport::Usb(u) => u.query_status(),
+            Transport::Net(n) => n.query_status(),
+        }
+    }
+
+    /// Whether status queries have any chance of an answer (USB needs a
+    /// bulk-IN endpoint; a TCP socket is always bidirectional).
+    pub fn has_status_channel(&self) -> bool {
+        match self {
+            Transport::Usb(u) => u.has_status_channel(),
+            Transport::Net(_) => true,
+        }
+    }
+
+    pub fn drain(&self, ms: u64) {
+        match self {
+            Transport::Usb(u) => u.drain(ms),
+            Transport::Net(n) => n.drain(ms),
+        }
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            Transport::Usb(u) => u.describe(),
+            Transport::Net(n) => n.describe(),
         }
     }
 }

@@ -12,10 +12,13 @@ use std::path::Path;
 /// Default config filename, resolved relative to the working directory.
 pub const DEFAULT_PATH: &str = "tp.conf";
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Printable width in dots (576 for most 80mm, 512 for some clones).
     pub width_dots: u32,
+    /// LAN printer `host[:port]` (raw/JetDirect; port defaults to 9100).
+    /// `None` = direct USB. `--net`/`--usb` flags override per invocation.
+    pub net_addr: Option<String>,
     /// Blank dots fed before a raster, so any cold-start artifact lands on margin.
     pub warmup_feed_dots: u8,
     /// Rows per raster band when printing images (smaller = safer on cheap heads).
@@ -28,6 +31,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             width_dots: WIDTH_DOTS_80MM,
+            net_addr: None,
             warmup_feed_dots: 24,
             image_band_rows: 128,
             // Thermal heads run dark, so a brightening gamma is a sane default.
@@ -66,6 +70,7 @@ impl Config {
             let num = |v: &str| v.parse::<f32>().map_err(|_| anyhow!("line {}: `{v}` is not a number", n + 1));
             match k {
                 "width_dots" => c.width_dots = num(v)? as u32,
+                "net_addr" => c.net_addr = (!v.is_empty()).then(|| v.to_string()),
                 "warmup_feed_dots" => c.warmup_feed_dots = num(v)? as u8,
                 "image_band_rows" => c.image_band_rows = num(v)? as u16,
                 "image_gamma" => c.image.gamma = num(v)?,
@@ -84,6 +89,7 @@ impl Config {
 # CLI flags on `tp image` override the image_* values below.
 
 width_dots        = 576    # 576 for most 80mm heads, 512 for some clones
+#net_addr         = 192.168.123.100   # LAN printer host[:port] (default port 9100); omit for USB
 warmup_feed_dots  = 24     # blank feed before an image (hides cold-start band)
 image_band_rows   = 128    # raster band height; lower if images smear/banding
 

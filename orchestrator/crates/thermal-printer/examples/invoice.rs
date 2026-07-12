@@ -256,11 +256,11 @@ fn main() -> Result<()> {
 
     // Hold the handle open until printing finishes, then cut separately.
     let lines = b.bytes().iter().filter(|&&x| x == 0x0A).count() as u64;
-    printer.usb().drain(lines * 120 + 2500);
+    printer.transport().drain(lines * 120 + 2500);
     printer.print(|c| {
         c.cut();
     })?;
-    printer.usb().drain(1000);
+    printer.transport().drain(1000);
 
     println!("printed {kind} invoice for \"{recipient}\"");
     Ok(())
