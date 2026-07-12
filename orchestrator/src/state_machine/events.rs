@@ -22,6 +22,10 @@ pub enum Event {
     /// skipped and the trial proceeds straight to deliberation.
     CrossQuestionFailed,
     VerdictReady(Verdict),
+    /// The pre_announced verdict service reached its reveal beat (verdict word
+    /// about to play). The FSM strikes the gavel here — through the hardware
+    /// adapter, so the strike honours the console-tuned gavel.toml geometry.
+    VerdictRevealed,
     TtsFinished,
     /// Payload is the raw ack/err line off the wire — nothing branches on it,
     /// but it shows up in event debugging; kept deliberately.

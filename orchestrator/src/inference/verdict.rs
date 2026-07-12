@@ -192,6 +192,10 @@ pub async fn real(
             reply: None, // fire-and-forget; the face may be absent
         })
         .await;
+    // The gavel lands on the same beat — at the reveal, not when the
+    // deliberation started playing back at VerdictReady. Routed through the
+    // FSM so the hardware adapter applies the gavel.toml strike geometry.
+    let _ = event_tx.send(Event::VerdictRevealed).await;
 
     let t3 = Instant::now();
     info!(text = verdict_word, "tts segment 3 (verdict word) start");

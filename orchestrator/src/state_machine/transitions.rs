@@ -297,6 +297,11 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         }
         (s @ Deliberating { .. }, _) => (s, vec![]),
 
+        // Reveal beat from the pre_announced verdict service: the gavel lands
+        // with the verdict word, not back when deliberation playback started.
+        (s @ PronouncingVerdict { .. }, VerdictRevealed) => {
+            (s, vec![Command::Hardware(HardwareCommand::Gavel)])
+        }
         (PronouncingVerdict { verdict, .. }, TtsFinished) => begin_executing_sentence(verdict, cfg),
         // Watchdog: TtsFinished normally arrives from the browser or the TTS
         // self-ack timer, but if that task dies the trial must not wedge here —
@@ -551,13 +556,13 @@ fn begin_pronouncing(v: Verdict) -> (State, Vec<Command>) {
             key_factor: v.key_factor.clone(),
         }));
         cmds.push(Command::Speak(v.deliberation.clone()));
-        // Fallback path reveals immediately, so the eye flips with it. On the
-        // pre_announced path the verdict service sends FACE itself at its
-        // reveal moment (after the theater beat) — flipping the eye here would
-        // spoil the verdict a whole deliberation early.
+        // Fallback path reveals immediately, so the eye flips and the gavel
+        // strikes with it. On the pre_announced path the verdict service sends
+        // FACE and GAVEL itself at its reveal moment (after the theater beat) —
+        // firing them here would land a whole deliberation early.
         cmds.push(Command::Hardware(HardwareCommand::Face(FacePhase::verdict(v.guilty))));
+        cmds.push(Command::Hardware(HardwareCommand::Gavel));
     }
-    cmds.push(Command::Hardware(HardwareCommand::Gavel));
     let watchdog_at = Instant::now() + pronounce_watchdog(&v.deliberation);
     (State::PronouncingVerdict { verdict: v, watchdog_at }, cmds)
 }
@@ -918,6 +923,32 @@ mod tests {
         assert!(cmds
             .iter()
             .any(|c| matches!(c, Command::Display(DisplayEvent::ExecuteSentence { .. }))));
+    }
+
+    #[test]
+    fn pre_announced_pronouncing_strikes_gavel_at_reveal_only() {
+        let cfg = test_cfg();
+        let mut v = guilty_verdict(true);
+        v.pre_announced = true;
+        // Entering PronouncingVerdict on the pre_announced path fires nothing —
+        // no gavel, no eye flip, no verdict broadcast (the service owns those).
+        let (s, cmds) = begin_pronouncing(v);
+        assert!(cmds.is_empty());
+        // The gavel lands at the service's reveal beat.
+        let (s, cmds) = step(s, Event::VerdictRevealed, &cfg, false);
+        assert!(matches!(s, State::PronouncingVerdict { .. }));
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Gavel))));
+    }
+
+    #[test]
+    fn fallback_pronouncing_strikes_gavel_immediately() {
+        let v = guilty_verdict(true); // pre_announced = false
+        let (_, cmds) = begin_pronouncing(v);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Gavel))));
     }
 
     #[test]
