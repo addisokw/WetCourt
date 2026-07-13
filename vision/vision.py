@@ -176,13 +176,39 @@ class Tracker:
         ]
 
 
+def _open_capture(cfg):
+    """The camera, or a looping video file when `--video` is set.
+
+    Video mode exercises the FULL pipeline — detection, tracking, selection,
+    the aim servo — against recorded footage, so multi-person event scenarios
+    (people milling behind the defendant) are testable at a desk with no
+    camera, no booth, and no crowd. Returns (capture, frame_interval_secs):
+    a file decodes as fast as read() is called, so the loop paces itself to
+    the file's native FPS to mimic a live camera (the tracker's TTL and the
+    aim stream cadence are wall-clock-based).
+    """
+    if cfg.video:
+        cap = cv2.VideoCapture(cfg.video)
+        if not cap.isOpened():
+            # flush: these print from the capture thread, where block-buffered
+            # stdout (piped logs) would otherwise swallow them for minutes.
+            print(f"[vision] cannot open video {cfg.video!r}; falling back to test pattern", flush=True)
+            return cap, 1 / 30.0
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        interval = 1.0 / fps if fps > 0 else 1 / 30.0
+        print(f"[vision] video mode: {cfg.video} ({fps:.1f} fps, looping)", flush=True)
+        return cap, interval
+    cap = cv2.VideoCapture(cfg.camera, cv2.CAP_ANY)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
+    return cap, None  # a live camera blocks at its own frame rate
+
+
 def detect_loop(cfg):
     """Capture → detect → annotate → publish, forever."""
     global _latest_jpeg, _latest_clean_jpeg, _latest_state
 
-    cap = cv2.VideoCapture(cfg.camera, cv2.CAP_ANY)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
+    cap, frame_interval = _open_capture(cfg)
 
     landmarker = None
     if mp is not None:
@@ -218,11 +244,23 @@ def detect_loop(cfg):
 
     t0 = time.perf_counter()
     last_ts = -1
+    next_frame_at = time.perf_counter()
     while True:
         ok, frame = cap.read()
+        if (not ok or frame is None) and cfg.video:
+            # End of file: loop back to the start (endless replay).
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
         if not ok or frame is None:
             frame = _test_pattern(cfg.width, cfg.height)
             time.sleep(0.05)
+        if frame_interval is not None:
+            # Pace file playback to its native FPS (decode is far faster than
+            # realtime; the servo/tracker assume wall-clock frames).
+            now = time.perf_counter()
+            if now < next_frame_at:
+                time.sleep(next_frame_at - now)
+            next_frame_at = max(next_frame_at + frame_interval, now - frame_interval)
         h, w = frame.shape[:2]
         state = {"ts": time.time(), "frame": {"w": w, "h": h}, "person": False}
 
@@ -686,6 +724,12 @@ def main():
     p = argparse.ArgumentParser(description="Wet Court turret vision")
     p.add_argument(
         "--camera", type=int, default=int(os.environ.get("BOOTH_VISION_CAMERA", 0))
+    )
+    p.add_argument(
+        "--video",
+        default=os.environ.get("BOOTH_VISION_VIDEO"),
+        help="loop a video file through the full pipeline instead of the camera "
+        "(test tracking/selection against recorded event footage)",
     )
     p.add_argument("--host", default=os.environ.get("BOOTH_VISION_HOST", "0.0.0.0"))
     p.add_argument(

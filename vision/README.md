@@ -55,6 +55,14 @@ feed to set the boresight, watch the overlay track (gun still still), then
 real rig so the target converges without oscillating — the sign depends on
 servo direction + camera orientation. Disarm stops the gun instantly.
 
+**Vision-failure fallback.** The saved tuning can include a fixed
+`fallback_aim` ([pan°, tilt°], sighted just above the defendant microphone —
+set and saved from the console's Vision panel, with an "aim there" button to
+sight it in). If vision is down when a trial arms targeting, the gun (and the
+judge's gaze) glides there and waits; if there's still no fresh lock at the
+freeze-and-fire moment, the shot fires on that spot instead of being held.
+Unset = the old fail-safe: no lock, no fire.
+
 **Tuning persists host-side, like the servo calibrations.** This process holds
 gains/tolerance/boresight/target only in memory (seeded from CLI flags), so on
 its own it forgets them on every restart. The deliberate flow: tune live in
@@ -80,6 +88,24 @@ uv run vision.py            # serves on http://0.0.0.0:8091
 Pass flags through, e.g. `uv run vision.py --camera 1`. (`uv sync` just
 creates/updates `.venv` without running.) If no camera is found it serves a
 "no camera" test pattern, so the server still comes up.
+
+### Testing with recorded footage (no camera)
+
+```sh
+uv run vision.py --video path/to/event-footage.mp4   # or BOOTH_VISION_VIDEO=
+```
+
+Loops a video file through the FULL pipeline — detection, the id tracker,
+click-to-select, the aim servo, the orchestrator aim stream — paced to the
+file's native FPS so wall-clock behaviors (track TTL, lock dwell) act as they
+would live. This is how to rehearse the hard event scenario at a desk: film a
+defendant seated at the mic with people milling behind, then verify the
+tracker keeps stable ids, click-to-select sticks to the defendant, and a
+selected-but-lost track HOLDS rather than migrating to a bystander. The servo
+"converges" only in the sense of the commanded aim — the camera doesn't
+actually move with the gun in a recording, so expect the aim to walk to its
+limit on an off-boresight subject; what you're testing is target choice, id
+stability, and lock/fire_ok behavior, not closed-loop convergence.
 
 On first run it downloads the MediaPipe pose model (~3 MB) to `models/`
 (gitignored), cached thereafter. Point `--model` at a pre-downloaded `.task` for
