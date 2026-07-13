@@ -2,7 +2,7 @@
 # Deploy the judge-face firmware to a mounted CIRCUITPY drive.
 #
 # Prereqs (see README.md):
-#   - CircuitPython 10.2.1 for Matrix Portal M4 already flashed
+#   - CircuitPython 10.2.1 for Matrix Portal S3 already flashed
 #   - settings.toml created next to this script (copy settings.toml.example)
 #
 # Usage: ./deploy.sh [/Volumes/CIRCUITPY]

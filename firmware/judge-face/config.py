@@ -6,7 +6,7 @@
 
 import os
 
-FW_VERSION = "0.3"
+FW_VERSION = "0.4"     # 0.4 = Matrix Portal S3 port (native WiFi + mDNS)
 
 # Physical panel (as wired to the HUB75 header) — logical orientation comes
 # from ROTATION. 90 = portrait (32 wide x 64 tall), 0 = landscape.
@@ -19,6 +19,10 @@ WIFI_SSID = os.getenv("WIFI_SSID")
 WIFI_PASS = os.getenv("WIFI_PASS")
 ORCH_HOST = os.getenv("ORCH_HOST")
 ORCH_PORT = int(os.getenv("ORCH_PORT") or 8090)
+
+# Network name: DHCP hostname (→ judge-face.lan on the booth router, like
+# the NanoC6 fixtures) and mDNS (→ judge-face.local). Letters/digits/hyphen.
+MDNS_NAME = str(os.getenv("EYE_MDNS") or "judge-face")
 
 # Force demo mode (never dial the orchestrator); otherwise demo runs
 # automatically whenever the link is down.

@@ -1,5 +1,5 @@
 # Wet Court judge-face — entry point.
-# Board: Adafruit Matrix Portal M4 · Panel: 64x32 HUB75, mounted PORTRAIT
+# Board: Adafruit Matrix Portal S3 · Panel: 64x32 HUB75, mounted PORTRAIT
 # (rotation 90 → logical 32 wide x 64 tall).
 #
 # Init the display, build the EyeFace, and run the loop: poll the
@@ -19,7 +19,8 @@ from inputs import DemoSource, OrchestratorLink
 
 displayio.release_displays()
 
-# Canonical Matrix Portal M4 HUB75 wiring, via the board's MTX_* pin names.
+# Canonical Matrix Portal S3 HUB75 wiring, via the board's MTX_* pin names
+# (same names the M4 used — the panel plug carries over unchanged).
 # A 64x32 panel is 1/16-scan → 4 address lines (a 64x64 adds MTX_ADDRE).
 matrix = rgbmatrix.RGBMatrix(
     width=config.WIDTH, height=config.HEIGHT, bit_depth=config.BIT_DEPTH,

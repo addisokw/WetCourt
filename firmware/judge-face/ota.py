@@ -25,12 +25,13 @@
 #   - The filesystem is only code-writable when boot.py remounted it (default;
 #     hold UP at reset for USB deploy mode instead). OTABEGIN probes and
 #     reports `read_only_fs` so a push against USB mode fails clearly.
-#   - Sockets go through the AirLift (esp32spi socketpool); the listener is
-#     (re)armed lazily from the OrchestratorLink's radio and re-created when
-#     the link hard-resets a wedged AirLift (radio_epoch).
-#   - sha256 accumulates over the chunks as they arrive (M4 builds may lack
-#     native hashlib; re-hashing 30KB in pure Python at commit would outlast
-#     the pusher's ack timeout). Commit then checks size + running digest.
+#   - Sockets come from the OrchestratorLink's native socketpool; the
+#     listener is (re)armed lazily once WiFi is up, and torn down if WiFi
+#     drops or the link ever rebuilds its pool (radio_epoch).
+#   - sha256 accumulates over the chunks as they arrive. The S3 has native
+#     hashlib so this is cheap; the pure-Python fallback below keeps the
+#     desktop harness and hashlib-less builds (the retired M4) working.
+#     Commit then checks size + running digest.
 
 import os
 
@@ -50,23 +51,43 @@ except ImportError:  # desktop test harness
 
 import binascii
 
+# sha256 construction, probed ONCE at import (a surprise mid-update raises
+# from _file_decl and used to take the whole listener down — see _service):
+#   - CPython (desktop harness): hashlib.sha256()
+#   - CircuitPython core hashlib (S3): ONLY hashlib.new("sha256") exists —
+#     there are no named constructors, so hasattr picks the right shape
+#   - no hashlib at all (the retired M4's SAMD51): pure-Python fallback
 try:
     import hashlib
 
-    def _sha256():
-        return hashlib.sha256()
-except ImportError:
+    if hasattr(hashlib, "sha256"):
+        def _sha256():
+            return hashlib.sha256()
+    else:
+        hashlib.new("sha256")     # unsupported algo raises here, not mid-update
+        def _sha256():
+            return hashlib.new("sha256")
+except Exception:
     def _sha256():
         return _PySHA256()
 
 CHUNK_LIMIT = 3000            # raw bytes per PUT after b64 decode
 LINE_LIMIT = 8192             # OTA line cap (b64 of a chunk fits comfortably)
-_EAGAIN = (11, 35, 110, 116)  # esp32spi / BSD spellings of "no data yet"
+_EAGAIN = (11, 35, 110, 116)  # lwIP / BSD spellings of "no data yet"
 IDLE_DROP_MS = 30000          # kick a silent client so OTA can't wedge
-ACCEPT_EVERY_MS = 500         # idle accept probes are SPI round-trips — space them
+ACCEPT_EVERY_MS = 500         # accept probes are cheap natively; still no rush
 REBIND_EVERY_MS = 5000        # how often to look for the radio while unbound
 ALLOWED_SUFFIXES = (".py", ".json")
 FORBIDDEN = ("boot.py",)
+
+# Last noteworthy server event (client drop reason, handler exception),
+# readable via OTALOG — the remote counterpart of the serial "ota:" prints.
+LAST_OTA_ERROR = None
+
+
+def _note_error(why):
+    global LAST_OTA_ERROR
+    LAST_OTA_ERROR = why
 
 
 def server_from_settings():
@@ -109,7 +130,6 @@ class OTAServer:
         self._next_bind = ticks_ms()
         self._next_accept = ticks_ms()
         self._client = None
-        self._client_probe = ticks_ms()
         self._rbuf = bytearray(512)
         self._buf = bytearray()
         self._last_rx = 0
@@ -128,11 +148,14 @@ class OTAServer:
             self._poll(link, now)
         except Exception as e:        # never let OTA take down the eye
             print("ota:", e)
+            _note_error("poll: %r" % e)
             self._teardown()
 
     def _poll(self, link, now):
-        # The link bumps radio_epoch whenever it (re)creates or hard-resets
-        # the AirLift; any listener from an older epoch is dead hardware.
+        # A listener from an older pool epoch is dead hardware — drop it; it
+        # re-arms on the rebind window. (No teardown on a WiFi dip: an lwIP
+        # listener bound to 0.0.0.0 survives reassociation, and tearing down
+        # mid-session costs an active OTA client.)
         if self._sock is not None and link.radio_epoch != self._epoch:
             self._teardown("radio reset")
         if self._sock is None:
@@ -153,17 +176,22 @@ class OTAServer:
             self._client = c
             self._buf = bytearray()
             self._last_rx = now
-            self._client_probe = now
             print("ota: client", addr)
             return
-        self._service(link, now)
+        self._service(now)
 
     def _bind(self, link):
-        esp, pool = link.radio()
+        radio, pool = link.radio()
         if pool is None:
             return
         try:
             s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+            try:
+                # Without this, rebinding while a dropped client's socket
+                # sits in TIME_WAIT fails for minutes (lwIP EADDRINUSE).
+                s.setsockopt(pool.SOL_SOCKET, pool.SO_REUSEADDR, 1)
+            except (AttributeError, OSError):
+                pass
             s.bind(("0.0.0.0", self.port))
             s.listen(1)
             s.settimeout(0)
@@ -174,18 +202,27 @@ class OTAServer:
         self._epoch = link.radio_epoch
         print("ota: listening on :%d" % self.port)
 
-    def _service(self, link, now):
+    def _service(self, now):
         got = False
         try:
             for _ in range(8):                 # drain a few chunks per pass
                 n = self._client.recv_into(self._rbuf)
-                if n <= 0:
-                    break
+                if n == 0:                     # EOF: peer closed cleanly
+                    self._drop_client("closed")
+                    return
                 got = True
                 self._last_rx = now
                 for b in memoryview(self._rbuf)[:n]:
                     if b == 0x0A:
-                        self._handle_line()
+                        try:
+                            self._handle_line()
+                        except Exception as e:
+                            # A handler bug must cost one client, not the
+                            # listener (proven the hard way: the S3's hashlib
+                            # shape raised here and the resulting teardown +
+                            # TIME_WAIT blacked out OTA for minutes per try).
+                            self._drop_client("handler: %r" % e)
+                            return
                         self._buf = bytearray()
                     elif len(self._buf) < LINE_LIMIT:
                         self._buf.append(b)
@@ -198,15 +235,6 @@ class OTAServer:
                 return
         if got:
             return
-        # Quiet: reap a peer that vanished (probe is bundle-version dependent,
-        # hence the hasattr — same idiom as OrchestratorLink._service).
-        if ticks_diff(now, self._client_probe) > 2000:
-            self._client_probe = now
-            esp, _ = link.radio()
-            if esp is not None and hasattr(self._client, "_socknum") and \
-                    not esp.socket_connected(self._client._socknum):
-                self._drop_client("closed")
-                return
         if ticks_diff(now, self._last_rx) > IDLE_DROP_MS:
             self._drop_client("idle")
 
@@ -225,6 +253,8 @@ class OTAServer:
 
     def _drop_client(self, why):
         print("ota: client dropped (%s)" % why)
+        if why not in ("closed", "idle"):  # keep routine reaps out of OTALOG
+            _note_error("drop: %s" % why)
         try:
             self._client.close()
         except OSError:
@@ -255,12 +285,29 @@ class OTAServer:
             self._send("ERR " + verb + " bad_token")
             return
         if verb == "OTALOG":
-            # Remote diagnostics: the orchestrator-link's last failure. The
-            # serial console for a board that's zip-tied into the booth.
+            # Remote diagnostics: the orchestrator-link's last failure + live
+            # signal strength. The serial console for a board that's zip-tied
+            # into the booth.
+            rssi = None
+            try:
+                import wifi
+                rssi = wifi.radio.ap_info.rssi if wifi.radio.ap_info else None
+            except Exception:
+                pass
+            boot = None
+            try:
+                # Why the last reboot happened (POWER_ON / BROWNOUT /
+                # SOFTWARE / WATCHDOG / RESET_PIN...) — a manual RESET press
+                # overwrites it, so query BEFORE pressing the button.
+                import microcontroller
+                boot = str(microcontroller.cpu.reset_reason).split(".")[-1]
+            except Exception:
+                pass
             try:
                 import inputs
-                self._send("OK OTALOG fails=%d last=%s probe=%s"
-                           % (inputs.LINK_FAILS, inputs.LAST_LINK_ERROR, inputs.NET_PROBE))
+                self._send("OK OTALOG fails=%d last=%s probe=%s rssi=%s ota=%s boot=%s"
+                           % (inputs.LINK_FAILS, inputs.LAST_LINK_ERROR,
+                              inputs.NET_PROBE, rssi, LAST_OTA_ERROR, boot))
             except Exception as e:
                 self._send("OK OTALOG unavailable (%s)" % e)
             return
@@ -357,7 +404,7 @@ class OTAServer:
             self._file = None
             self._file_path = None
         # Verify EVERYTHING before touching anything live. (Digests were
-        # accumulated as chunks arrived — see the header note on why the M4
+        # accumulated as chunks arrived — see the header note on why commit
         # doesn't re-read flash here like the NanoC6 does.)
         for name, (size, sha) in self._manifest.items():
             if self._written.get(name, 0) != size:
@@ -399,9 +446,10 @@ class OTAServer:
 
 
 # --------------------------------------------------------------------------
-# Pure-Python SHA-256 fallback for CircuitPython builds without hashlib
-# (SAMD51 among them). Slow (~KB/s scale) but digests accumulate per 2KB
-# chunk as they arrive, so no single ack stalls long enough to time out.
+# Pure-Python SHA-256 fallback for builds without hashlib (the retired M4's
+# SAMD51 among them — the S3 has it native, so this is dormant there). Slow
+# (~KB/s scale) but digests accumulate per 2KB chunk as they arrive, so no
+# single ack stalls long enough to time out.
 _K = (
     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B, 0x59F111F1,
     0x923F82A4, 0xAB1C5ED5, 0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3,

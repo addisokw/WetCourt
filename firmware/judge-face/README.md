@@ -2,11 +2,15 @@
 
 The physical presence of the Wet Court AI judge: an animated eye on a 64×32
 HUB75 LED matrix, mounted **portrait** (logical 32 wide × 64 tall), driven by
-an **Adafruit Matrix Portal M4**. Implements
+an **Adafruit Matrix Portal S3**. Implements
 [`docs/wet-court-eye-face-brief.md`](../../docs/wet-court-eye-face-brief.md)
-on the M4, in portrait, wired into the fleet's
+in portrait, wired into the fleet's
 [device line protocol](../../protocol/README.md) rather than the brief's
 suggested UDP side-channel.
+
+(Ported from the Matrix Portal M4 on 2026-07-12 — same panel plug, same
+protocol, native WiFi instead of the AirLift. The last M4-flavored firmware
+is commit `74330dc`.)
 
 The eye drifts its gaze vertically (the `judge-neck` pan/tilt mech that the
 panel is mounted on owns horizontal gaze), dilates its pupil with the
@@ -32,9 +36,9 @@ guilty verdict and blooms green on an innocent one. Five judge personas
 
 ## Setup
 
-1. **CircuitPython 10.2.1** (what this was built and tested on): double-tap
-   RESET → drag the `.uf2` onto `MATRIXBOOT`. Download:
-   <https://downloads.circuitpython.org/bin/matrixportal_m4/en_US/adafruit-circuitpython-matrixportal_m4-en_US-10.2.1.uf2>
+1. **CircuitPython 10.2.1** (matching the version the M4 port was tested
+   on): double-tap RESET → drag the `.uf2` onto `MATRXS3BOOT`. Download:
+   <https://downloads.circuitpython.org/bin/adafruit_matrixportal_s3/en_US/adafruit-circuitpython-adafruit_matrixportal_s3-en_US-10.2.1.uf2>
    (A newer stable should also work — the deps are vendored, but re-verify.)
 2. **Config**: copy `settings.toml.example` → `settings.toml`, fill in WiFi +
    orchestrator host.
@@ -48,20 +52,21 @@ guilty verdict and blooms green on an innocent one. Five judge personas
 ## OTA updates (no cable)
 
 Same staged/verified protocol and push client as the NanoC6 fleet
-(`../micropython/README.md`), with two platform twists: the CIRCUITPY drive
-belongs to exactly one writer, and the AirLift doesn't do mDNS.
+(`../micropython/README.md`), with one platform twist: the CIRCUITPY drive
+belongs to exactly one writer.
 
 - `boot.py` arbitrates at reset: **default = OTA mode** (filesystem writable
   to `ota.py`, read-only to a USB host); **UP held at reset = USB deploy
   mode** (`deploy.sh` works, OTA answers `read_only_fs`). `boot.py` itself is
   on the OTA forbidden list, so recovery over USB can never be pushed away.
-- Push from this directory to the board's IP (find it in the serial log's
-  `wifi: up, <ip>` line):
+- Push from this directory. The board answers to `judge-face.local` (mDNS,
+  also its DHCP hostname on the booth router); a raw IP from the serial
+  log's `wifi: up, <ip>` line works too:
 
   ```sh
   cd firmware/judge-face
-  python3 ../micropython/otapush.py 192.168.50.77              # otafiles.txt set
-  python3 ../micropython/otapush.py 192.168.50.77 eye_face.py  # just one file
+  python3 ../micropython/otapush.py judge-face.local              # otafiles.txt set
+  python3 ../micropython/otapush.py judge-face.local eye_face.py  # just one file
   ```
 
   Credentials come from `./settings.toml` (`OTA_TOKEN`, `OTA_PORT`; empty
@@ -71,13 +76,14 @@ belongs to exactly one writer, and the AirLift doesn't do mDNS.
 - The listener rides the orchestrator link's WiFi, so it works with the
   orchestrator down — but not in forced demo mode (`EYE_DEMO = 1`, no radio).
 
-`lib/` vendors the exact `.mpy` dependencies the board runs —
-`adafruit_esp32spi` (AirLift WiFi), `adafruit_connection_manager`, and
+`lib/` vendors the exact `.mpy` dependencies the board runs — just
 `adafruit_ticks`, byte-identical to Adafruit bundle `20260704` (10.x-mpy
-series; `.mpy` files are CP-major-specific). `displayio`, `rgbmatrix`,
-`framebufferio`, and `bitmaptools` are built into the M4 firmware. No
-`adafruit_matrixportal` wrapper needed — `code.py` wires the HUB75 pins
-directly via the board's `MTX_*` names.
+series; `.mpy` files are CP-major-specific). Everything else is built into
+the S3 firmware: `displayio`, `rgbmatrix`, `framebufferio`, `bitmaptools`,
+and — new with the S3 — native `wifi`, `socketpool`, `mdns`, and `hashlib`
+(the AirLift-era `adafruit_esp32spi` + `adafruit_connection_manager` are
+gone). No `adafruit_matrixportal` wrapper needed — `code.py` wires the
+HUB75 pins directly via the board's `MTX_*` names.
 
 With no orchestrator reachable (or `EYE_DEMO = 1`), it runs **demo mode**:
 cycles idle → listening → deliberating, rotates personas each cycle, and
@@ -88,7 +94,7 @@ strobe reads as a glitch out of context); exercise those by sending
 
 ## Protocol
 
-Dials the orchestrator, `HELLO judge-face 0.3`, then services (one ack per
+Dials the orchestrator, `HELLO judge-face 0.4`, then services (one ack per
 command):
 
 | Command | Effect |
@@ -120,8 +126,10 @@ this pixel scale. The tunable is `_GLINT_PX_PER_DEG` at the top of
 `eye_face.py`; flip its sign there if the slide direction reads wrong on
 hardware.
 
-**Documented deviations from the prototype** (M4 CPU budget / displayio
-limits — revisit on an S3):
+**Documented deviations from the prototype** (originally M4 CPU budget /
+displayio limits; the S3 has the CPU headroom to revisit the budget-driven
+ones — static striations, the glitch style — but none have been yet, and
+the displayio limits still stand):
 
 - **Portrait orientation** (user decision; the brief's geometry is
   parameterized, so `W=32, H=64` flows through).
@@ -142,14 +150,16 @@ limits — revisit on an S3):
   (displayio has no alpha blending).
 - `deliberating` (faster gaze darts) is the brief's *recommended extension*,
   not prototype behavior.
-- WiFi association + `HELLO` handshake are synchronous on the AirLift and can
-  stall a few seconds; attempts are rate-limited (8 s backoff) and `dt` is
-  clamped so the animation never leaps.
+- WiFi association + `HELLO` handshake are synchronous (native `wifi` too,
+  though quicker than the AirLift was) and can stall a couple of seconds;
+  attempts are rate-limited with backoff and `dt` is clamped so the
+  animation never leaps.
 
-**Verify on-device** (bundle APIs move): `bitmaptools.arrayblit` is
-feature-detected with a per-pixel fallback; the esp32spi socket-pool
-non-blocking `recv_into` semantics are handled defensively in
-`inputs.py:_service`. Report actual FPS from the serial console.
+**Verify on-device** (core APIs move): `bitmaptools.arrayblit` is
+feature-detected with a per-pixel fallback; the native socketpool
+non-blocking `recv_into` semantics (EAGAIN = no data, 0 = peer closed) are
+handled defensively in `inputs.py:_service`. Report actual FPS from the
+serial console — the S3 should beat the M4's numbers.
 
 ## Troubleshooting a dead face
 
@@ -169,9 +179,11 @@ What the blank-vs-not distinction tells you before you touch anything:
   produce this combination — don't start by reading firmware diffs.
 
 The quickest network check runs from the orchestrator host (it's on the
-booth LAN): `ping`-sweep the subnet or `arp -a | grep 192.168.123` — the
-NanoC6 fixtures show up as `squirt.lan`, `gavel.lan`, etc.; the face's
-AirLift has no mDNS name, so probe candidate IPs on `:8266` instead.
+booth LAN): `ping judge-face.local` (mDNS) or look for `judge-face.lan` in
+the router's client list next to the NanoC6 fixtures (`squirt.lan`,
+`gavel.lan`, …). If the name doesn't resolve, fall back to probing candidate
+IPs on `:8266` — `OTALOG` now also reports live RSSI, since weak booth WiFi
+looks exactly like a dead host.
 
 **Recovery ladder** (proven 2026-07-12: booth trial found the panel blank
 and off-network; step 1 fixed it):
@@ -180,8 +192,14 @@ and off-network; step 1 fixed it):
    fault, watchdog, or brownout — it deliberately doesn't run `code.py`
    (blank panel, no WiFi) until a manual reset. The status NeoPixel blinks
    **yellow** in safe mode. The HUB75 panel's current draw makes brownout
-   the usual suspect here, so a one-off safe-mode trip is expected booth
-   life, not a firmware bug.
+   the usual suspect here — and the S3's WiFi TX bursts draw *more* than
+   the M4+AirLift did, so a marginal 5 V supply gets less forgiving with
+   this board, not more. **An OTA push is peak load** (sustained flash
+   writes + WiFi + panel — a push mid-transfer is a proven brownout
+   trigger on a weak supply). A one-off safe-mode trip is expected booth
+   life, not a firmware bug. After any surprise reboot, `OTALOG` reports
+   `boot=<reset reason>` — query it *before* pressing RESET if you can,
+   since the button press overwrites the reason.
 2. **If it recurs**: USB to a computer, `screen /dev/cu.usbmodem* 115200` —
    CircuitPython prints the safe-mode reason at the top of the console.
    Repeated brownouts = fix the 5 V supply, not the code.

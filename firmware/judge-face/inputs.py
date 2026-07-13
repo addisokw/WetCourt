@@ -1,8 +1,8 @@
 # Wet Court judge-face — input layer: the orchestrator link + demo mode.
 #
 # OrchestratorLink speaks the Wet Court device line protocol (see
-# ../../protocol/README.md): dial the host over TCP through the AirLift
-# ESP32, identify with `HELLO judge-face`, then service commands:
+# ../../protocol/README.md): dial the host over TCP on the S3's native
+# WiFi, identify with `HELLO judge-face`, then service commands:
 #
 #   FACE <phase>       set the eye phase (idle/listening/deliberating/verdict:*)
 #   AUDIO <0.0-1.0>    live mic envelope (~20-30 Hz while listening)
@@ -16,9 +16,9 @@
 #
 # Rendering must never block on the network, so all socket reads are
 # non-blocking and connection attempts are rate-limited. The unavoidable
-# exception on the M4: WiFi association + the HELLO handshake are synchronous
-# in the esp32spi API and can stall a few seconds — they run at most once per
-# backoff window, and code.py clamps dt so the animation doesn't leap.
+# exception: WiFi association + the HELLO handshake are synchronous and can
+# stall a few seconds — they run at most once per backoff window, and
+# code.py clamps dt so the animation doesn't leap.
 #
 # DemoSource fakes the same inputs (brief §5): cycles the phases, rotates
 # personas, and synthesizes a speech-like audio envelope, so the eye is fully
@@ -45,22 +45,29 @@ def _note_failure(e):
     LINK_FAILS += 1
 
 
-def _net_probe(esp, pool):
+def _net_probe(radio, pool):
     """One-shot layer-by-layer dial diagnosis, reported via OTALOG.
 
-    Separates NINA hostname resolution (esp32spi resolves even dotted-quad
-    strings through REQ_HOST_BY_NAME) from the raw START_CLIENT_TCP connect.
+    Separates DNS (getaddrinfo) from the raw TCP connect, and records the
+    AP signal strength — weak booth WiFi looks exactly like a dead host.
     """
     out = {}
     try:
-        out["dns"] = repr(bytes(esp.get_host_by_name(config.ORCH_HOST)))
+        ap = radio.ap_info
+        out["rssi"] = ap.rssi if ap else None
+        out["ip"] = str(radio.ipv4_address)
+    except Exception as e:
+        out["rssi"] = "ERR " + repr(e)
+    try:
+        info = pool.getaddrinfo(config.ORCH_HOST, config.ORCH_PORT)
+        out["dns"] = repr(info[0][-1])
     except Exception as e:
         out["dns"] = "ERR " + repr(e)
     try:
         s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
         try:
-            ip = bytes(int(x) for x in config.ORCH_HOST.split("."))
-            esp.socket_connect(s._socknum, ip, config.ORCH_PORT, 0)  # 0 = TCP
+            s.settimeout(_CONNECT_TIMEOUT_S)
+            s.connect((config.ORCH_HOST, config.ORCH_PORT))
             out["raw_tcp"] = "OK"
         finally:
             try:
@@ -70,22 +77,23 @@ def _net_probe(esp, pool):
     except Exception as e:
         out["raw_tcp"] = "ERR " + repr(e)
     return out
-# Connection attempts block the render loop (sync esp32spi API), so space
-# them well apart: a down orchestrator costs one ≤3 s hitch per window, and
-# a live one is picked up within ~20 s. Consecutive failures back off
-# exponentially (20 → 40 → 80 s) so absent infrastructure barely hitches.
+# Connection attempts block the render loop (association + handshake are
+# synchronous), so space them well apart: a down orchestrator costs one ≤3 s
+# hitch per window, and a live one is picked up within ~20 s. Consecutive
+# failures back off exponentially (20 → 40 → 80 s) so absent infrastructure
+# barely hitches.
 _RETRY_MS = 20000
 _RETRY_MAX_MS = 80000
 _CONNECT_TIMEOUT_S = 3
-# Re-dial after this much rx silence. The NINA identifies sockets by small
-# recycled numbers, and with the OTA server allocating sockets on the same
-# radio, a dead link socket can inherit a live socket's number — making the
-# socket_connected probe (and recv) lie indefinitely. End-to-end liveness
-# can't lean on the host either (it's silent between trials and doesn't
-# answer device pings), so: too quiet for too long → assume nothing and
-# reconnect. Costs a sub-second hitch every window while idle; any trial
-# traffic resets the clock.
+# Re-dial after this much rx silence. An orderly close shows up as EOF on a
+# native socket, but a host that vanishes without a FIN (power cut, cable
+# pull) leaves a half-open TCP that stays silent forever — socketpool exposes
+# no keepalive, and end-to-end liveness can't lean on the host either (it's
+# silent between trials and doesn't answer device pings). So: too quiet for
+# too long → assume nothing and reconnect. Costs a sub-second hitch every
+# window while idle; any trial traffic resets the clock.
 _RX_REFRESH_MS = 120000
+_EAGAIN = (11, 35, 110, 116)  # lwIP / BSD spellings of "no data yet"
 
 
 class DemoSource:
@@ -127,36 +135,33 @@ class DemoSource:
 
 class OrchestratorLink:
     def __init__(self):
-        self._esp = None
+        self._radio = None
         self._pool = None
+        self._mdns = None
         self._sock = None
         self._rbuf = bytearray(128)
         self._line = bytearray()
         self._next_try = ticks_ms()
-        self._last_alive = ticks_ms()
         self._last_rx = ticks_ms()
         self._fails = 0
         self._enabled = bool(config.WIFI_SSID and config.ORCH_HOST)
-        # Bumped whenever the AirLift is (re)created or hard-reset, so the OTA
-        # server knows its listener socket died with the old radio state.
+        # Bumped when the socket pool is (re)built, so the OTA server knows
+        # its listener socket died with the old pool. On native WiFi this
+        # happens once at first connect and then never again in practice.
         self.radio_epoch = 0
         if not self._enabled:
             print("link: no WIFI_SSID/ORCH_HOST in settings.toml — demo mode only")
 
     def radio(self):
-        """(esp, pool) once WiFi is associated, else (None, None).
+        """(wifi.radio, pool) once WiFi is associated, else (None, None).
 
-        The OTA server binds its listener through this; the is_connected probe
-        is an SPI round-trip, so callers rate-limit themselves.
+        The OTA server binds its listener through this; `connected` is a
+        cheap property read on native WiFi (unlike the old AirLift's SPI
+        round-trip), so per-frame calls are fine.
         """
-        if self._esp is None or self._pool is None:
+        if self._pool is None or not self._radio.connected:
             return None, None
-        try:
-            if not self._esp.is_connected:
-                return None, None
-        except Exception:
-            return None, None
-        return self._esp, self._pool
+        return self._radio, self._pool
 
     def poll(self, eye, now):
         """Service the link; returns True while connected. Never raises."""
@@ -179,76 +184,66 @@ class OrchestratorLink:
             return False
         try:
             self._connect()
-            self._last_alive = ticks_ms()
             self._fails = 0
             return True
         except Exception as e:                 # any failure → backoff, keep animating
             print("link:", e)
             _note_failure(e)
             global NET_PROBE
-            if not NET_PROBE and self._esp is not None and self._pool is not None:
+            if not NET_PROBE and self._pool is not None and self._radio.connected:
                 try:
-                    NET_PROBE = _net_probe(self._esp, self._pool)
+                    NET_PROBE = _net_probe(self._radio, self._pool)
                 except Exception as pe:
                     NET_PROBE = {"probe": "ERR " + repr(pe)}
                 print("link: net probe:", NET_PROBE)
-            if "not responding" in str(e) and self._esp is not None:
-                # AirLift wedged mid-transaction (busy pin stuck) — only a
-                # hard reset recovers it; WiFi reassociates on the next try.
-                try:
-                    self._esp.reset()
-                    self.radio_epoch += 1     # every socket died with the radio
-                    print("link: AirLift reset")
-                except Exception:
-                    pass
             self._drop(ticks_ms())
             return False
 
     # ------------------------------------------------------------ internals
     def _init_hw(self):
-        import board
-        import busio
-        from digitalio import DigitalInOut
-        from adafruit_esp32spi import adafruit_esp32spi
-        import adafruit_connection_manager
+        import wifi
+        import socketpool
 
-        spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
-        self._esp = adafruit_esp32spi.ESP_SPIcontrol(
-            spi, DigitalInOut(board.ESP_CS), DigitalInOut(board.ESP_BUSY),
-            DigitalInOut(board.ESP_RESET))
-        self._pool = adafruit_connection_manager.get_radio_socketpool(self._esp)
+        self._radio = wifi.radio
+        try:
+            # DHCP hostname: the booth router lists the board by name, same
+            # as the NanoC6 fixtures' *.lan entries. Must be set before the
+            # radio ever associates.
+            self._radio.hostname = config.MDNS_NAME
+        except Exception as e:
+            print("wifi: hostname rejected:", e)
+        self._pool = socketpool.SocketPool(self._radio)
         self.radio_epoch += 1
 
-    def _connect(self):
-        if self._esp is None:
-            self._init_hw()
-        if not self._esp.is_connected:
-            self._esp.connect_AP(config.WIFI_SSID, config.WIFI_PASS)
-            print("wifi: up,", self._esp.pretty_ip(self._esp.ip_address))
+    def _start_mdns(self):
+        """Advertise <MDNS_NAME>.local — something the AirLift never could."""
+        if self._mdns is not None:
+            return
+        try:
+            import mdns
+            srv = mdns.Server(self._radio)
+            srv.hostname = config.MDNS_NAME
+            self._mdns = srv                   # keep a ref or the responder dies
+            print("wifi: mdns up, %s.local" % config.MDNS_NAME)
+        except Exception as e:                 # e.g. web workflow owns the responder
+            print("wifi: mdns unavailable:", e)
 
-        # No reachability pre-check: an earlier ping gate here (meant to spare
-        # the NINA from wedging on a dead host) turned out to poison the dial
-        # itself — a ping immediately before START_CLIENT_TCP made the NINA
-        # NAK the connect ("Expected 01 but got 00"), so the face never got a
-        # SYN out while the ping-free NanoC6 boards connected fine. Dial
-        # directly like they do; connect has its own timeout, and poll()
-        # hard-resets a wedged AirLift.
+    def _connect(self):
+        if self._pool is None:
+            self._init_hw()
+        if not self._radio.connected:
+            self._radio.connect(config.WIFI_SSID, config.WIFI_PASS, timeout=10)
+            print("wifi: up,", self._radio.ipv4_address)
+        # Outside the branch: a soft reload keeps WiFi associated but kills
+        # the previous run's mDNS responder — re-arm it either way.
+        self._start_mdns()
+
         sock = self._pool.socket(self._pool.AF_INET, self._pool.SOCK_STREAM)
         try:
             sock.settimeout(_CONNECT_TIMEOUT_S)
-            # Don't use sock.connect((host, port)): this bundle's socketpool
-            # mangles a dotted-quad string dest on its way to the NINA, which
-            # NAKs START_CLIENT_TCP ("Expected 01 but got 00") — the SYN never
-            # leaves the radio. Resolving to 4 IP bytes and connecting at the
-            # esp layer works (proven by the OTALOG net probe on this unit);
-            # the Socket wrapper stays valid for send/recv since connection
-            # state lives in the NINA, keyed by socket number.
-            parts = config.ORCH_HOST.split(".")
-            if len(parts) == 4 and all(p.isdigit() and int(p) < 256 for p in parts):
-                ip = bytes(int(p) for p in parts)
-            else:
-                ip = bytes(self._esp.get_host_by_name(config.ORCH_HOST))
-            self._esp.socket_connect(sock._socknum, ip, config.ORCH_PORT, 0)  # 0 = TCP
+            # Native socketpool resolves hostnames and dotted quads itself —
+            # the M4-era NINA dotted-quad workaround is gone.
+            sock.connect((config.ORCH_HOST, config.ORCH_PORT))
             sock.send(b"HELLO judge-face " + config.FW_VERSION.encode() + b"\n")
 
             # Await WELCOME / BYE (handshake is the one blocking read, ≤3 s).
@@ -263,8 +258,8 @@ class OrchestratorLink:
             if first.split(b"\n")[0].strip() != b"WELCOME":
                 raise OSError("handshake: rejected: " + str(bytes(first.split(b"\n")[0])))
         except BaseException:
-            # NINA socket numbers are a tiny pool; a failed dial must not
-            # leak one (enough leaks and every future dial dies too).
+            # The pool holds a small fixed number of sockets and reclaims
+            # closed ones lazily — a failed dial must not leak one.
             try:
                 sock.close()
             except Exception:
@@ -289,14 +284,17 @@ class OrchestratorLink:
         self._next_try = ticks_add(now, delay)
 
     def _service(self, eye, now):
-        n = 0
+        n = -1
         try:
             n = self._sock.recv_into(self._rbuf)
         except OSError as e:
-            if e.errno not in (11, 110, 116):  # EAGAIN / timeouts = no data yet
+            if e.errno not in _EAGAIN:
                 raise
+        if n == 0:
+            # Native sockets report an orderly close as EOF — no more
+            # socket-number liveness probes.
+            raise OSError("peer closed")
         if n > 0:
-            self._last_alive = now
             self._last_rx = now
             for b in memoryview(self._rbuf)[:n]:
                 if b == 0x0A:                  # \n
@@ -309,16 +307,9 @@ class OrchestratorLink:
                 else:
                     self._line = bytearray()   # overflow: drop the runaway line
         elif ticks_diff(now, self._last_rx) > _RX_REFRESH_MS:
-            # See _RX_REFRESH_MS: the NINA state below can lie about a stale
-            # socket, so long silence forces a fresh dial regardless.
+            # See _RX_REFRESH_MS: a peer that vanished without a FIN stays
+            # silent forever, so long silence forces a fresh dial regardless.
             raise OSError("idle refresh")
-        elif ticks_diff(now, self._last_alive) > 2000:
-            # Quiet for a while — make sure the peer is still there. The
-            # socknum probe is bundle-version dependent, hence the hasattr.
-            self._last_alive = now
-            if hasattr(self._sock, "_socknum") and \
-                    not self._esp.socket_connected(self._sock._socknum):
-                raise OSError("peer closed")
 
     def _send(self, s):
         self._sock.send(s.encode() + b"\n")

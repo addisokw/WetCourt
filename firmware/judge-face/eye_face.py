@@ -24,8 +24,9 @@
 # for the prototype's full-frame overlays.
 #
 # Geometry is parameterized from the display (works portrait or landscape).
-# Deviation from the prototype: iris striations are static per persona (the
-# M4 can't re-texture the disc every frame); drift + dilation carry the
+# Deviation from the prototype: iris striations are static per persona
+# (per-frame re-texturing was too slow on the original M4 board; the S3 has
+# the headroom but this hasn't been revisited); drift + dilation carry the
 # "alive" reading.
 
 import math

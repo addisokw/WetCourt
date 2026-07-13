@@ -16,3 +16,5 @@ OTA_PORT = 8266
 # EYE_DEMO = 1               # force demo mode (never dial the orchestrator)
 # EYE_PERSONA = "honorable"  # boot persona: honorable | magistrate | cosmic
 #                            #               | nullpointer | petunia
+# EYE_MDNS = "judge-face"    # network name: <name>.local (mDNS) and the
+#                            # router's DHCP client list; letters/digits/hyphen

@@ -2,11 +2,12 @@
 
 Run: python3 firmware/judge-face/test_ota_desktop.py
 
-Runs the REAL firmware/judge-face/ota.py server against a fake AirLift
-socket pool (wrapping CPython sockets with esp32spi-ish semantics), and
-drives it with the REAL firmware/micropython/otapush.py over localhost TCP —
-both halves of the wire exercised, plus unit checks for the pure-Python
-sha256 fallback and the failure paths.
+Runs the REAL firmware/judge-face/ota.py server against a fake socket pool
+(thin wrappers over CPython sockets, which already share the native
+CircuitPython socketpool semantics the S3 uses), and drives it with the REAL
+firmware/micropython/otapush.py over localhost TCP — both halves of the wire
+exercised, plus unit checks for the pure-Python sha256 fallback and the
+failure paths.
 """
 import hashlib
 import os
@@ -28,10 +29,10 @@ TOKEN = "test-token-123"
 PORT = 18266
 
 
-# ---- fake AirLift plumbing ---------------------------------------------------
+# ---- fake socketpool plumbing --------------------------------------------------
 
 class FakeSocket:
-    """esp32spi-flavored wrapper over a real CPython socket."""
+    """socketpool-flavored wrapper over a real CPython socket."""
 
     def __init__(self, raw):
         self._raw = raw
@@ -52,13 +53,9 @@ class FakeSocket:
         return FakeSocket(c), addr
 
     def recv_into(self, buf):
-        n = self._raw.recv_into(buf)     # raises OSError(EAGAIN) when drained
-        if n == 0:
-            # CPython returns 0 on EOF; the AirLift surfaces closure via the
-            # esp.socket_connected probe instead. Model it as a hard error so
-            # the firmware's drop path runs (same outcome as the 2s probe).
-            raise OSError(104, "peer closed")
-        return n
+        # CPython matches native socketpool here: no data raises
+        # OSError(EAGAIN), EOF returns 0 (the firmware drops the client).
+        return self._raw.recv_into(buf)
 
     def send(self, data):
         return self._raw.send(data)
@@ -105,6 +102,30 @@ def test_pure_sha256_matches_hashlib():
         # digest() must be repeatable
         assert py.digest() == hashlib.sha256(data).digest()
     print("ok: pure sha256 matches hashlib (incl. padding edges)")
+
+
+def test_sha256_probe_shapes():
+    """ota._sha256 must cope with CircuitPython's new()-only hashlib.
+
+    Regression: the S3's core hashlib has no .sha256() constructor — only
+    hashlib.new("sha256") — and the resulting AttributeError in OTAFILE
+    killed every real push while this suite stayed green on CPython.
+    """
+    import importlib
+    import types
+    real = sys.modules["hashlib"]
+    stub = types.ModuleType("hashlib")
+    stub.new = lambda name, data=b"": real.new(name, data)   # no .sha256 attr
+    try:
+        sys.modules["hashlib"] = stub
+        importlib.reload(ota)
+        h = ota._sha256()
+        h.update(b"wet court")
+        assert h.digest() == real.sha256(b"wet court").digest()
+    finally:
+        sys.modules["hashlib"] = real
+        importlib.reload(ota)
+    print("ok: _sha256 handles CircuitPython's new()-only hashlib shape")
 
 
 def start_server(tmp):
@@ -187,9 +208,31 @@ def test_drop_mid_update_cleans_staging(tmp, srv):
     print("ok: dropped connection mid-update cleans staging")
 
 
+def test_handler_exception_drops_client_not_listener(tmp, srv):
+    """A command-handler bug must cost one client, never the listener."""
+    orig = srv._file_decl
+    srv._file_decl = lambda args: (_ for _ in ()).throw(RuntimeError("boom"))
+    try:
+        c = socket.create_connection(("127.0.0.1", PORT), timeout=10)
+        assert raw_cmd(c, f"OTABEGIN {TOKEN}") == "OK OTABEGIN"
+        c.sendall(f"OTAFILE {TOKEN} z.py 4 {'0'*64}\n".encode())
+        c.settimeout(5)
+        assert c.recv(1024) == b"", "expected the client to be dropped"
+        c.close()
+    finally:
+        srv._file_decl = orig
+    assert srv._sock is not None, "listener died with the client"
+    c = socket.create_connection(("127.0.0.1", PORT), timeout=10)
+    assert raw_cmd(c, f"OTABEGIN {TOKEN}") == "OK OTABEGIN"
+    assert raw_cmd(c, f"OTAABORT {TOKEN}") == "OK OTAABORT"
+    c.close()
+    assert "boom" in str(ota.LAST_OTA_ERROR), "OTALOG never learned why"
+    print("ok: handler exception drops the client, listener + OTALOG survive")
+
+
 def test_radio_epoch_rearms(tmp, srv, link):
     old_sock = srv._sock
-    link.radio_epoch += 1                       # simulate AirLift hard reset
+    link.radio_epoch += 1                       # simulate the link rebuilding its pool
     deadline = time.time() + 8                  # teardown + rebind (5s window)
     while (srv._sock is old_sock or srv._sock is None) and time.time() < deadline:
         time.sleep(0.05)
@@ -203,12 +246,14 @@ def test_radio_epoch_rearms(tmp, srv, link):
 
 def main():
     test_pure_sha256_matches_hashlib()
+    test_sha256_probe_shapes()
     tmp = Path(tempfile.mkdtemp(prefix="wc_ota_"))
     srv, link, stop = start_server(tmp)
     try:
         test_end_to_end_push(tmp)
         test_failure_paths(tmp)
         test_drop_mid_update_cleans_staging(tmp, srv)
+        test_handler_exception_drops_client_not_listener(tmp, srv)
         test_radio_epoch_rearms(tmp, srv, link)
     finally:
         stop.set()
