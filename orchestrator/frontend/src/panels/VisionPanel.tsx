@@ -194,6 +194,27 @@ export default function VisionPanel() {
   const [tuneStatus, setTuneStatus] = createSignal('');
   const [tuneError, setTuneError] = createSignal('');
 
+  // Vision-failure fallback aim (fixed turret pan/tilt°, above the mic). Not a
+  // live vision value — it lives only in the saved tuning — so it's a local
+  // form seeded from the save: null field = show saved, NaN = cleared.
+  const [fbPan, setFbPan] = createSignal<number | null>(null);
+  const [fbTilt, setFbTilt] = createSignal<number | null>(null);
+  const fbPanVal = () => fbPan() ?? savedTuning()?.fallback_aim?.[0] ?? NaN;
+  const fbTiltVal = () => fbTilt() ?? savedTuning()?.fallback_aim?.[1] ?? NaN;
+  /** The fallback as Save would persist it: both axes set, else none. */
+  const fbLive = (): [number, number] | null =>
+    Number.isFinite(fbPanVal()) && Number.isFinite(fbTiltVal())
+      ? [fbPanVal(), fbTiltVal()]
+      : null;
+  // Point the turret (and the judge's gaze) at the fallback to sight it in —
+  // degree-based AIM through the maintenance gate, like the Turret panel.
+  function aimAtFallback() {
+    const fb = fbLive();
+    if (!fb) return;
+    void sendCommand('turret', { cmd: 'aim', pan: fb[0], tilt: fb[1] }, true);
+    void sendCommand('judge_neck', { cmd: 'aim', pan: fb[0], tilt: fb[1] }, true);
+  }
+
   /** The tuning as currently live (what Save would persist). */
   function liveTuning(): VisionCal | null {
     const p = panVal();
@@ -218,6 +239,7 @@ export default function VisionPanel() {
           : savedTuning()?.boresight ?? null,
       target_part,
       autofire_dwell_ms: dwellMs(),
+      fallback_aim: fbLive(),
     };
   }
 
@@ -232,7 +254,8 @@ export default function VisionPanel() {
       live.tolerance !== saved.tolerance ||
       live.target_part !== saved.target_part ||
       String(live.boresight ?? '') !== String(saved.boresight ?? '') ||
-      live.autofire_dwell_ms !== (saved.autofire_dwell_ms ?? live.autofire_dwell_ms)
+      live.autofire_dwell_ms !== (saved.autofire_dwell_ms ?? live.autofire_dwell_ms) ||
+      String(live.fallback_aim ?? '') !== String(saved.fallback_aim ?? '')
     );
   });
 
@@ -245,6 +268,8 @@ export default function VisionPanel() {
       const base = calibrations().vision ?? { role: 'vision' };
       await updateCalibration('vision', { ...base, vision: live });
       await saveCalibration('vision');
+      setFbPan(null); // re-sync the fallback inputs to the now-saved value
+      setFbTilt(null);
       setTuneStatus('saved to disk');
     } catch (e) {
       setTuneError(String(e));
@@ -460,6 +485,39 @@ export default function VisionPanel() {
           <input class="gain-input" type="number" step="1" min="1" value={tolVal() ?? ''}
             onChange={(e) => setTolerance(parseInt(e.currentTarget.value, 10))} />
           <span class="muted small">px error for LOCKED</span>
+        </div>
+
+        <div class="vision-row">
+          <label>fallback aim</label>
+          <input
+            class="gain-input"
+            type="number"
+            step="0.5"
+            placeholder="pan°"
+            value={Number.isFinite(fbPanVal()) ? fbPanVal() : ''}
+            onChange={(e) => setFbPan(e.currentTarget.value === '' ? NaN : parseFloat(e.currentTarget.value))}
+          />
+          <input
+            class="gain-input"
+            type="number"
+            step="0.5"
+            placeholder="tilt°"
+            value={Number.isFinite(fbTiltVal()) ? fbTiltVal() : ''}
+            onChange={(e) => setFbTilt(e.currentTarget.value === '' ? NaN : parseFloat(e.currentTarget.value))}
+          />
+          <button
+            class="mini"
+            disabled={!maintenanceActive() || !fbLive()}
+            title={maintenanceActive() ? 'point the turret + gaze there to sight it in' : 'requires maintenance mode'}
+            onClick={aimAtFallback}
+          >
+            aim there
+          </button>
+          <span class="muted small">
+            {fbLive()
+              ? 'vision down → gun parks + fires here (aim above the mic); Save to persist'
+              : 'unset — a vision failure holds the shot instead'}
+          </span>
         </div>
 
         <div class="vision-row">

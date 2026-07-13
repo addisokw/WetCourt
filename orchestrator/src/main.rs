@@ -343,6 +343,7 @@ async fn main() -> Result<()> {
         cfg.vision.base_url.clone(),
         calibration.clone(),
         maint_cmd_tx.clone(),
+        vision_gate.clone(),
     ));
     // Re-seed the vision process with the saved tuning (gains/tolerance/
     // boresight/target) whenever it (re)appears — vision holds those only in
@@ -385,6 +386,7 @@ async fn main() -> Result<()> {
         vision_http,
         targeting_armed,
         vision_gate,
+        targeting: targeting.clone(),
         auto_fire,
         trial_snapshot: trial_snapshot.clone(),
         lawyer_enabled: lawyer_enabled.clone(),

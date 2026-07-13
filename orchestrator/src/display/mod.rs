@@ -101,6 +101,10 @@ pub struct AppState {
     /// fresh `fire_ok` while targeting is armed. Shared with the hardware
     /// adapter task in `main.rs`.
     pub vision_gate: Arc<crate::hardware::gate::VisionFireGate>,
+    /// Trial targeting controller — shared here for its aim tracker (every
+    /// logical AIM send is recorded so glides know where the gun points) and
+    /// its eased glide-to-center (the console Recenter button).
+    pub targeting: Arc<crate::targeting::TargetingController>,
     /// Read-only trial mirror for `GET /trial/state` (the lawyer phone reads
     /// it at call pickup). Written by `Runtime` on every transition.
     pub trial_snapshot: Arc<std::sync::RwLock<crate::state_machine::states::TrialSnapshot>>,
@@ -360,7 +364,13 @@ async fn maintenance_command(
                 });
             }
             match cal.aim_to_raw(pan, tilt) {
-                Ok((p, t)) => HardwareCommand::Aim { pan: p, tilt: t },
+                Ok((p, t)) => {
+                    // The operator owns the aim now: stop any in-flight glide
+                    // and record where this role points for the next one.
+                    s.targeting.take_over();
+                    s.targeting.note_aim(req.target, pan, tilt);
+                    HardwareCommand::Aim { pan: p, tilt: t }
+                }
                 Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
             }
         }
@@ -639,6 +649,9 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
     if !armed {
         return StatusCode::NO_CONTENT; // disarmed: don't move the gun
     }
+    // Vision owns the aim while armed: stop any in-flight recenter glide and
+    // keep the aim tracker current for the next one.
+    s.targeting.take_over();
     // Apply the turret calibration (degrees → raw µs, clamped to limits).
     let raw = {
         let reg = s.calibration.read().await;
@@ -646,6 +659,7 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
             .and_then(|c| c.aim_to_raw(aim.pan, aim.tilt).ok())
     };
     if let Some((pan, tilt)) = raw {
+        s.targeting.note_aim(Role::Turret, aim.pan, aim.tilt);
         let _ = s
             .maint_cmd_tx
             .send(MaintenanceCommand {
@@ -666,6 +680,7 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
             .and_then(|c| c.aim_to_raw(aim.pan, aim.tilt).ok())
     };
     if let Some((pan, tilt)) = neck {
+        s.targeting.note_aim(Role::JudgeNeck, aim.pan, aim.tilt);
         let _ = s
             .maint_cmd_tx
             .send(MaintenanceCommand {
@@ -794,8 +809,9 @@ async fn vision_gains(AxumState(s): AxumState<AppState>, body: Bytes) -> Respons
 }
 
 /// One-click recovery from an overshoot: disarm targeting, reset vision's aim
-/// integrator, and command the turret back to center — works even while
-/// disarmed, so the operator doesn't have to enter maintenance to re-center.
+/// integrator, and glide the turret (and the judge's gaze) back to center —
+/// works even while disarmed, so the operator doesn't have to enter
+/// maintenance to re-center.
 async fn vision_center(AxumState(s): AxumState<AppState>) -> Response {
     s.targeting_armed.store(false, Ordering::Relaxed);
     // Reset the vision-side integrator + stop tracking (best-effort).
@@ -805,21 +821,8 @@ async fn vision_center(AxumState(s): AxumState<AppState>) -> Response {
         .timeout(Duration::from_secs(2))
         .send()
         .await;
-    // Command the turret back to center (0°,0° → center µs via calibration).
-    let raw = {
-        let reg = s.calibration.read().await;
-        reg.get(Role::Turret.as_str()).and_then(|c| c.aim_to_raw(0.0, 0.0).ok())
-    };
-    if let Some((pan, tilt)) = raw {
-        let _ = s
-            .maint_cmd_tx
-            .send(MaintenanceCommand {
-                target: Role::Turret,
-                cmd: HardwareCommand::Aim { pan, tilt },
-                reply: None,
-            })
-            .await;
-    }
+    // Eased return to center — same calm glide as the trial-idle recenter.
+    s.targeting.spawn_glide(&[Role::Turret, Role::JudgeNeck], 0.0, 0.0);
     StatusCode::NO_CONTENT.into_response()
 }
 

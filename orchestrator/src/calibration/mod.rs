@@ -163,6 +163,12 @@ pub struct VisionCal {
     /// tool fires. The enabled flag is deliberately NOT persisted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autofire_dwell_ms: Option<u64>,
+    /// Vision-failure fallback: a fixed turret aim (logical [pan°, tilt°],
+    /// calibrated to just above the defendant microphone). With vision down at
+    /// Acquire the gun parks here; with no fresh lock at Freeze it fires here
+    /// instead of holding the shot. `None` = no fallback (fail-safe hold).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_aim: Option<[f32; 2]>,
 }
 
 fn default_target_part() -> String {
@@ -178,6 +184,9 @@ impl VisionCal {
     const DWELL_MAX_MS: u64 = 60_000;
     /// Sanity bound for a boresight coordinate (any plausible camera mode).
     const BORESIGHT_MAX: u32 = 8192;
+    /// Fallback aim window (logical degrees; per-role calibration clamps
+    /// tighter at send time).
+    const FALLBACK_DEG_MAX: f32 = 90.0;
 
     fn validate(&self) -> Result<()> {
         for (name, g) in [("gain_pan", self.gain_pan), ("gain_tilt", self.gain_tilt)] {
@@ -206,6 +215,16 @@ impl VisionCal {
         if let Some(ms) = self.autofire_dwell_ms {
             if ms > Self::DWELL_MAX_MS {
                 bail!("vision.autofire_dwell_ms ({ms}) must be ≤ {}", Self::DWELL_MAX_MS);
+            }
+        }
+        if let Some([p, t]) = self.fallback_aim {
+            for (name, d) in [("pan", p), ("tilt", t)] {
+                if !d.is_finite() || d.abs() > Self::FALLBACK_DEG_MAX {
+                    bail!(
+                        "vision.fallback_aim {name} ({d}) must be finite and within ±{}°",
+                        Self::FALLBACK_DEG_MAX
+                    );
+                }
             }
         }
         Ok(())
@@ -498,6 +517,7 @@ settle_dwell_ms = 160
             boresight: Some([320, 260]),
             target_part: "head".into(),
             autofire_dwell_ms: Some(2000),
+            fallback_aim: Some([-4.5, 12.0]),
         }
     }
 
@@ -533,6 +553,12 @@ settle_dwell_ms = 160
         assert!(v.validate().is_err());
         v = vision_cal();
         v.autofire_dwell_ms = Some(120_000);
+        assert!(v.validate().is_err());
+        v = vision_cal();
+        v.fallback_aim = Some([f32::INFINITY, 0.0]);
+        assert!(v.validate().is_err());
+        v = vision_cal();
+        v.fallback_aim = Some([0.0, 120.0]); // beyond ±90°
         assert!(v.validate().is_err());
         assert!(vision_cal().validate().is_ok());
     }

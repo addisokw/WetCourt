@@ -34,6 +34,9 @@ export interface VisionCal {
   boresight?: [number, number] | null;
   target_part: string; // "chest" | "head"
   autofire_dwell_ms?: number | null;
+  // Vision-failure fallback: fixed turret aim [pan°, tilt°] (above the mic).
+  // Fired at when vision is down / never locked; null = hold the shot instead.
+  fallback_aim?: [number, number] | null;
 }
 
 export interface Calibration {
