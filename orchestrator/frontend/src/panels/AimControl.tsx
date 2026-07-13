@@ -8,12 +8,34 @@ const SMOOTH_TICK_MS = 33;
 const RATE_MIN = 5;
 const RATE_MAX = 180;
 const RATE_DEFAULT = 45;
+/** Seconds to reach cruise speed — sets the ease-in/out acceleration. */
+const ACCEL_SECS = 0.3;
 
-/** Step `cur` toward `target` by at most `step` (snaps on arrival). */
-function approach(cur: number, target: number, step: number): number {
+/**
+ * One tick of an acceleration-limited approach: ease in from rest, cruise at
+ * `vmax`, and brake (√(2a·d) envelope) into the target — ease-in/out that
+ * stays smooth when the target moves mid-glide (stick input retargets every
+ * frame, where a time-based curve would stutter). Returns [next, velocity];
+ * arrival snaps exactly onto the target with zero velocity.
+ */
+function ease(
+  cur: number,
+  target: number,
+  v: number,
+  vmax: number,
+  dt: number,
+): [number, number] {
+  const amax = vmax / ACCEL_SECS;
   const d = target - cur;
-  if (Math.abs(d) <= step) return target;
-  return cur + (d > 0 ? step : -step);
+  // The fastest speed that can still brake to a stop at the target.
+  const want = Math.sign(d) * Math.min(vmax, Math.sqrt(2 * amax * Math.abs(d)));
+  v += Math.max(-amax * dt, Math.min(amax * dt, want - v));
+  const next = cur + v * dt;
+  // Close and slow → settle exactly (kills sub-resolution creep at the end).
+  if (Math.abs(target - next) <= 0.1 && Math.abs(v) <= 2 * amax * dt) {
+    return [target, 0];
+  }
+  return [next, v];
 }
 
 /**
@@ -22,10 +44,10 @@ function approach(cur: number, target: number, step: number): number {
  * Owns its own gamepad loop (onStick only) so the parent panel can map buttons
  * independently.
  *
- * Smooth mode: sliders/stick set a *target*; a 30 Hz loop glides the sent
- * position toward it at an adjustable °/s rate — gentler on the mechanics
- * than servo-speed jumps when testing large moves. Off = direct sends,
- * exactly as before.
+ * Smooth mode: sliders/stick set a *target*; a 30 Hz loop eases the sent
+ * position toward it — accelerating in, cruising at the adjustable °/s rate,
+ * braking out — gentler on the mechanics than servo-speed jumps when testing
+ * large moves. Off = direct sends, exactly as before.
  */
 export default function AimControl(props: { role: Role }) {
   const cal = createMemo(() => calibrations()[props.role]);
@@ -41,6 +63,14 @@ export default function AimControl(props: { role: Role }) {
   const [smooth, setSmooth] = createSignal(false);
   const [rate, setRate] = createSignal(RATE_DEFAULT); // °/s
 
+  // Precise glide state (unrounded position + velocity per axis) — the wire
+  // stream rounds to tenths, which would stall the gentle ease-in steps at
+  // low rates if it were also the integration state.
+  let curP = 0;
+  let curT = 0;
+  let vP = 0;
+  let vT = 0;
+
   function send(p: number, t: number) {
     // Tenths are plenty; keeps float noise out of the JSON stream.
     p = Math.round(p * 10) / 10;
@@ -49,16 +79,24 @@ export default function AimControl(props: { role: Role }) {
     setSentTilt(t);
     void sendCommand(props.role, { cmd: 'aim', pan: p, tilt: t }, true);
   }
+  /** Direct (non-glide) jump: sync the glide state so a later glide starts here. */
+  function jumpTo(p: number, t: number) {
+    curP = p;
+    curT = t;
+    vP = 0;
+    vT = 0;
+    send(p, t);
+  }
   function setAim(p: number, t: number) {
     setPan(Math.round(p));
     setTilt(Math.round(t));
-    if (!smooth()) send(Math.round(p), Math.round(t));
-    // smooth: the glide loop streams toward the new target
+    if (!smooth()) jumpTo(Math.round(p), Math.round(t));
+    // smooth: the glide loop eases toward the new target
   }
   function toggleSmooth(on: boolean) {
     setSmooth(on);
     // Turning it off mid-glide: finish the move immediately.
-    if (!on && (sentPan() !== pan() || sentTilt() !== tilt())) send(pan(), tilt());
+    if (!on && (sentPan() !== pan() || sentTilt() !== tilt())) jumpTo(pan(), tilt());
   }
 
   onMount(() => {
@@ -71,12 +109,13 @@ export default function AimControl(props: { role: Role }) {
     let last = performance.now();
     const timer = window.setInterval(() => {
       const now = performance.now();
-      const dt = (now - last) / 1000;
+      const dt = Math.min((now - last) / 1000, 0.25); // clamp tab-hidden hitches
       last = now;
       if (!smooth()) return;
-      if (sentPan() === pan() && sentTilt() === tilt()) return; // settled: stream nothing
-      const step = rate() * dt;
-      send(approach(sentPan(), pan(), step), approach(sentTilt(), tilt(), step));
+      if (curP === pan() && curT === tilt() && vP === 0 && vT === 0) return; // settled
+      [curP, vP] = ease(curP, pan(), vP, rate(), dt);
+      [curT, vT] = ease(curT, tilt(), vT, rate(), dt);
+      send(curP, curT);
     }, SMOOTH_TICK_MS);
     onCleanup(() => {
       stop();
