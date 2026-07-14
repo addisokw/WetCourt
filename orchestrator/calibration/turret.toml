@@ -3,7 +3,7 @@ role = "turret"
 [pan]
 min = 1000
 max = 2000
-center = 1500
+center = 1489
 invert = true
 limit_min_deg = -90.0
 limit_max_deg = 90.0
@@ -11,7 +11,7 @@ limit_max_deg = 90.0
 [tilt]
 min = 1000
 max = 2000
-center = 1500
+center = 1600
 invert = true
 limit_min_deg = -45.0
 limit_max_deg = 25.0
