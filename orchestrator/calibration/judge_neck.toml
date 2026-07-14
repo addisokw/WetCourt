@@ -5,8 +5,8 @@ min = 500
 max = 2500
 center = 1583
 invert = false
-limit_min_deg = -60.0
-limit_max_deg = 60.0
+limit_min_deg = -135.0
+limit_max_deg = 135.0
 
 [tilt]
 min = 1500

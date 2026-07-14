@@ -1,7 +1,7 @@
 id = "dewey_stubb"
 display_name = "Dewey Stubb, Esq. — Dewey, Soakem & Howe"
 tts_voice = "am_santa"
-tts_speed = 1.4
+tts_speed = 1.3
 
 greeting = "yeah no there's no way this person is getting out of this, they're screwed big time... uhhhhhh I'll have the BLT... but hold the L and T! ... shoot! hang on, it's them... Dewey, Soakem and Howe, this is me speaking, what can me do for you?"
 reprompt = "Hello? Are you still there? Don't go silent on me, that's how they get you. Silence reads as guilt, my friend. Say literally anything."
