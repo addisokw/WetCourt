@@ -65,6 +65,54 @@ impl ServoCal {
     }
 }
 
+/// How a follower role (the judge neck) mirrors the shared turret aim. The
+/// turret's logical degrees are scaled per axis, then optionally mirrored,
+/// before the follower's own `ServoCal` maps them to raw units — so the head
+/// can subtly track (scale < 1) and face the same way as the gun (mirror)
+/// without touching either device's own axis calibration. Absent = follow 1:1.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FollowCal {
+    /// Fraction of the shared pan the follower takes (0 = ignore, 1 = full).
+    #[serde(default = "default_follow_scale")]
+    pub pan_scale: f32,
+    /// Fraction of the shared tilt the follower takes.
+    #[serde(default = "default_follow_scale")]
+    pub tilt_scale: f32,
+    /// Flip the pan sense (turret and head face each other, so "toward the
+    /// defendant" is opposite signs for the two devices).
+    #[serde(default)]
+    pub mirror_pan: bool,
+    /// Flip the tilt sense.
+    #[serde(default)]
+    pub mirror_tilt: bool,
+}
+
+fn default_follow_scale() -> f32 {
+    1.0
+}
+
+impl FollowCal {
+    /// Scale ceiling: a follower may over-drive the shared aim a little (the
+    /// neck's limits are wider than the turret's), but not wildly.
+    const SCALE_MAX: f32 = 2.0;
+
+    fn validate(&self) -> Result<()> {
+        for (name, s) in [("pan_scale", self.pan_scale), ("tilt_scale", self.tilt_scale)] {
+            if !s.is_finite() || !(0.0..=Self::SCALE_MAX).contains(&s) {
+                bail!("follow.{name} ({s}) must be within [0, {}]", Self::SCALE_MAX);
+            }
+        }
+        Ok(())
+    }
+
+    fn apply(&self, pan: f32, tilt: f32) -> (f32, f32) {
+        (
+            pan * self.pan_scale * if self.mirror_pan { -1.0 } else { 1.0 },
+            tilt * self.tilt_scale * if self.mirror_tilt { -1.0 } else { 1.0 },
+        )
+    }
+}
+
 /// The gavel's strike geometry. The host sends all seven values on every `GAVEL`
 /// so the firmware stays stateless: three servo positions (pulse-width µs) for
 /// the rap plus the per-move dwell (ms) that lets each move physically arrive
@@ -248,6 +296,9 @@ pub struct Calibration {
     pub gavel: Option<GavelCal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision: Option<VisionCal>,
+    /// How this role mirrors the shared turret aim (judge neck only today).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow: Option<FollowCal>,
 }
 
 static ROLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -280,7 +331,20 @@ impl Calibration {
         if let Some(v) = &self.vision {
             v.validate()?;
         }
+        if let Some(f) = &self.follow {
+            f.validate()?;
+        }
         Ok(())
+    }
+
+    /// Map a shared (turret-frame) aim into this role's logical degrees via its
+    /// follow transform. Identity for roles without one — the turret itself,
+    /// or a neck calibrated before `[follow]` existed.
+    pub fn follow_aim(&self, pan: f32, tilt: f32) -> (f32, f32) {
+        match &self.follow {
+            Some(f) => f.apply(pan, tilt),
+            None => (pan, tilt),
+        }
     }
 
     /// Transform a logical pan/tilt aim (degrees) into raw servo units. Errors
@@ -395,6 +459,7 @@ mod tests {
             fire_ms: None, // turret aims; the squirt board owns fire_ms
             gavel: None,
             vision: None,
+            follow: None,
         }
     }
 
@@ -449,6 +514,7 @@ mod tests {
             fire_ms: None,
             gavel: Some(gavel_cal()),
             vision: None,
+            follow: None,
         };
         assert!(gavel.aim_to_raw(0.0, 0.0).is_err());
     }
@@ -462,6 +528,7 @@ mod tests {
             fire_ms: None,
             gavel: Some(gavel_cal()),
             vision: None,
+            follow: None,
         };
         let text = toml::to_string_pretty(&cal).unwrap();
         let back: Calibration = toml::from_str(&text).unwrap();
@@ -530,6 +597,7 @@ settle_dwell_ms = 160
             fire_ms: None,
             gavel: None,
             vision: Some(vision_cal()),
+            follow: None,
         };
         let text = toml::to_string_pretty(&cal).unwrap();
         let back: Calibration = toml::from_str(&text).unwrap();
@@ -588,6 +656,69 @@ tolerance = 12
         assert_eq!(cal.role, "vision");
         assert!(cal.validate().is_ok());
         assert!(cal.vision.is_some());
+    }
+
+    fn follow_cal() -> FollowCal {
+        FollowCal {
+            pan_scale: 0.5,
+            tilt_scale: 0.25,
+            mirror_pan: true,
+            mirror_tilt: false,
+        }
+    }
+
+    #[test]
+    fn follow_aim_scales_and_mirrors() {
+        let mut cal = turret();
+        cal.follow = Some(follow_cal());
+        assert_eq!(cal.follow_aim(40.0, 20.0), (-20.0, 5.0));
+        assert_eq!(cal.follow_aim(0.0, 0.0), (0.0, 0.0)); // center is a fixed point
+    }
+
+    #[test]
+    fn follow_aim_defaults_to_identity() {
+        // No [follow] section (turret, or a pre-follow judge_neck.toml).
+        assert_eq!(turret().follow_aim(40.0, 20.0), (40.0, 20.0));
+    }
+
+    #[test]
+    fn follow_cal_rejects_bad_scale() {
+        let mut cal = turret();
+        for bad in [-0.1, 2.5, f32::NAN] {
+            cal.follow = Some(FollowCal { pan_scale: bad, ..follow_cal() });
+            assert!(cal.validate().is_err(), "pan_scale {bad} should be rejected");
+        }
+        cal.follow = Some(follow_cal());
+        assert!(cal.validate().is_ok());
+    }
+
+    #[test]
+    fn follow_cal_roundtrips_and_backfills() {
+        let mut cal = turret();
+        cal.follow = Some(follow_cal());
+        let text = toml::to_string_pretty(&cal).unwrap();
+        let back: Calibration = toml::from_str(&text).unwrap();
+        assert_eq!(back, cal);
+
+        // A bare [follow] section backfills full-scale, unmirrored.
+        let text = "role = \"judge_neck\"\n[follow]\nmirror_pan = true\n";
+        let cal: Calibration = toml::from_str(text).unwrap();
+        let f = cal.follow.unwrap();
+        assert_eq!(f.pan_scale, 1.0);
+        assert_eq!(f.tilt_scale, 1.0);
+        assert!(f.mirror_pan);
+        assert!(!f.mirror_tilt);
+    }
+
+    #[test]
+    fn shipped_judge_neck_toml_parses() {
+        // Keep the seed calibration/judge_neck.toml loadable — the registry
+        // refuses to start on an invalid file.
+        let text = include_str!("../../calibration/judge_neck.toml");
+        let cal: Calibration = toml::from_str(text).unwrap();
+        assert_eq!(cal.role, "judge_neck");
+        assert!(cal.validate().is_ok());
+        assert!(cal.follow.is_some());
     }
 
     #[test]

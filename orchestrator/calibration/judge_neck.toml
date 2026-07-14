@@ -15,3 +15,12 @@ center = 1500
 invert = false
 limit_min_deg = 0.0
 limit_max_deg = 30.0
+
+# How the neck mirrors the turret's tracking aim (console-tunable, Judge tab).
+# Scales damp the head's sweep to a fraction of the gun's; mirror_pan flips the
+# pan sense so the head turns the same way the turret does.
+[follow]
+pan_scale = 0.5
+tilt_scale = 0.5
+mirror_pan = true
+mirror_tilt = false

@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from 'solid-js';
 import {
   AckResult,
   Calibration,
+  FollowCal,
   Role,
   ServoCal,
   calibrations,
@@ -81,6 +82,13 @@ export function CalibrationEditor(props: { role: Role }) {
     });
   }
 
+  function patchFollow(key: keyof FollowCal, value: number | boolean) {
+    edit((c) => {
+      const f = c.follow;
+      if (f) (f[key] as number | boolean) = value;
+    });
+  }
+
   async function doApply() {
     setError('');
     setStatus('applying…');
@@ -146,12 +154,67 @@ export function CalibrationEditor(props: { role: Role }) {
     );
   };
 
+  // Turret-follow tuning (judge neck): how much of the gun's tracking sweep
+  // the head takes (scale, 0–2) and whether each axis' sense is flipped.
+  const followEditor = () => {
+    const f = () => current()?.follow ?? null;
+    return (
+      <Show when={f()}>
+        {(follow) => (
+          <div class="cal-axis">
+            <div class="cal-axis-name">turret follow</div>
+            <div class="cal-grid">
+              <For
+                each={[
+                  { key: 'pan_scale', label: 'pan scale' },
+                  { key: 'tilt_scale', label: 'tilt scale' },
+                ] as Array<{ key: keyof FollowCal; label: string }>}
+              >
+                {(field) => (
+                  <label class="cal-field">
+                    <span>{field.label}</span>
+                    <input
+                      type="number"
+                      step={0.05}
+                      min={0}
+                      max={2}
+                      value={follow()[field.key] as number}
+                      onInput={(e) => patchFollow(field.key, parseFloat(e.currentTarget.value))}
+                    />
+                  </label>
+                )}
+              </For>
+              <For
+                each={[
+                  { key: 'mirror_pan', label: 'mirror pan' },
+                  { key: 'mirror_tilt', label: 'mirror tilt' },
+                ] as Array<{ key: keyof FollowCal; label: string }>}
+              >
+                {(field) => (
+                  <label class="cal-field cal-check">
+                    <input
+                      type="checkbox"
+                      checked={follow()[field.key] as boolean}
+                      onChange={(e) => patchFollow(field.key, e.currentTarget.checked)}
+                    />
+                    <span>{field.label}</span>
+                  </label>
+                )}
+              </For>
+            </div>
+          </div>
+        )}
+      </Show>
+    );
+  };
+
   return (
     <div class="cal-editor">
       <h3>Calibration</h3>
       <Show when={current()} fallback={<div class="muted small">no calibration loaded</div>}>
         {axisEditor('pan')}
         {axisEditor('tilt')}
+        {followEditor()}
         <div class="btn-row">
           <button onClick={doApply}>Apply</button>
           <button onClick={doSave}>Save to disk</button>

@@ -12,6 +12,16 @@ export interface ServoCal {
   limit_max_deg: number;
 }
 
+// How a follower role (the judge neck) mirrors the shared turret aim: per-axis
+// scale (0..2, fraction of the turret's sweep) plus mirror flags that flip the
+// sense. Mirrors the backend `FollowCal` (src/calibration/mod.rs).
+export interface FollowCal {
+  pan_scale: number;
+  tilt_scale: number;
+  mirror_pan: boolean;
+  mirror_tilt: boolean;
+}
+
 // The gavel's strike geometry (servo µs positions + dwell ms). Mirrors the
 // backend `GavelCal` (src/calibration/mod.rs).
 export interface GavelCal {
@@ -48,6 +58,8 @@ export interface Calibration {
   fire_ms?: number | null;
   gavel?: GavelCal | null;
   vision?: VisionCal | null;
+  // How this role mirrors the turret's tracking aim (judge neck only today).
+  follow?: FollowCal | null;
 }
 
 export interface DeviceInfo {

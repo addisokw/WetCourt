@@ -183,7 +183,8 @@ impl TargetingController {
                     if let Some([pan, tilt]) = fallback {
                         warn!(pan, tilt, "targeting: no fresh lock at freeze — firing on fallback aim");
                         self.send_aim_deg(Role::Turret, pan, tilt).await;
-                        self.send_aim_deg(Role::JudgeNeck, pan, tilt).await;
+                        let (np, nt) = self.follow_aim(Role::JudgeNeck, pan, tilt).await;
+                        self.send_aim_deg(Role::JudgeNeck, np, nt).await;
                         self.vision_gate.record(true);
                     }
                 }
@@ -205,6 +206,8 @@ impl TargetingController {
     /// Glide the given pan/tilt roles to a logical aim (degrees) with an eased
     /// (smoothstep) profile at ~[`GLIDE_RATE_DEG_S`] peak — calm on the
     /// mechanics and on the audience, vs. the servo-speed snap of a single AIM.
+    /// The target is in the shared (turret) frame; follower roles map it
+    /// through their `[follow]` transform first, same as the live vision relay.
     /// Roles with no recorded aim (fresh boot) jump directly — there is nothing
     /// to interpolate from. Superseded glides (a new cue, another glide) stop
     /// at the next tick. Detached; never blocks the caller.
@@ -213,15 +216,26 @@ impl TargetingController {
         let this = self.clone();
         let roles = roles.to_vec();
         tokio::spawn(async move {
-            // Per-role start; the farthest axis of any role sets one shared
-            // duration so paired roles (turret + neck) arrive together.
-            let starts: Vec<(Role, (f32, f32))> = {
-                let last = this.last_aim.lock().unwrap();
-                roles.iter().map(|r| (*r, last.get(r).copied().unwrap_or((pan, tilt)))).collect()
+            // Per-role target (through the follow transform) and start; the
+            // farthest axis of any role sets one shared duration so paired
+            // roles (turret + neck) arrive together.
+            let targets: Vec<(Role, (f32, f32))> = {
+                let mut out = Vec::with_capacity(roles.len());
+                for r in &roles {
+                    out.push((*r, this.follow_aim(*r, pan, tilt).await));
+                }
+                out
             };
-            let dist = starts
+            let legs: Vec<(Role, (f32, f32), (f32, f32))> = {
+                let last = this.last_aim.lock().unwrap();
+                targets
+                    .iter()
+                    .map(|(r, tgt)| (*r, last.get(r).copied().unwrap_or(*tgt), *tgt))
+                    .collect()
+            };
+            let dist = legs
                 .iter()
-                .map(|(_, (p0, t0))| (p0 - pan).abs().max((t0 - tilt).abs()))
+                .map(|(_, (p0, t0), (p1, t1))| (p0 - p1).abs().max((t0 - t1).abs()))
                 .fold(0.0_f32, f32::max);
             // Eased peak speed ≈ 1.5 × average → duration = 1.5 × dist / rate.
             let secs = (1.5 * dist / GLIDE_RATE_DEG_S).min(GLIDE_MAX_SECS);
@@ -231,12 +245,19 @@ impl TargetingController {
                     return; // superseded — whoever took over owns the aim now
                 }
                 let s = smoothstep(i as f32 / steps as f32);
-                for (role, (p0, t0)) in &starts {
-                    this.send_aim_deg(*role, p0 + (pan - p0) * s, t0 + (tilt - t0) * s).await;
+                for (role, (p0, t0), (p1, t1)) in &legs {
+                    this.send_aim_deg(*role, p0 + (p1 - p0) * s, t0 + (t1 - t0) * s).await;
                 }
                 tokio::time::sleep(Duration::from_millis(GLIDE_TICK_MS)).await;
             }
         });
+    }
+
+    /// Map a shared (turret-frame) aim into a role's own logical degrees via
+    /// its `[follow]` calibration; identity for roles without one.
+    async fn follow_aim(&self, role: Role, pan: f32, tilt: f32) -> (f32, f32) {
+        let reg = self.calibration.read().await;
+        reg.get(role.as_str()).map(|c| c.follow_aim(pan, tilt)).unwrap_or((pan, tilt))
     }
 
     /// Send one logical aim (degrees) to a pan/tilt role via its calibration,

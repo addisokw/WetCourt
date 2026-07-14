@@ -693,15 +693,20 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
     // Judge-neck mirror: while vision is driving the turret, the judge's head
     // tracks the same target — it visibly *looks at* the defendant during the
     // pre-verdict lock-on — and the eye's catchlight counter-moves via the
-    // FaceAim fan-out (same pairing as the maintenance AIM handler). The neck
-    // calibration clamps to its own softer limits; absent devices just drop.
+    // FaceAim fan-out (same pairing as the maintenance AIM handler). The
+    // turret-frame aim goes through the neck's `[follow]` transform (scale /
+    // mirror, console-tunable) first, so the head can track subtly and face
+    // the right way; the neck calibration then clamps to its own softer
+    // limits. Absent devices just drop.
     let neck = {
         let reg = s.calibration.read().await;
-        reg.get(Role::JudgeNeck.as_str())
-            .and_then(|c| c.aim_to_raw(aim.pan, aim.tilt).ok())
+        reg.get(Role::JudgeNeck.as_str()).and_then(|c| {
+            let (p, t) = c.follow_aim(aim.pan, aim.tilt);
+            c.aim_to_raw(p, t).ok().map(|raw| (raw, (p, t)))
+        })
     };
-    if let Some((pan, tilt)) = neck {
-        s.targeting.note_aim(Role::JudgeNeck, aim.pan, aim.tilt);
+    if let Some(((pan, tilt), (neck_pan, neck_tilt))) = neck {
+        s.targeting.note_aim(Role::JudgeNeck, neck_pan, neck_tilt);
         let _ = s
             .maint_cmd_tx
             .send(MaintenanceCommand {
@@ -714,7 +719,7 @@ async fn vision_aim(AxumState(s): AxumState<AppState>, Json(aim): Json<AimMsg>) 
             .maint_cmd_tx
             .send(MaintenanceCommand {
                 target: Role::JudgeFace,
-                cmd: HardwareCommand::FaceAim { pan: aim.pan, tilt: aim.tilt },
+                cmd: HardwareCommand::FaceAim { pan: neck_pan, tilt: neck_tilt },
                 reply: None,
             })
             .await;
