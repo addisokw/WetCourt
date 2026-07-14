@@ -43,6 +43,10 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         return (
             Idle,
             vec![
+                // Kill any speech mid-delivery before the display reset, so the
+                // backend stops pumping PCM the same instant clients silence
+                // their queues.
+                Command::CancelSpeech,
                 Command::Display(DisplayEvent::Reset),
                 Command::Display(DisplayEvent::Idle),
                 Command::Hardware(HardwareCommand::Face(FacePhase::Idle)),

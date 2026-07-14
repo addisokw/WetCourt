@@ -27,10 +27,25 @@ let sessionStartPending = false;
 // odd-length buffer to Int16Array (which would byte-swap every subsequent
 // sample and produce bursts of white noise at chunk seams).
 let pcmResidue: number | null = null;
+// Every scheduled-but-not-finished BufferSource, so an e-stop can silence
+// speech that is already queued in the AudioContext.
+const liveSources = new Set<AudioBufferSourceNode>();
 
-/** Drop any half-carried PCM byte — called on trial reset so a session aborted
- * mid-frame (e-stop) can't misalign the next session's first samples. */
-export function resetPcmResidue() {
+/** Hard-stop TTS playback (e-stop / trial reset): kill every scheduled buffer
+ * source and reset the queue state — including any half-carried PCM byte,
+ * which would misalign the next session's first samples — so the next
+ * session starts clean. */
+export function stopAllPlayback() {
+  for (const source of liveSources) {
+    source.onended = null;
+    try { source.stop(); } catch { /* already stopped */ }
+  }
+  liveSources.clear();
+  nextStartTime = 0;
+  queueDepth = 0;
+  endingSession = false;
+  sessionStartPending = false;
+  onSessionDrained = null;
   pcmResidue = null;
 }
 
@@ -98,7 +113,9 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
   nextStartTime = startAt + audioBuf.duration;
   sessionStartPending = false;
   queueDepth++;
+  liveSources.add(source);
   source.onended = () => {
+    liveSources.delete(source);
     queueDepth--;
     if (endingSession && queueDepth <= 0) {
       endingSession = false;

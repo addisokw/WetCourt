@@ -149,6 +149,9 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
         .route("/operator/cross_exam", get(get_cross_exam).post(set_cross_exam))
+        // ---- Audio check (console Audio tab): end-to-end source verification ----
+        .route("/operator/audio/tts_test", post(audio_tts_test))
+        .route("/operator/audio/stt_test", post(audio_stt_test))
         // ---- Custom prints (own sub-router: raised body limit for images) ----
         .merge(print::router())
         // ---- Maintenance / hardware test plane ----
@@ -211,6 +214,88 @@ async fn operator_estop(AxumState(s): AxumState<AppState>) -> impl IntoResponse 
         return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
     }
     (StatusCode::NO_CONTENT, "")
+}
+
+// ---- Audio check ----
+
+#[derive(Deserialize)]
+struct TtsTestReq {
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// Speaker check: synthesize a test phrase with the active persona's voice and
+/// stream it down the normal TTS WS path (header + binary PCM + end), so it
+/// exercises Kokoro, the socket, the robot-voice graph, and the speakers —
+/// exactly what a trial exercises. Errors surface synchronously so the console
+/// can say *which* leg is broken. Idle/maintenance only: never talks over a
+/// trial. The stray `tts_finished` ack lands in Idle and is ignored.
+async fn audio_tts_test(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<TtsTestReq>,
+) -> impl IntoResponse {
+    if !s.is_idle.load(Ordering::Relaxed) && !s.maintenance.load(Ordering::Relaxed) {
+        return (StatusCode::CONFLICT, "audio check only runs while idle").into_response();
+    }
+    let text = body
+        .text
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "Testing, testing. The Wet Court is now in session.".into());
+    let (voice, speed) = {
+        let reg = s.personas.read().await;
+        let p = reg.active();
+        (p.tts_voice.clone(), p.tts_speed)
+    };
+    let client = LlmClient::new(&s.inference_cfg);
+    let connect_to = Duration::from_secs(s.inference_cfg.tts_timeout_secs);
+    let stream = match client.synth_pcm_stream(&text, &voice, speed, connect_to).await {
+        Ok(st) => st,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("tts synth failed: {e:#}")).into_response()
+        }
+    };
+    info!("operator: audio check — tts test");
+    let bcast = s.display_bcast.clone();
+    tokio::spawn(async move {
+        futures_util::pin_mut!(stream);
+        let _ = bcast.send(DisplayMessage::Json(DisplayEvent::TtsAudio {
+            format: "pcm_s16le_24000".into(),
+        }));
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(b) => {
+                    let _ = bcast.send(DisplayMessage::Binary(b));
+                }
+                Err(e) => {
+                    warn!("audio check: tts stream error: {e:#}");
+                    break;
+                }
+            }
+        }
+        let _ = bcast.send(DisplayMessage::Json(DisplayEvent::TtsEnd));
+    });
+    (StatusCode::OK, "").into_response()
+}
+
+#[derive(Serialize)]
+struct SttTestResp {
+    transcript: String,
+}
+
+/// Mic check, far end: the console records a short clip and posts the raw
+/// blob here; we run it through the real STT route and hand the transcript
+/// back. Proves mic → browser capture → upload → Parakeet, end to end.
+async fn audio_stt_test(AxumState(s): AxumState<AppState>, body: Bytes) -> impl IntoResponse {
+    if body.is_empty() {
+        return (StatusCode::BAD_REQUEST, "no audio uploaded").into_response();
+    }
+    info!(bytes = body.len(), "operator: audio check — stt test");
+    let client = LlmClient::new(&s.inference_cfg);
+    let to = Duration::from_secs(s.inference_cfg.stt_timeout_secs);
+    match client.transcribe(body, "audio-check.webm", to).await {
+        Ok(text) => (StatusCode::OK, Json(SttTestResp { transcript: text })).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("stt failed: {e:#}")).into_response(),
+    }
 }
 
 #[derive(Serialize, Deserialize)]

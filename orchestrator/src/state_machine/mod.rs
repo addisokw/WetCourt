@@ -334,7 +334,7 @@ impl Runtime {
 
     async fn dispatch(&self, cmd: Command) {
         match cmd {
-            Command::GenerateCharge | Command::Transcribe(_) | Command::CrossExamine { .. } | Command::Deliberate { .. } | Command::Speak(_) => {
+            Command::GenerateCharge | Command::Transcribe(_) | Command::CrossExamine { .. } | Command::Deliberate { .. } | Command::Speak(_) | Command::CancelSpeech => {
                 if self.inference_tx.send(cmd).await.is_err() {
                     tracing::error!("inference channel closed");
                 }

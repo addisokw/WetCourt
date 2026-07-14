@@ -34,7 +34,13 @@ pub async fn run(
     }
     let real = mode == "real";
 
+    // Handles of in-flight tasks, so an e-stop's CancelSpeech can abort them
+    // all — most importantly a TTS/verdict stream mid-delivery, which would
+    // otherwise keep pumping PCM at the clients from a detached task.
+    let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
     while let Some(cmd) = cmd_rx.recv().await {
+        tasks.retain(|t| !t.is_finished());
         let cfg = cfg.clone();
         let personas = personas.clone();
         let crimes = crimes.clone();
@@ -42,34 +48,39 @@ pub async fn run(
         let display_tx = display_tx.clone();
         match cmd {
             Command::GenerateCharge => {
-                tokio::spawn(async move {
+                tasks.push(tokio::spawn(async move {
                     charge::next(cfg, crimes, real, event_tx).await;
-                });
+                }));
             }
             Command::Transcribe(audio) => {
-                tokio::spawn(async move {
+                tasks.push(tokio::spawn(async move {
                     if real { stt::real(cfg, audio, event_tx).await }
                     else    { stt::mock(cfg, audio, event_tx).await }
-                });
+                }));
             }
             Command::CrossExamine { charge: c, plea } => {
-                tokio::spawn(async move {
+                tasks.push(tokio::spawn(async move {
                     if real { cross::real(cfg, personas, c, plea, event_tx).await }
                     else    { cross::mock(cfg, c, plea, event_tx).await }
-                });
+                }));
             }
             Command::Deliberate { charge: c, plea, cross } => {
                 let maint_cmd_tx = maint_cmd_tx.clone();
-                tokio::spawn(async move {
+                tasks.push(tokio::spawn(async move {
                     if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx, maint_cmd_tx).await }
                     else    { verdict::mock(cfg, c, plea, cross, event_tx).await }
-                });
+                }));
             }
             Command::Speak(text) => {
-                tokio::spawn(async move {
+                tasks.push(tokio::spawn(async move {
                     if real { tts::real(cfg, personas, text, event_tx, display_tx).await }
                     else    { tts::mock(cfg, text, event_tx, display_tx).await }
-                });
+                }));
+            }
+            Command::CancelSpeech => {
+                for t in tasks.drain(..) {
+                    t.abort();
+                }
             }
             _ => {}
         }

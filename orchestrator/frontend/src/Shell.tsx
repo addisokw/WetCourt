@@ -15,8 +15,9 @@ import VisionPanel from './panels/VisionPanel';
 import LawyerPanel from './panels/LawyerPanel';
 import PrintPanel from './panels/PrintPanel';
 import SwearInPanel from './panels/SwearInPanel';
+import AudioPanel from './panels/AudioPanel';
 
-type Tab = 'operator' | 'judge_mind' | 'vision' | 'lawyer' | 'print' | 'judge_body' | 'gavel' | 'turret' | 'swear_in';
+type Tab = 'operator' | 'judge_mind' | 'vision' | 'lawyer' | 'audio' | 'print' | 'judge_body' | 'gavel' | 'turret' | 'swear_in';
 type Kind = 'operator' | 'config' | 'hardware';
 
 // 'config' tabs hit the /operator/* endpoints and are safe live (ungated).
@@ -27,6 +28,7 @@ const TABS: Array<{ id: Tab; label: string; kind: Kind }> = [
   { id: 'judge_mind', label: 'Judge Mind', kind: 'config' },
   { id: 'vision', label: 'Vision', kind: 'config' },
   { id: 'lawyer', label: 'Lawyer', kind: 'config' },
+  { id: 'audio', label: 'Audio', kind: 'config' },
   { id: 'print', label: 'Print', kind: 'config' },
   { id: 'judge_body', label: 'Judge Body', kind: 'hardware' },
   { id: 'gavel', label: 'Gavel', kind: 'hardware' },
@@ -128,6 +130,13 @@ export default function Shell() {
         <Show when={tab() === 'lawyer'}>
           <div class="maint-tab">
             <LawyerPanel />
+          </div>
+        </Show>
+
+        {/* Audio check — mic/speaker verification, idle-gated server-side. */}
+        <Show when={tab() === 'audio'}>
+          <div class="maint-tab">
+            <AudioPanel />
           </div>
         </Show>
 

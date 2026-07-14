@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resetPcmResidue, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
+import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopAllPlayback, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
 import { onButtonPressed, onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 import { applyRobotParamsToGraph } from './robotParams';
@@ -185,7 +185,9 @@ function handleEvent(ev: DisplayEvent) {
       setCrossAnswerWindow(false);
       setClockPausedMs(0);
       setServerError('');
-      resetPcmResidue(); // e-stop can abort a TTS session mid-frame
+      // E-stop (or any reset) silences speech immediately — already-scheduled
+      // buffers included — and clears the queue for the next session.
+      stopAllPlayback();
       if (theaterActive()) {
         setTheaterActive(false);
         if (audioEnabled()) stopTheater();
@@ -226,6 +228,9 @@ function handleEvent(ev: DisplayEvent) {
       }
       setPleaWindowOpen(phase === 'awaiting_plea' || crossAnswer);
       setPleaRecordingActive(false);
+      // Reconnected into an open window: restart the mic (recording is
+      // browser-local, so whatever was captured died with the old socket).
+      if (!readOnly && (phase === 'awaiting_plea' || crossAnswer)) void beginPlea({ auto: true });
       setMaintenanceActive(Boolean(ev.maintenance));
       if (phase === 'idle') setDeliberation('');
       break;
@@ -266,6 +271,10 @@ function handleEvent(ev: DisplayEvent) {
       setPleaWindowOpen(true);
       setPleaRecordingActive(false);
       setCrossAnswerWindow(Boolean(ev.cross));
+      // The mic opens the moment the window does — no "Plead" press needed.
+      // Only the operator console owns the mic; P still toggles (early stop /
+      // restart) and the defendant's button still closes the window early.
+      if (!readOnly) void beginPlea({ auto: true });
       break;
     case 'plea_recording':
       setPleaRecordingActive(Boolean(ev.active));
@@ -330,7 +339,7 @@ function handleEvent(ev: DisplayEvent) {
   }
 }
 
-export async function beginPlea() {
+export async function beginPlea(opts: { auto?: boolean } = {}) {
   if (recording()) return;
   if (!pleaWindowOpen()) return;
   try {
@@ -339,7 +348,10 @@ export async function beginPlea() {
     socket?.send(JSON.stringify({ type: 'plea_recording_started' }));
   } catch (e) {
     pushLog({ ts: Date.now(), ev: { type: 'mic_error', message: String(e) } });
-    socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
+    // Manual press: concede the plea rather than wedge the trial. Auto-open:
+    // leave the window running so the operator can fix the mic and press P;
+    // the deadline still closes it if nobody does.
+    if (!opts.auto) socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
   }
 }
 

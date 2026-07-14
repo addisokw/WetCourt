@@ -1234,3 +1234,27 @@ button.plea.recording:hover { background: #8b2326; }
   font-size: 0.85rem;
 }
 .sel-badge.lost { color: #f85149; border-color: #f8514966; }
+
+/* Audio-check mic level meter */
+.mic-meter {
+  position: relative;
+  height: 14px;
+  max-width: 420px;
+  margin: 0.4rem 0;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #0d1117;
+  overflow: hidden;
+}
+.mic-meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #238636, #56d364 70%, #d29922);
+  transition: width 60ms linear;
+}
+.mic-meter-peak {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: #ffa198;
+}

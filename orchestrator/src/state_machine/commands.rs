@@ -12,6 +12,10 @@ pub enum Command {
     CrossExamine { charge: String, plea: String },
     Deliberate { charge: String, plea: String, cross: Option<CrossExam> },
     Speak(String),
+    /// Abort every in-flight inference task (TTS streams included) — the
+    /// e-stop's "shut up NOW". Clients stop their own playback on the
+    /// accompanying `Reset`.
+    CancelSpeech,
 
     Hardware(HardwareCommand),
     Display(DisplayEvent),
