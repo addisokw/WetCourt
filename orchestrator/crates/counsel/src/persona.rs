@@ -30,6 +30,11 @@ pub struct LawyerPersona {
     pub reprompt: String,
     /// Spoken before the lawyer hangs up (max call length / dead line).
     pub signoff: String,
+    /// The exchange-cap exits: scripted mishaps that befall the lawyer and
+    /// force him off the line ("the copier's got my tie—"), one picked per
+    /// call. Empty → the plain `signoff` is used instead.
+    #[serde(default)]
+    pub hangup_lines: Vec<String>,
     /// In-character lines for inference failures, cycled.
     pub fallback_lines: Vec<String>,
     pub system_prompt: String,
@@ -53,5 +58,14 @@ impl LawyerPersona {
 
     pub fn fallback(&self, n: usize) -> &str {
         &self.fallback_lines[n % self.fallback_lines.len()]
+    }
+
+    /// The exchange-cap exit line; `n` varies the pick per call.
+    pub fn hangup(&self, n: usize) -> &str {
+        if self.hangup_lines.is_empty() {
+            &self.signoff
+        } else {
+            &self.hangup_lines[n % self.hangup_lines.len()]
+        }
     }
 }

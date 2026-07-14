@@ -142,6 +142,11 @@ pub struct AudioConfig {
     /// Whole-call cap; the lawyer signs off and hangs up (secs).
     #[serde(default = "d_max_call_secs")]
     pub max_call_secs: u64,
+    /// Exchange cap: after this many client-utterance → lawyer-reply turns,
+    /// something urgent befalls the lawyer (a persona `hangup_lines` bit) and
+    /// he hangs up. Keeps calls snappy independent of the wall clock.
+    #[serde(default = "d_max_exchanges")]
+    pub max_exchanges: usize,
     /// Log per-frame RMS while listening (VAD calibration on real hardware).
     #[serde(default)]
     pub debug_rms: bool,
@@ -162,6 +167,7 @@ impl Default for AudioConfig {
             max_utterance_ms: d_max_utterance_ms(),
             silence_reprompt_secs: d_silence_reprompt_secs(),
             max_call_secs: d_max_call_secs(),
+            max_exchanges: d_max_exchanges(),
             debug_rms: false,
             echo_test: false,
         }
@@ -191,6 +197,9 @@ fn d_silence_reprompt_secs() -> u64 {
 }
 fn d_max_call_secs() -> u64 {
     300
+}
+fn d_max_exchanges() -> usize {
+    5
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -14,6 +14,16 @@ hold_voice = "af_sarah"
 
 signoff = "Listen, I'm being told my parking is being validated as we speak, so we'll call that legal strategy. Remember: admit nothing, deny everything, and if all else fails, cry. Stubb out."
 
+# Exchange-cap exits ([audio] max_exchanges in config.toml): after the capped
+# number of back-and-forths, one of these mishaps strikes and Dewey is gone.
+hangup_lines = [
+    "Ope — hold on — the ceiling sprinklers just went off and I am holding EVERY copy of your paperwork. Quick, before it's pulp: you're innocent, probably! Trust the system! Stubb ou—",
+    "What the— my chair is rolling toward the stairwell and I am STILL IN IT. Plead something Latin! Habeas... corpuuuuus—",
+    "Uh oh. The bees are back. Nobody panic — I'm saying that mostly to the bees. Just tell the judge what I always say: no take-backs. Gotta run, they remember me!",
+    "Do you smell that? My hot plate! My closing arguments are on fire — they were also my sandwich! Deny everything, especially this phone call. Stubb out!",
+    "There's a process server at my door dressed as a pizza. Oldest trick in the book, and it is WORKING — I'm starving. If I don't make it: you were never my client. Bye!",
+]
+
 fallback_lines = [
     "Hold that thought — my other phone is on fire. The important thing is: whatever you did, own it. Judges love that. Or hate it. One of the two. Just don't trust your gut... Usually do the opposite of whatever your gut says.",
     "You know, that reminds me of a case I lost. Well, they all remind me of cases I lost. My advice stands: plead something. Anything. Surprise me.",

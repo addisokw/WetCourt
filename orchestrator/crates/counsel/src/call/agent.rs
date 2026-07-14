@@ -89,6 +89,13 @@ pub async fn run(
         tokio::time::Instant::now() + Duration::from_secs(cfg.max_call_secs);
     let silence_limit = cfg.silence_reprompt_secs * 1000;
     let mut reprompted = false;
+    let mut exchanges = 0usize;
+    // Which scripted mishap ends this call — varied per call, fixed up front
+    // so the pick can't correlate with anything the client says.
+    let hangup_pick = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as usize)
+        .unwrap_or(0);
 
     loop {
         tokio::select! {
@@ -117,6 +124,18 @@ pub async fn run(
                         .await;
                         flush_stale(&mut events, &mut vad);
                         reprompted = false;
+                        exchanges += 1;
+                        // Exchange cap: something urgent suddenly befalls the
+                        // lawyer and he's off the line. Same teardown as every
+                        // other exit — the break sends the BYE and notifies
+                        // the orchestrator to resume the trial clock.
+                        if exchanges >= cfg.max_exchanges {
+                            let exit = persona.hangup(hangup_pick);
+                            tracing::info!(exchanges, "max_exchanges reached — scripted hangup");
+                            note("lawyer", exit.to_string());
+                            speak(shared, &mixer, exit).await.ok();
+                            break;
+                        }
                     } else if vad.idle_ms() >= silence_limit {
                         if reprompted {
                             tracing::info!("client stayed silent — signing off");

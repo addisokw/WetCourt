@@ -10,6 +10,8 @@ advertise_ip = "" # auto-detect; set to this machine's 192.168.50.x if multi-hom
 debug_rms = false # flip on when calibrating VAD against the real handset
 vad_rms_threshold = 100
 max_call_secs = 180
+# Back-and-forths before a scripted mishap (persona hangup_lines) ends the call.
+max_exchanges = 5
 
 [inference]
 mode = "real"

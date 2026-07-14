@@ -18,6 +18,8 @@ vad_rms_threshold = 100.0
 vad_hangover_ms = 700
 silence_reprompt_secs = 12
 max_call_secs = 180
+# Back-and-forths before a scripted mishap (persona hangup_lines) ends the call.
+max_exchanges = 5
 
 [inference]
 mode = "real"

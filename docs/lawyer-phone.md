@@ -111,6 +111,7 @@ sections.
 | `[audio] vad_rms_threshold` | 700 | handset/booth noise floor (see debug_rms) |
 | `[audio] silence_reprompt_secs` | 12 | how long Dewey waits before "hello? that's how they get you" |
 | `[audio] max_call_secs` | 300 | line hog control; ends with an in-character sign-off |
+| `[audio] max_exchanges` | 5 | back-and-forths before a scripted mishap (`hangup_lines`) forces Dewey off the line |
 | `[trial_context] enabled` | true | lawyer reads the live charge from the orchestrator |
 | `[persona] file` | personas/lawyer.toml | swap the whole persona |
 
