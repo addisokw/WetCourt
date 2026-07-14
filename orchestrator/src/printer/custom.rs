@@ -376,12 +376,23 @@ fn prepare(blk: &Block, width_dots: u32, cfg: &PrinterConfig) -> anyhow::Result<
             let font = parse_font(font).map_err(anyhow::Error::msg)?;
             let align = parse_align(align).map_err(anyhow::Error::msg)?;
             let cols = (cols_for(width_dots, font) / *size_w as usize).max(1);
+            // Inverse lines get one padding space per side inside the black
+            // bar: flush glyphs read as cut off at the bar's edge (wrap()
+            // strips any padding the user types themselves), and the space
+            // scales with the magnification.
+            let pad = usize::from(*inverse);
+            let cols = cols.saturating_sub(2 * pad).max(1);
             let mut lines = Vec::new();
             for raw in text.lines() {
                 lines.extend(wrap(&asciify(raw), cols));
             }
             if lines.is_empty() {
                 lines.push(String::new());
+            }
+            if pad > 0 {
+                for l in &mut lines {
+                    *l = format!(" {l} ");
+                }
             }
             let spacing = glyph_height(font) * *size_h as u32 + TEXT_LEADING_DOTS;
             Prep::Lines {
@@ -785,6 +796,32 @@ mod tests {
             .write_to(&mut buf, image::ImageFormat::Png)
             .unwrap();
         base64::engine::general_purpose::STANDARD.encode(buf.into_inner())
+    }
+
+    #[test]
+    fn inverse_text_is_padded_inside_the_bar() {
+        // 48 cols / size 6 = 8; padding reserves 2, so "GUILTY" (6 chars)
+        // still fits one line and prints with a space each side of the bar.
+        let blk = Block::Text {
+            text: "GUILTY".into(),
+            align: "center".into(),
+            bold: true,
+            underline: false,
+            inverse: true,
+            font: "a".into(),
+            size_w: 6,
+            size_h: 6,
+        };
+        let Prep::Lines { lines, .. } = prepare(&blk, 576, &cfg()).unwrap() else {
+            panic!("text block must prepare to lines");
+        };
+        assert_eq!(lines, vec![" GUILTY ".to_string()]);
+
+        // Non-inverse text is untouched.
+        let Prep::Lines { lines, .. } = prepare(&text("GUILTY"), 576, &cfg()).unwrap() else {
+            panic!("text block must prepare to lines");
+        };
+        assert_eq!(lines, vec!["GUILTY".to_string()]);
     }
 
     #[test]

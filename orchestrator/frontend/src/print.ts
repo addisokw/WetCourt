@@ -185,13 +185,16 @@ export function wrap(s: string, cols: number): string[] {
 
 /** The wrapped preview lines of a text block (what will actually print). */
 export function textLines(b: TextBlock, widthDots: number): string[] {
-  const cols = Math.max(1, Math.floor(colsFor(widthDots, b.font) / b.size_w));
+  // Inverse blocks reserve one padding space per side inside the black bar —
+  // mirrors custom.rs::prepare.
+  const pad = b.inverse ? 1 : 0;
+  const cols = Math.max(1, Math.floor(colsFor(widthDots, b.font) / b.size_w) - 2 * pad);
   const out: string[] = [];
   for (const raw of b.text.split('\n')) {
     out.push(...wrap(asciify(raw), cols));
   }
   if (out.length === 0) out.push('');
-  return out;
+  return pad ? out.map((l) => ` ${l} `) : out;
 }
 
 export function textSpacing(b: TextBlock): number {
