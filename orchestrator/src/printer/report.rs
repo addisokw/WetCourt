@@ -80,7 +80,10 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
         rule(&mut b, cols);
     }
 
-    let delib_label = format!("DELIBERATION OF THE HON. {}:", asciify(&rec.judge_name).to_uppercase());
+    let delib_label = format!(
+        "DELIBERATION OF THE HON. {}:",
+        asciify(&rec.judge_name).to_uppercase()
+    );
     section(&mut b, &delib_label, &rec.deliberation, cols);
 
     heavy_rule(&mut b, cols);
@@ -91,7 +94,7 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
         moment_of_justice(&mut b, w, rec.still_jpeg.as_deref(), opts);
     }
 
-    footer(&mut b, rec, opts);
+    //footer(&mut b, rec, opts);
 
     b.align(Align::Left).feed(2).cut();
     b
@@ -134,7 +137,11 @@ fn caption(b: &mut Builder, rec: &TrialRecord, cols: usize) {
         .bold(false)
         .font(Font::B)
         .line(&format!("aka \"{}\"", asciify(&rec.docket_alias())))
-        .line(&format!("Case No. {}   {}", rec.case_label(), rec.display_time()))
+        .line(&format!(
+            "Case No. {}   {}",
+            rec.case_label(),
+            rec.display_time()
+        ))
         .font(Font::A);
     heavy_rule(b, cols);
 }
@@ -149,7 +156,10 @@ fn section(b: &mut Builder, label: &str, body: &str, cols: usize) {
 }
 
 fn cross(b: &mut Builder, cx: &CrossExam, cols: usize) {
-    b.align(Align::Left).bold(true).line("CROSS-EXAMINATION:").bold(false);
+    b.align(Align::Left)
+        .bold(true)
+        .line("CROSS-EXAMINATION:")
+        .bold(false);
     for l in wrap(&format!("THE COURT: {}", asciify(&cx.question)), cols) {
         b.line(&l);
     }
@@ -159,11 +169,19 @@ fn cross(b: &mut Builder, cx: &CrossExam, cols: usize) {
 }
 
 fn verdict(b: &mut Builder, rec: &TrialRecord) {
-    b.align(Align::Center).bold(true).line("- VERDICT -").bold(false).feed(1);
+    b.align(Align::Center)
+        .bold(true)
+        .line("- VERDICT -")
+        .bold(false)
+        .feed(1);
     if rec.guilty {
         // Inverse + magnified — the line everyone photographs. Padding spaces
         // give the white-on-black bar some breathing room.
-        b.inverse(true).size(2, 2).line("  GUILTY  ").size(1, 1).inverse(false);
+        b.inverse(true)
+            .size(2, 2)
+            .line("  GUILTY  ")
+            .size(1, 1)
+            .inverse(false);
     } else {
         b.size(2, 2).line("NOT GUILTY").size(1, 1);
     }
@@ -172,7 +190,12 @@ fn verdict(b: &mut Builder, rec: &TrialRecord) {
         .line(&format!("\"{}\"", asciify(&rec.remarks)))
         .font(Font::A);
     // The deciding factor the judge named — the keepsake's "why".
-    if let Some(kf) = rec.key_factor.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(kf) = rec
+        .key_factor
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         b.feed(1)
             .font(Font::B)
             .line(&format!("WHAT DECIDED IT: {}", asciify(kf)))
@@ -184,7 +207,10 @@ fn verdict(b: &mut Builder, rec: &TrialRecord) {
 /// the layout and paper feed match the final receipt; M3 replaces the frame
 /// with the dithered firing-still from the vision service.
 fn moment_of_justice(b: &mut Builder, w: u32, still: Option<&[u8]>, opts: &ReportOpts) {
-    b.align(Align::Center).bold(true).line("-- MOMENT OF JUSTICE --").bold(false);
+    b.align(Align::Center)
+        .bold(true)
+        .line("-- MOMENT OF JUSTICE --")
+        .bold(false);
     // Dither the captured blast frame to 1-bit at printer width; fall back to the
     // reticle placeholder when there's no still (capture off / failed).
     let captured = still.and_then(|bytes| {
@@ -216,7 +242,9 @@ fn footer(b: &mut Builder, rec: &TrialRecord, opts: &ReportOpts) {
     b.feed(1).align(Align::Center);
     b.qr(opts.qr_url, 6, QrEcc::M).feed(1);
     b.bold(true).line("CATCH A TRIAL YOURSELF").bold(false);
-    b.font(Font::B).line(&asciify(opts.booth_location)).font(Font::A);
+    b.font(Font::B)
+        .line(&asciify(opts.booth_location))
+        .font(Font::A);
     b.line("#WetCourtOfAppeals");
     b.feed(1)
         .font(Font::B)
@@ -330,8 +358,16 @@ mod tests {
 
         // Sanity: real content, and the guilty receipt is longer (verdict bar +
         // photo slot) than the acquittal.
-        assert!(guilty.len() > 200, "guilty receipt too short: {}", guilty.len());
-        assert!(acquitted.len() > 200, "acquittal too short: {}", acquitted.len());
+        assert!(
+            guilty.len() > 200,
+            "guilty receipt too short: {}",
+            guilty.len()
+        );
+        assert!(
+            acquitted.len() > 200,
+            "acquittal too short: {}",
+            acquitted.len()
+        );
         assert!(guilty.len() > acquitted.len());
 
         let pg = dump("wetcourt_receipt_guilty.escpos", &guilty);
@@ -342,7 +378,10 @@ mod tests {
         // Opt-in real-hardware proof: `WETCOURT_PRINT_USB=1 cargo test ...`.
         if std::env::var("WETCOURT_PRINT_USB").is_ok() {
             let printer = thermal_printer::Printer::connect().expect("open USB printer");
-            printer.transport().write(&guilty).expect("print guilty receipt");
+            printer
+                .transport()
+                .write(&guilty)
+                .expect("print guilty receipt");
         }
     }
 
