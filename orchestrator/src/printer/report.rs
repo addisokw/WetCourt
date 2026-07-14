@@ -392,10 +392,12 @@ mod tests {
         let bytes = render(&TrialRecord::sample_guilty(), &opts).build();
         // ESC { 1 right after init.
         assert_eq!(&bytes[..5], &[0x1B, b'@', 0x1B, b'{', 1]);
-        // Content order reversed: the footer tag prints before the masthead.
+        // Content order reversed: the verdict banner (the document's last
+        // major block while the footer is disabled) prints before the
+        // masthead.
         let masthead = bytes.windows(9).position(|w| w == b"WET COURT").unwrap();
-        let tag = bytes.windows(9).position(|w| w == b"#WetCourt").unwrap();
-        assert!(tag < masthead, "footer must print before the masthead");
+        let verdict = bytes.windows(11).position(|w| w == b"- VERDICT -").unwrap();
+        assert!(verdict < masthead, "verdict must print before the masthead");
         // The cut is still the physically-last command.
         assert_eq!(&bytes[bytes.len() - 4..bytes.len() - 1], &[0x1D, b'V', 66]);
     }
