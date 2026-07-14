@@ -47,8 +47,9 @@ LED: red = no WiFi · amber = dialing · green = connected) is the shared
    ```
 
 2. **Secrets** (gitignored): `cp secrets.example.py secrets.py`, then fill in
-   `WIFI_SSID` / `WIFI_PASS` / `ORCH_HOST` (orchestrator LAN IP) / `ORCH_PORT`
-   (`8090`). Confirm `RELAY_PIN` in `main.py` (see Wiring).
+   `WIFI_SSID` / `WIFI_PASS`. Leave `ORCH_HOST` unset to auto-discover the
+   orchestrator from its UDP beacon (the usual mode); set it only as a hard
+   override (show rigs, or two orchestrators on one LAN). Confirm `RELAY_PIN` in `main.py` (see Wiring).
 3. **Deploy**: `./deploy.sh` — copies `main.py`, `secrets.py`, and the shared
    `wetline.py`, then resets. Watch it with `mpremote repl`.
 4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;

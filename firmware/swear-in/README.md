@@ -67,8 +67,9 @@ raw. GPIO source current is fine for a single LED (< 20 mA) but not more.
    ```
 
 2. **Secrets** (gitignored): `cp secrets.example.py secrets.py`, then fill in
-   `WIFI_SSID` / `WIFI_PASS` / `ORCH_HOST` (orchestrator LAN IP) / `ORCH_PORT`
-   (`8090`).
+   `WIFI_SSID` / `WIFI_PASS`. Leave `ORCH_HOST` unset to auto-discover the
+   orchestrator from its UDP beacon (the usual mode); set it only as a hard
+   override (show rigs, or two orchestrators on one LAN).
 3. **Deploy**: `./deploy.sh` — copies `main.py`, `secrets.py`, and the shared
    `wetline.py`/`ota.py`, then resets. Watch it with `mpremote repl`.
 4. **OTA (optional)**: set `OTA_TOKEN` in `secrets.py` and redeploy once;

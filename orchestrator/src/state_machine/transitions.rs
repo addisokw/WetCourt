@@ -650,7 +650,7 @@ mod tests {
                 verdict_total_timeout_secs: 30, stt_timeout_secs: 5, tts_timeout_secs: 10,
                 enable_thinking: false, api_key: None,
             },
-            hardware: HardwareConfig { driver: "mock".into(), ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into() },
+            hardware: HardwareConfig { driver: "mock".into(), ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into(), beacon_port: 0 },
             mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
             mock_inference: MockInferenceConfig::default(),
             squirt: SquirtConfig { duration_ms: 150 },

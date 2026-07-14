@@ -6,7 +6,7 @@
 
 import os
 
-FW_VERSION = "0.4"     # 0.4 = Matrix Portal S3 port (native WiFi + mDNS)
+FW_VERSION = "0.5"     # 0.5 = orchestrator discovery beacon; 0.4 = S3 port
 
 # Physical panel (as wired to the HUB75 header) — logical orientation comes
 # from ROTATION. 90 = portrait (32 wide x 64 tall), 0 = landscape.
@@ -17,8 +17,11 @@ BIT_DEPTH = 5          # 4-6: iris gradient smoothness vs refresh cost (brief §
 
 WIFI_SSID = os.getenv("WIFI_SSID")
 WIFI_PASS = os.getenv("WIFI_PASS")
-ORCH_HOST = os.getenv("ORCH_HOST")
+# ORCH_HOST set = hard override (never listens for beacons). Unset/empty =
+# discover the orchestrator from its UDP beacon (see protocol README).
+ORCH_HOST = os.getenv("ORCH_HOST") or None
 ORCH_PORT = int(os.getenv("ORCH_PORT") or 8090)
+ORCH_BEACON_PORT = int(os.getenv("ORCH_BEACON_PORT") or 8091)
 
 # Network name: DHCP hostname (→ judge-face.lan on the booth router, like
 # the NanoC6 fixtures) and mDNS (→ judge-face.local). Letters/digits/hyphen.

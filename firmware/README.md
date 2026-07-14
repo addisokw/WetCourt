@@ -39,8 +39,13 @@ CIRCUITPY drive to on-device code by default so OTA can write; **hold UP at
 reset** for a host-writable drive (`deploy.sh` / recovery).
 
 Each device dials the orchestrator over TCP and identifies with `HELLO <role>`;
-the host routes commands per role. `LIGHTS` is deferred (no owner); e-stop is the
-operator panel + hardware power, not a device.
+the host routes commands per role. The orchestrator's address is **discovered**
+by default: the host broadcasts a UDP beacon (`WETCOURT <spec> <port>`, port
+8091) and boards with no `ORCH_HOST` in their secrets listen for it — set an
+explicit `ORCH_HOST` as a hard override (show rigs, or two orchestrators on
+one LAN). See the [protocol spec](../protocol/README.md)'s Discovery section.
+`LIGHTS` is deferred (no owner); e-stop is the operator panel + hardware
+power, not a device.
 
 The turret's **vision** process (camera person-tracking + aim feed) is a non-MCU
 host process and lives in `vision/`, not here — see

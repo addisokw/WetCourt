@@ -45,11 +45,12 @@ def _note_failure(e):
     LINK_FAILS += 1
 
 
-def _net_probe(radio, pool):
+def _net_probe(radio, pool, target):
     """One-shot layer-by-layer dial diagnosis, reported via OTALOG.
 
     Separates DNS (getaddrinfo) from the raw TCP connect, and records the
     AP signal strength — weak booth WiFi looks exactly like a dead host.
+    `target` is the effective (host, port) — configured or beacon-discovered.
     """
     out = {}
     try:
@@ -59,7 +60,7 @@ def _net_probe(radio, pool):
     except Exception as e:
         out["rssi"] = "ERR " + repr(e)
     try:
-        info = pool.getaddrinfo(config.ORCH_HOST, config.ORCH_PORT)
+        info = pool.getaddrinfo(target[0], target[1])
         out["dns"] = repr(info[0][-1])
     except Exception as e:
         out["dns"] = "ERR " + repr(e)
@@ -67,7 +68,7 @@ def _net_probe(radio, pool):
         s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
         try:
             s.settimeout(_CONNECT_TIMEOUT_S)
-            s.connect((config.ORCH_HOST, config.ORCH_PORT))
+            s.connect(target)
             out["raw_tcp"] = "OK"
         finally:
             try:
@@ -144,13 +145,24 @@ class OrchestratorLink:
         self._next_try = ticks_ms()
         self._last_rx = ticks_ms()
         self._fails = 0
-        self._enabled = bool(config.WIFI_SSID and config.ORCH_HOST)
+        self._enabled = bool(config.WIFI_SSID)
+        # Orchestrator addressing: an explicit ORCH_HOST is a hard override;
+        # without one the host is discovered from the UDP beacon (`WETCOURT
+        # <spec> <tcp_port>` on ORCH_BEACON_PORT) — IP from the datagram's
+        # sender, port from the payload. The beacon socket is pumped
+        # non-blocking from poll(), so discovery never hitches the render
+        # loop, and a beacon from a *moved* orchestrator retargets the next
+        # dial automatically.
+        self._static = bool(config.ORCH_HOST)
+        self._target = (config.ORCH_HOST, config.ORCH_PORT) if self._static else None
+        self._beacon = None
+        self._bbuf = bytearray(64)
         # Bumped when the socket pool is (re)built, so the OTA server knows
         # its listener socket died with the old pool. On native WiFi this
         # happens once at first connect and then never again in practice.
         self.radio_epoch = 0
         if not self._enabled:
-            print("link: no WIFI_SSID/ORCH_HOST in settings.toml — demo mode only")
+            print("link: no WIFI_SSID in settings.toml — demo mode only")
 
     def radio(self):
         """(wifi.radio, pool) once WiFi is associated, else (None, None).
@@ -180,7 +192,23 @@ class OrchestratorLink:
                     self._next_try = now
                     self._fails = 0
                 return False
+        # Disconnected: pump the discovery beacon every frame (non-blocking)
+        # so the freshest orchestrator address is ready when the retry opens.
+        self._poll_beacon()
         if ticks_diff(now, self._next_try) < 0:
+            return False
+        if self._target is None:
+            # Discovery mode with nothing heard yet: bring the network up so
+            # the beacon socket can listen, then check back soon — this is a
+            # quiet wait, not a failure (no probe, no exponential backoff).
+            try:
+                self._ensure_net()
+            except Exception as e:
+                print("link: net:", e)
+                _note_failure(e)
+                self._drop(now)
+                return False
+            self._next_try = ticks_add(now, 1000)
             return False
         try:
             self._connect()
@@ -192,7 +220,7 @@ class OrchestratorLink:
             global NET_PROBE
             if not NET_PROBE and self._pool is not None and self._radio.connected:
                 try:
-                    NET_PROBE = _net_probe(self._radio, self._pool)
+                    NET_PROBE = _net_probe(self._radio, self._pool, self._target)
                 except Exception as pe:
                     NET_PROBE = {"probe": "ERR " + repr(pe)}
                 print("link: net probe:", NET_PROBE)
@@ -228,7 +256,8 @@ class OrchestratorLink:
         except Exception as e:                 # e.g. web workflow owns the responder
             print("wifi: mdns unavailable:", e)
 
-    def _connect(self):
+    def _ensure_net(self):
+        """WiFi + mDNS + (in discovery mode) the beacon listener."""
         if self._pool is None:
             self._init_hw()
         if not self._radio.connected:
@@ -237,13 +266,51 @@ class OrchestratorLink:
         # Outside the branch: a soft reload keeps WiFi associated but kills
         # the previous run's mDNS responder — re-arm it either way.
         self._start_mdns()
+        self._open_beacon()
 
+    def _open_beacon(self):
+        """Bind the (non-blocking) UDP beacon listener; no-op when static."""
+        if self._static or self._beacon is not None:
+            return
+        try:
+            s = self._pool.socket(self._pool.AF_INET, self._pool.SOCK_DGRAM)
+            s.bind(("0.0.0.0", config.ORCH_BEACON_PORT))
+            s.settimeout(0)
+            self._beacon = s
+            print("link: listening for orchestrator beacon on :%d" % config.ORCH_BEACON_PORT)
+        except Exception as e:
+            print("link: beacon bind failed:", e)
+
+    def _poll_beacon(self):
+        """Drain one beacon datagram if present; updates the dial target."""
+        if self._beacon is None:
+            return
+        try:
+            n, src = self._beacon.recvfrom_into(self._bbuf)
+        except OSError as e:
+            if e.errno in _EAGAIN:
+                return                         # nothing waiting — the usual
+            print("link: beacon recv:", e)
+            return
+        parts = bytes(self._bbuf[:n]).split()
+        if len(parts) == 3 and parts[0] == b"WETCOURT":
+            try:
+                target = (src[0], int(parts[2]))
+            except ValueError:
+                return                         # malformed port: ignore
+            if target != self._target:
+                print("link: discovered orchestrator at %s:%d" % target)
+                self._target = target
+                self._next_try = ticks_ms()    # fresh address: dial promptly
+
+    def _connect(self):
+        self._ensure_net()
         sock = self._pool.socket(self._pool.AF_INET, self._pool.SOCK_STREAM)
         try:
             sock.settimeout(_CONNECT_TIMEOUT_S)
             # Native socketpool resolves hostnames and dotted quads itself —
             # the M4-era NINA dotted-quad workaround is gone.
-            sock.connect((config.ORCH_HOST, config.ORCH_PORT))
+            sock.connect(self._target)
             sock.send(b"HELLO judge-face " + config.FW_VERSION.encode() + b"\n")
 
             # Await WELCOME / BYE (handshake is the one blocking read, ≤3 s).

@@ -297,10 +297,19 @@ pub struct HardwareConfig {
     /// Where to listen for the MCU's TCP connection when driver = "tcp".
     #[serde(default = "default_bind_addr")]
     pub bind_addr: String,
+    /// UDP port for the discovery beacon (`WETCOURT <spec> <tcp_port>`,
+    /// broadcast every ~2 s so firmware with no `ORCH_HOST` configured can
+    /// find this host). Only the TCP driver beacons. 0 disables.
+    #[serde(default = "default_beacon_port")]
+    pub beacon_port: u16,
 }
 
 fn default_bind_addr() -> String {
     "0.0.0.0:8090".into()
+}
+
+fn default_beacon_port() -> u16 {
+    8091
 }
 
 #[derive(Debug, Deserialize, Clone)]

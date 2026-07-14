@@ -28,6 +28,9 @@ driver = "tcp"
 #driver = "mock"
 ack_timeout_ms = 3000
 bind_addr = "0.0.0.0:8090"
+# UDP discovery beacon so firmware with no ORCH_HOST finds this host
+# (WETCOURT <spec> <tcp_port>, every ~2 s). 0 disables.
+beacon_port = 8091
 
 [mock_hw]
 ack_latency_ms = 50

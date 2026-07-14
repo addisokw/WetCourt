@@ -17,6 +17,32 @@ that firmware is retired, so no v1 devices remain.
   Tokens are whitespace-separated; the first token is the verb (uppercase).
 - Blank lines are ignored. Unknown lines are logged and skipped (forward-compat).
 
+## Discovery (UDP beacon)
+
+How a device *finds* the host to dial. The orchestrator broadcasts a
+discovery beacon every ~2 s (UDP, default port **8091**, configurable via
+`[hardware] beacon_port`, `0` disables):
+
+```
+WETCOURT <spec-version> <tcp-port>
+```
+
+A device with **no `ORCH_HOST` configured** listens on the beacon port and
+takes the orchestrator's **IP from the datagram's source address** and the
+**TCP port from the payload**, then dials as normal. Devices re-listen after
+repeated dial failures, so the fleet follows the orchestrator across
+machines and DHCP renumbering with no reflash.
+
+An **explicit `ORCH_HOST` is a hard override**: the device dials it directly
+and never listens for beacons. Use it on show rigs, and whenever two
+orchestrators share a LAN — discovery connects to whichever host is heard
+first, and the role-takeover rule below means two live hosts would steal the
+fleet from each other.
+
+Datagrams that don't parse as exactly three tokens starting `WETCOURT` are
+ignored. The spec version lets future firmware refuse an incompatible host
+before dialing; current firmware ignores it.
+
 ## Connection & identity  *(v2)*
 
 On connect, before anything else, the device announces its role:

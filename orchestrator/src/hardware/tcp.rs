@@ -36,14 +36,50 @@ static NEXT_GEN: AtomicU64 = AtomicU64::new(1);
 pub struct TcpRegistry {
     bind_addr: String,
     ack_timeout: Duration,
+    beacon_port: u16,
 }
 
 impl TcpRegistry {
-    pub fn new(bind_addr: String, ack_timeout_ms: u64) -> Self {
+    pub fn new(bind_addr: String, ack_timeout_ms: u64, beacon_port: u16) -> Self {
         Self {
             bind_addr,
             ack_timeout: Duration::from_millis(ack_timeout_ms),
+            beacon_port,
         }
+    }
+}
+
+/// Protocol spec version carried in the beacon (see `protocol/README.md`).
+const SPEC_VERSION: u32 = 2;
+
+/// Discovery beacon: broadcast `WETCOURT <spec> <tcp_port>` every ~2 s so
+/// firmware with no `ORCH_HOST` configured can find this host by listening —
+/// the device takes the orchestrator IP from the datagram's source address
+/// and the TCP port from the payload. Only the TCP driver beacons (the mock
+/// driver has no listener to advertise).
+async fn beacon(beacon_port: u16, tcp_port: u16) {
+    let sock = match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("tcp_hw: beacon bind failed: {e}");
+            return;
+        }
+    };
+    if let Err(e) = sock.set_broadcast(true) {
+        warn!("tcp_hw: beacon set_broadcast failed: {e}");
+        return;
+    }
+    let msg = format!("WETCOURT {SPEC_VERSION} {tcp_port}");
+    info!("tcp_hw: discovery beacon '{msg}' -> 255.255.255.255:{beacon_port} every 2s");
+    loop {
+        if let Err(e) = sock
+            .send_to(msg.as_bytes(), ("255.255.255.255", beacon_port))
+            .await
+        {
+            // Transient (interface down, no route): keep trying quietly.
+            tracing::debug!("tcp_hw: beacon send failed: {e}");
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 
@@ -113,6 +149,18 @@ impl HardwareDriver for TcpRegistry {
             }
         };
         info!("tcp_hw: registry listening on {}", self.bind_addr);
+
+        if self.beacon_port != 0 {
+            // Advertise the *configured* TCP port; devices pair it with the
+            // beacon datagram's source IP.
+            let tcp_port = self
+                .bind_addr
+                .rsplit(':')
+                .next()
+                .and_then(|p| p.parse::<u16>().ok())
+                .unwrap_or(8090);
+            tokio::spawn(beacon(self.beacon_port, tcp_port));
+        }
 
         let (reg_tx, reg_rx) = mpsc::channel::<RouterMsg>(64);
         tokio::spawn(router(

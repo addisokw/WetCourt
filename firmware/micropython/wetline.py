@@ -14,9 +14,19 @@
 # up, None while it is down — so firmware can scan inputs, animate LEDs, and
 # emit unsolicited events (e.g. "BUTTON") without owning the serve loop.
 #
+# The orchestrator is found one of two ways:
+#   - secrets.ORCH_HOST set (hostname or IP): dial it directly — a hard
+#     override that never listens for beacons (use on show rigs, or when two
+#     orchestrators share a LAN).
+#   - ORCH_HOST absent/empty: listen for the orchestrator's UDP discovery
+#     beacon (`WETCOURT <spec> <tcp_port>` broadcast on ORCH_BEACON_PORT,
+#     default 8091) — IP from the datagram's sender, port from the payload.
+#     Re-discovers after repeated dial failures, so the fleet follows the
+#     orchestrator across machines/addresses with no reflash.
+#
 # Status RGB LED (NanoC6 onboard WS2812):
 #   red   = WiFi down / associating
-#   amber = WiFi up, dialing the orchestrator
+#   amber = WiFi up, discovering / dialing the orchestrator
 #   green = link up, serving commands
 
 import network
@@ -78,9 +88,46 @@ def _ensure_wifi(wlan):
     return wlan.isconnected()
 
 
-def _connect(role, version):
+_BEACON_MAGIC = b"WETCOURT"
+_DISCOVER_MS = 8000            # ~4 beacon intervals before giving up a round
+
+
+def _discover(ota, tick):
+    """Listen for the orchestrator's UDP discovery beacon.
+
+    Returns (host, port) from the first well-formed `WETCOURT <spec> <port>`
+    datagram — host is the sender's IP, port comes from the payload — or None
+    after ~8 s of silence. OTA (and the board's tick hook) stay serviced so a
+    board parked in discovery can still be updated.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(("0.0.0.0", getattr(secrets, "ORCH_BEACON_PORT", 8091)))
+        s.settimeout(0.1)
+        deadline = time.ticks_add(time.ticks_ms(), _DISCOVER_MS)
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            if ota:
+                ota.poll()
+            if tick:
+                tick(None)
+            try:
+                data, src = s.recvfrom(64)
+            except OSError:
+                continue                     # timeout: keep listening
+            parts = data.split()
+            if len(parts) == 3 and parts[0] == _BEACON_MAGIC:
+                try:
+                    return (src[0], int(parts[2]))
+                except ValueError:
+                    pass                     # malformed port: keep listening
+    finally:
+        s.close()
+    return None
+
+
+def _connect(role, version, target):
     """Dial + HELLO. Returns a non-blocking socket, or raises OSError."""
-    addr = socket.getaddrinfo(secrets.ORCH_HOST, secrets.ORCH_PORT)[0][-1]
+    addr = socket.getaddrinfo(target[0], target[1])[0][-1]
     s = socket.socket()
     try:
         s.settimeout(4)
@@ -172,14 +219,25 @@ def run(role, version, handlers, tick=None):
         pass                       # port without hostname(); IP still works
     wlan = network.WLAN(network.STA_IF)
     ota = _make_ota()
+    # Explicit ORCH_HOST is a hard override; unset/empty means "discover".
+    static_host = getattr(secrets, "ORCH_HOST", None) or None
+    target = (static_host, getattr(secrets, "ORCH_PORT", 8090)) if static_host else None
+    fails = 0                      # consecutive dial failures → re-discover
     while True:
         if not _ensure_wifi(wlan):
             continue                       # _ensure_wifi already waited ~15 s
         _led(_AMBER)
+        if not static_host and (target is None or fails >= 3):
+            target = _discover(ota, tick)
+            fails = 0
+            if target is None:
+                continue                   # no beacon heard; recheck WiFi, retry
+            print("discovered orchestrator at %s:%d" % target)
         try:
-            sock = _connect(role, version)
+            sock = _connect(role, version, target)
         except OSError as e:
             print("link:", e)
+            fails += 1
             for _ in range(20):            # ~2 s backoff, OTA stays serviced
                 if ota:
                     ota.poll()
@@ -187,6 +245,7 @@ def run(role, version, handlers, tick=None):
                     tick(None)             # link down: no event sink
                 time.sleep_ms(100)
             continue
+        fails = 0
         _led(_GREEN)
         print("connected to orchestrator")
         try:
