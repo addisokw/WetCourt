@@ -329,6 +329,47 @@ async fn main() -> Result<()> {
     let maintenance = Arc::new(AtomicBool::new(false));
     let is_idle = Arc::new(AtomicBool::new(true));
 
+    // Swear-in lamp resync: the button boots dark and only animates on
+    // command, so whenever it (re)connects push the lamp state the FSM would
+    // have cued — the attract blink in Idle, dark otherwise (maintenance or
+    // mid-trial; a window's pulse cue will re-arrive on the next state edge).
+    // Mirrors the judge-face PERSONA replay above; covers boot via the mock
+    // driver's seeded DeviceConnected too.
+    {
+        let is_idle = is_idle.clone();
+        let maintenance = maintenance.clone();
+        let tx = maint_cmd_tx.clone();
+        let mut presence = display_bcast.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match presence.recv().await {
+                    Ok(DisplayMessage::Json(display::events::DisplayEvent::DeviceConnected {
+                        role,
+                        ..
+                    })) if role == "swear_in" => {
+                        let mode = if is_idle.load(std::sync::atomic::Ordering::Relaxed)
+                            && !maintenance.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            hardware::protocol::LedMode::Blink
+                        } else {
+                            hardware::protocol::LedMode::Off
+                        };
+                        let _ = tx
+                            .send(hardware::maintenance::MaintenanceCommand {
+                                target: hardware::maintenance::Role::SwearIn,
+                                cmd: hardware::HardwareCommand::Led(mode),
+                                reply: None,
+                            })
+                            .await;
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
     // HTTP client for the vision reverse-proxy. No global timeout — the MJPEG
     // feed is an infinite stream; a per-request timeout guards the /state calls.
     let vision_http = reqwest::Client::builder()

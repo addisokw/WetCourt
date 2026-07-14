@@ -122,7 +122,7 @@ Sent any time, not in reply to a command:
 
 | Line | Meaning |
 |---|---|
-| `BUTTON` | One debounced press of the defendant's arcade button (`swear-in` role). What a press *means* is the host's call, by trial state: from `Idle` it starts a trial; other states may treat it as a non-verbal acknowledgement or ignore it. The firmware rate-limits emission (≥ 250 ms apart) and drops presses while disconnected. |
+| `BUTTON` | One debounced press of the defendant's arcade button (`swear-in` role only; the host drops it from any other role). What a press *means* is the host's call, by trial state: from `Idle` it starts a trial; during an open plea/answer window it means "I'm done talking" and closes the window early (ignored while the countdown is paused on the lawyer phone); every other state ignores it. The firmware rate-limits emission (≥ 250 ms apart) and drops presses while disconnected. |
 
 `PING` is acknowledged with `OK PING` (not a separate `PONG`), so every command
 resolves through the same one-ack-per-command path; the host tolerates a stray

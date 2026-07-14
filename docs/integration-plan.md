@@ -230,13 +230,14 @@ lamp with `LED off|on|blink|pulse` so the light cues when pressing matters.
 Items 26–28 make the button start trials with a working lamp; 29–30 are the
 mid-trial acknowledgement layer and can ship later.
 
-**Status 2026-07-13:** 26, 27, and 31 are DONE (wire-verified end-to-end with
-a scripted fake device: handshake, presence, LED routing + acks, 400 on a bad
-mode, and `button_pressed` reaching `/ws` while maintenance blocked the trial
-start). The console also gets a `button_pressed` broadcast for every wire
-press (`DisplayEvent::ButtonPressed`), emitted from the TCP registry so
-bringup can see the switch even when the FSM ignores the event. Remaining:
-28 (FSM lamp cues), 29–30 (acknowledgements).
+**Status 2026-07-13: ALL DONE (26–31), hardware-verified.** The firmware and
+console tab were exercised on the real board; the FSM layer was then verified
+live against it too (resync blink on connect, press→trial start with the lamp
+going dark, `pulse` when the plea window opened, a mid-window press closing it
+2 s later via the flush grace, e-stop restoring the attract blink). Note when
+reading logs: `FlushingPlea` shares the `awaiting_plea` display name, so the
+press-close edge doesn't show as a transition line. Only the optional
+verdict-acknowledgement theatrics (the tail of item 30) remain a decision.
 
 26. ~~**Host role registration**~~ (S, **done**) — add `Role::SwearIn` to
     `hardware/maintenance.rs` (`as_str` → `swear_in`; `from_wire` accepts
@@ -245,31 +246,30 @@ bringup can see the switch even when the FSM ignores the event. Remaining:
 27. ~~**`LED` command plumbing**~~ (S, **done**) — `HardwareCommand::Led(LedMode)`
     in `hardware/protocol.rs` (serialises to `LED <mode>`), routed to
     `Role::SwearIn`. No calibration file — there's nothing to tune.
-28. **Lamp cues from the FSM** (M) — emit `LED` on state edges the way `FACE`
-    is emitted: `Idle` → `blink` (the attract "press me to stand trial"),
-    trial start → `off`, back to `blink` on return to Idle. Reuse the
-    device-reconnect resync hook (the one that replays `PERSONA` to a
-    rebooting face) so a power-cycled button comes back with the right lamp —
-    the firmware boots dark and stays dark until commanded. Trial start
-    already works with zero host changes beyond item 26: `tcp.rs:350` maps
-    `BUTTON` → `Event::OperatorStart` and `(Idle, OperatorStart)` starts a
-    trial — the button is exactly the console start button.
-29. **A distinct `Event::DefendantButton`** (S, prerequisite for 30) — don't
-    reuse `OperatorStart` for mid-trial presses: `mod.rs:157` calls
-    `begin_draft()` on *every* `OperatorStart` regardless of state, so a
-    mid-trial press would open a fresh casebook draft over the live one. Map
-    the swear-in connection's `BUTTON` to `DefendantButton`, give it an
-    `(Idle, DefendantButton)` arm identical to `OperatorStart`, and let every
-    other state ignore it by default. (Also closes today's quirk where a
-    `BUTTON` line from *any* device role acts as a start trigger.)
-30. **Non-verbal acknowledgements** (M, decision first) — proposal: in
-    `AwaitingPlea` and `CrossAwaitingAnswer` a press means "I'm done
-    talking" and closes the answer window early (same path as the deadline
-    expiring, into `FlushingPlea`/`CrossFlushingAnswer`); lamp `pulse` while
-    those windows are open cues that the button is live. Optionally later: a
-    press during `PronouncingVerdict`/sentence as a defiant "acknowledged."
-    Each state that consumes a press gets its lamp cue in the same
-    transition, so light and meaning can't drift apart.
+28. ~~**Lamp cues from the FSM**~~ (M, **done**) — `LED` emitted on state
+    edges: Idle entry (trial end / e-stop / maintenance exit) → `blink`,
+    trial start + maintenance entry → `off`, plea/answer window open →
+    `pulse`, window close (any path) → `off`. A dedicated resync watcher in
+    `main.rs` (mirroring the face's `PERSONA` replay) pushes blink/off on
+    swear-in (re)connect keyed off the `is_idle`/`maintenance` mirrors. In
+    the router, `LED` routes as a *cosmetic* verb: fire-and-forget, silently
+    skipped when the board is absent — its ack can never steal gating-ack
+    timing (the Lights lesson).
+29. ~~**A distinct `Event::DefendantButton`**~~ (S, **done**) — the swear-in
+    connection's `BUTTON` maps to `DefendantButton`; a `BUTTON` from any
+    other role is warned and dropped. `(Idle, DefendantButton)` starts a
+    trial exactly like `OperatorStart`; every other state ignores it unless
+    listed in 30. The casebook draft now opens on the actual
+    Idle→GeneratingCharge *edge* rather than on every start event, so no
+    press (or stray console start) can clobber a live draft.
+30. **Non-verbal acknowledgements** (M, core **done**) — in `AwaitingPlea`
+    and `CrossAwaitingAnswer` a press means "I'm done talking" and closes
+    the window early (same path as the deadline expiring, into
+    `FlushingPlea`/`CrossFlushingAnswer`); ignored while the clock is paused
+    on the lawyer phone (consulting counsel must not skip the frozen
+    window). Lamp `pulse` cues the open window in the same transitions.
+    Still open (decision): a press during `PronouncingVerdict`/sentence as a
+    defiant "acknowledged" + any lamp theatrics around the sentence.
 31. ~~**Console: swear-in maintenance strip**~~ (S, **done**) — the `Swear-in`
     hardware tab: LED mode test buttons with ack chips, Ping, a live press
     indicator fed by the `button_pressed` broadcast (flashes + counts on every
@@ -287,7 +287,7 @@ bringup can see the switch even when the FSM ignores the event. Remaining:
 - **Do "Fire now" / manual arm also get maintenance-gated** (Phase 0 item 3)?
 - **Cross-exam ring timing** (Phase 3 item 13) — ring as the answer window
   opens, or as the question is being asked?
-- **Which trial states consume a defendant button press** (Phase 6 item 30) —
-  the "done talking" early-close is the safe core; decide whether a
-  verdict-acknowledgement press (and any lamp theatrics around the sentence)
-  is wanted.
+- **Verdict-acknowledgement press** (Phase 6 item 30 tail) — the "done
+  talking" early-close shipped; decide whether a press during
+  `PronouncingVerdict`/sentence should mean anything (and any lamp theatrics
+  around the sentence).

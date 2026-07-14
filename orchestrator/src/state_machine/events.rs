@@ -3,6 +3,11 @@ use super::states::Verdict;
 #[derive(Debug)]
 pub enum Event {
     OperatorStart,
+    /// The defendant pressed the swear-in arcade button (a wire `BUTTON`).
+    /// From `Idle` it starts a trial exactly like `OperatorStart`; during an
+    /// open plea/answer window it means "I'm done talking" and closes the
+    /// window early. Every other state ignores it.
+    DefendantButton,
     OperatorEmergencyStop,
 
     /// Enter the maintenance/test plane (only honoured from `Idle`).

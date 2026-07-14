@@ -133,6 +133,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ws", get(ws_handler))
         .route("/ws/view", get(view_ws_handler))
         .route("/operator/start", post(operator_start))
+        .route("/operator/defendant_press", post(operator_defendant_press))
         .route("/operator/estop", post(operator_estop))
         .route("/operator/personas", get(list_personas))
         .route("/operator/voices", get(list_voices))
@@ -188,6 +189,17 @@ async fn health() -> &'static str { "ok" }
 async fn operator_start(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     info!("operator: start");
     if s.event_tx.send(Event::OperatorStart).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
+    }
+    (StatusCode::NO_CONTENT, "")
+}
+
+/// Console "simulate press": inject exactly the event a wire `BUTTON` from the
+/// swear-in board produces, so the start / done-talking paths are testable
+/// without the physical button.
+async fn operator_defendant_press(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    info!("operator: simulated defendant press");
+    if s.event_tx.send(Event::DefendantButton).await.is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
     }
     (StatusCode::NO_CONTENT, "")

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::display::events::DisplayEvent;
 use crate::fallbacks;
-use crate::hardware::protocol::{FacePhase, HardwareCommand};
+use crate::hardware::protocol::{FacePhase, HardwareCommand, LedMode};
 
 use super::commands::{Command, TargetingCue};
 use super::events::Event;
@@ -46,12 +46,15 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                 Command::Display(DisplayEvent::Reset),
                 Command::Display(DisplayEvent::Idle),
                 Command::Hardware(HardwareCommand::Face(FacePhase::Idle)),
+                Command::Hardware(HardwareCommand::Led(LedMode::Blink)),
             ],
         );
     }
 
     match (state, event) {
-        (Idle, OperatorStart) => (
+        // The defendant's button is the start trigger too — identical to the
+        // operator's start.
+        (Idle, OperatorStart) | (Idle, DefendantButton) => (
             GeneratingCharge { started_at: Instant::now() },
             vec![
                 Command::GenerateCharge,
@@ -61,13 +64,21 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                     deadline_ms: cfg.inference.charge_timeout_secs * 1000,
                 }),
                 Command::Hardware(HardwareCommand::Face(FacePhase::Deliberating)),
+                // Trial underway: the lamp goes dark until a press means
+                // something again (the plea window's pulse).
+                Command::Hardware(HardwareCommand::Led(LedMode::Off)),
             ],
         ),
         // Enter the maintenance/test plane — only from Idle. The atomic mirror
         // in `Runtime::handle` opens the direct-command REST gate on entry.
+        // The lamp goes dark: trials are blocked, so its attract blink would
+        // be a lie (the console tab can drive it directly from here).
         (Idle, EnterMaintenance) => (
             Maintenance,
-            vec![Command::Display(DisplayEvent::Maintenance { active: true })],
+            vec![
+                Command::Display(DisplayEvent::Maintenance { active: true }),
+                Command::Hardware(HardwareCommand::Led(LedMode::Off)),
+            ],
         ),
         (Idle, _) => (Idle, vec![]),
 
@@ -78,6 +89,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             vec![
                 Command::Display(DisplayEvent::Maintenance { active: false }),
                 Command::Display(DisplayEvent::Idle),
+                Command::Hardware(HardwareCommand::Led(LedMode::Blink)),
             ],
         ),
         (s @ Maintenance, _) => (s, vec![]),
@@ -143,6 +155,13 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         (AwaitingPlea { charge, deadline, paused_remaining: None }, Tick)
             if Instant::now() >= deadline =>
         {
+            begin_flushing_plea(charge, cfg)
+        }
+        // "I'm done talking" — the defendant's button closes the plea window
+        // early, down the same path as the deadline expiring. Ignored while
+        // the clock is paused on the lawyer phone (they're consulting, and
+        // the frozen countdown must not be skipped out from under them).
+        (AwaitingPlea { charge, paused_remaining: None, .. }, DefendantButton) => {
             begin_flushing_plea(charge, cfg)
         }
         (s @ AwaitingPlea { .. }, _) => (s, vec![]),
@@ -257,6 +276,11 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         ) if Instant::now() >= deadline => {
             begin_cross_flushing(charge, plea, question)
         }
+        // Same "done talking" early close as the plea window.
+        (
+            CrossAwaitingAnswer { charge, plea, question, paused_remaining: None, .. },
+            DefendantButton,
+        ) => begin_cross_flushing(charge, plea, question),
         (s @ CrossAwaitingAnswer { .. }, _) => (s, vec![]),
 
         (CrossFlushingAnswer { charge, plea, question, .. }, PleaAudioReceived(audio)) => {
@@ -336,6 +360,8 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                 vec![
                     Command::Display(DisplayEvent::Idle),
                     Command::Hardware(HardwareCommand::Face(FacePhase::Idle)),
+                    // Back to the attract blink: pressing starts the next trial.
+                    Command::Hardware(HardwareCommand::Led(LedMode::Blink)),
                 ],
             )
         }
@@ -378,6 +404,8 @@ fn begin_awaiting_plea(charge: String, cfg: &Config) -> (State, Vec<Command>) {
                 deadline_ms: cfg.trial.plea_window_secs * 1000,
             }),
             Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
+            // Breathing lamp: a press now means "I'm done talking".
+            Command::Hardware(HardwareCommand::Led(LedMode::Pulse)),
         ],
     )
 }
@@ -387,6 +415,7 @@ fn begin_transcribing(charge: String, audio: Vec<u8>, cfg: &Config) -> (State, V
         State::Transcribing { charge, audio: audio.clone(), started_at: Instant::now() },
         vec![
             Command::Display(DisplayEvent::StopPleaRecording),
+            Command::Hardware(HardwareCommand::Led(LedMode::Off)),
             Command::Display(DisplayEvent::Transcribing),
             Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "transcribing".into(),
@@ -404,7 +433,10 @@ fn begin_flushing_plea(charge: String, _cfg: &Config) -> (State, Vec<Command>) {
     let hard_deadline = Instant::now() + Duration::from_millis(PLEA_FLUSH_GRACE_MS);
     (
         State::FlushingPlea { charge, hard_deadline },
-        vec![Command::Display(DisplayEvent::StopPleaRecording)],
+        vec![
+            Command::Display(DisplayEvent::StopPleaRecording),
+            Command::Hardware(HardwareCommand::Led(LedMode::Off)),
+        ],
     )
 }
 
@@ -508,6 +540,8 @@ fn begin_cross_answer(charge: String, plea: String, question: String, cfg: &Conf
                 deadline_ms: window * 1000,
             }),
             Command::Hardware(HardwareCommand::Face(FacePhase::Listening)),
+            // Same "done talking" press cue as the plea window.
+            Command::Hardware(HardwareCommand::Led(LedMode::Pulse)),
         ],
     )
 }
@@ -516,7 +550,10 @@ fn begin_cross_flushing(charge: String, plea: String, question: String) -> (Stat
     let hard_deadline = Instant::now() + Duration::from_millis(PLEA_FLUSH_GRACE_MS);
     (
         State::CrossFlushingAnswer { charge, plea, question, hard_deadline },
-        vec![Command::Display(DisplayEvent::StopPleaRecording)],
+        vec![
+            Command::Display(DisplayEvent::StopPleaRecording),
+            Command::Hardware(HardwareCommand::Led(LedMode::Off)),
+        ],
     )
 }
 
@@ -531,6 +568,7 @@ fn begin_cross_transcribing(
         State::CrossTranscribing { charge, plea, question, audio: audio.clone(), started_at: Instant::now() },
         vec![
             Command::Display(DisplayEvent::StopPleaRecording),
+            Command::Hardware(HardwareCommand::Led(LedMode::Off)),
             Command::Display(DisplayEvent::Transcribing),
             Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "transcribing".into(),
@@ -696,6 +734,107 @@ mod tests {
         let (s, cmds) = step(State::Idle, Event::OperatorStart, &cfg, false);
         assert!(matches!(s, State::GeneratingCharge { .. }));
         assert!(matches!(cmds[0], Command::GenerateCharge));
+    }
+
+    #[test]
+    fn defendant_button_starts_trial_from_idle_and_darkens_the_lamp() {
+        let cfg = test_cfg();
+        let (s, cmds) = step(State::Idle, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::GeneratingCharge { .. }));
+        assert!(matches!(cmds[0], Command::GenerateCharge));
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Off)))));
+    }
+
+    #[test]
+    fn defendant_button_closes_the_plea_window_early() {
+        let cfg = test_cfg();
+        let s = State::AwaitingPlea {
+            charge: "c".into(),
+            deadline: Instant::now() + Duration::from_secs(60), // nowhere near expiry
+            paused_remaining: None,
+        };
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::FlushingPlea { .. }));
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Display(DisplayEvent::StopPleaRecording))));
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Off)))));
+    }
+
+    #[test]
+    fn defendant_button_ignored_while_paused_on_the_lawyer_phone() {
+        let cfg = test_cfg();
+        let s = State::AwaitingPlea {
+            charge: "c".into(),
+            deadline: Instant::now() + Duration::from_secs(60),
+            paused_remaining: Some(Duration::from_secs(30)),
+        };
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::AwaitingPlea { paused_remaining: Some(_), .. }));
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn defendant_button_closes_the_cross_answer_window_early() {
+        let cfg = test_cfg();
+        let s = State::CrossAwaitingAnswer {
+            charge: "c".into(),
+            plea: "p".into(),
+            question: "q?".into(),
+            deadline: Instant::now() + Duration::from_secs(60),
+            paused_remaining: None,
+        };
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::CrossFlushingAnswer { .. }));
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Display(DisplayEvent::StopPleaRecording))));
+    }
+
+    #[test]
+    fn defendant_button_ignored_outside_its_states() {
+        let cfg = test_cfg();
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::Deliberating { .. }));
+        assert!(cmds.is_empty());
+
+        let (s, cmds) = step(State::Maintenance, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::Maintenance));
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn lamp_cues_track_the_idle_and_window_edges() {
+        let cfg = test_cfg();
+        // Plea window opening cues the "done talking" pulse.
+        let (_s, cmds) = begin_awaiting_plea("c".into(), &cfg);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Pulse)))));
+        let (_s, cmds) = begin_cross_answer("c".into(), "p".into(), "q?".into(), &cfg);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Pulse)))));
+        // E-stop and maintenance exit land in Idle with the attract blink.
+        let mid = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
+        let (_s, cmds) = step(mid, Event::OperatorEmergencyStop, &cfg, false);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Blink)))));
+        let (_s, cmds) = step(State::Maintenance, Event::ExitMaintenance, &cfg, false);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Blink)))));
+        // Entering maintenance darkens the lamp (trials are blocked).
+        let (_s, cmds) = step(State::Idle, Event::EnterMaintenance, &cfg, false);
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Off)))));
     }
 
     #[test]

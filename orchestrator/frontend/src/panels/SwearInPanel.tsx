@@ -39,14 +39,14 @@ export default function SwearInPanel() {
     void run(sendCommand('swear_in', { cmd: 'led', mode }));
   }
 
-  // Inject the same trial-start event a wire BUTTON produces, so the start
-  // path is testable without the physical button. NOTE: the FSM ignores it in
-  // maintenance mode; from live Idle it starts a real trial.
+  // Inject exactly the event a wire BUTTON produces (DefendantButton), so the
+  // start / done-talking paths are testable without the physical button. The
+  // FSM ignores it in maintenance mode; from live Idle it starts a real trial.
   async function simulatePress() {
     setSimStatus('');
     try {
-      const res = await fetch('/operator/start', { method: 'POST' });
-      setSimStatus(res.ok ? 'start event injected' : `failed: ${res.status}`);
+      const res = await fetch('/operator/defendant_press', { method: 'POST' });
+      setSimStatus(res.ok ? 'press injected' : `failed: ${res.status}`);
     } catch (e) {
       setSimStatus(`failed: ${String(e)}`);
     }
@@ -103,9 +103,10 @@ export default function SwearInPanel() {
           <Show when={simStatus()}><span class="muted small">{simStatus()}</span></Show>
         </div>
         <p class="muted small">
-          Simulate injects the same trial-start event as a real press (no
-          firmware involved). In maintenance mode the FSM ignores it; from
-          live Idle it starts a real trial.
+          Simulate injects the same event as a real press (no firmware
+          involved): from live Idle it starts a trial; during an open
+          plea/answer window it closes the window ("done talking"); in
+          maintenance mode the FSM ignores it.
         </p>
       </section>
     </div>

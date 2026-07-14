@@ -193,6 +193,14 @@ async fn router(
                             let _ = event_tx.send(Event::HardwareError(format!("no device: {line}"))).await;
                         }
                     },
+                    // Cosmetic verb (Led): fire-and-forget, and skipped silently when
+                    // the owner is absent — its ack (or a synthesized error) must never
+                    // become an FSM event that could steal gating-ack timing.
+                    RouteTarget::Cosmetic(role) => {
+                        if let Some(h) = table.get(&role) {
+                            let _ = h.tx.send(Outbound { line, sink: AckSink::None }).await;
+                        }
+                    }
                     // Ping is the not-guilty branch's only ack source; it is a local
                     // filler, never routed to a device. Ack it immediately.
                     RouteTarget::SynthAck => {
@@ -248,6 +256,9 @@ async fn publish(
 
 enum RouteTarget {
     Role(Role),
+    /// Cosmetic verb: fire-and-forget to the role if present, silently skipped
+    /// if absent — never produces an FSM ack/error event.
+    Cosmetic(Role),
     /// Ack locally without touching a device (trial `Ping` filler).
     SynthAck,
 }
@@ -270,7 +281,7 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         HardwareCommand::Face(_) | HardwareCommand::Persona(_) => {
             RouteTarget::Role(Role::JudgeFace)
         }
-        HardwareCommand::Led(_) => RouteTarget::Role(Role::SwearIn),
+        HardwareCommand::Led(_) => RouteTarget::Cosmetic(Role::SwearIn),
         HardwareCommand::Ping => RouteTarget::SynthAck,
     }
 }
@@ -399,13 +410,19 @@ async fn handle_connection(
                     None => warn!("tcp_hw: ack with empty queue from {addr}: {line}"),
                 },
                 Some(Inbound::Button) => {
-                    let _ = event_tx.send(Event::OperatorStart).await;
-                    // Console press indicator — sent for every wire press so
-                    // bringup can see the switch even when the FSM ignores the
-                    // event (maintenance mode, mid-trial).
-                    let _ = presence.send(DisplayMessage::Json(DisplayEvent::ButtonPressed {
-                        role: role.as_str().into(),
-                    }));
+                    // Only the swear-in role legitimately emits BUTTON; the FSM
+                    // decides what a press means in the current state.
+                    if role == Role::SwearIn {
+                        let _ = event_tx.send(Event::DefendantButton).await;
+                        // Console press indicator — sent for every wire press so
+                        // bringup can see the switch even when the FSM ignores
+                        // the event (maintenance mode, mid-trial).
+                        let _ = presence.send(DisplayMessage::Json(DisplayEvent::ButtonPressed {
+                            role: role.as_str().into(),
+                        }));
+                    } else {
+                        warn!("tcp_hw: ignoring BUTTON from non-swear-in role {}", role.as_str());
+                    }
                 }
                 None => break, // reader ended (EOF)
             },

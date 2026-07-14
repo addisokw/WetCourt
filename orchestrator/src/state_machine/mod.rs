@@ -141,7 +141,6 @@ impl Runtime {
     async fn handle(&mut self, ev: Event) {
         let prev_name = self.state.name();
         let interesting = !matches!(ev, Event::Tick);
-        let is_start = matches!(ev, Event::OperatorStart);
         let prev = std::mem::replace(&mut self.state, State::Idle);
         let cross_enabled = self.cross_enabled.load(Ordering::Relaxed);
         let (next, cmds) = transitions::step(prev, ev, &self.cfg, cross_enabled);
@@ -153,7 +152,11 @@ impl Runtime {
 
         // Keepsake/casebook: open a fresh draft on trial start, harvest the
         // trial's pieces as they pass, and finalize the moment sentence
-        // execution begins (the verdict is final by then).
+        // execution begins (the verdict is final by then). Keyed on the actual
+        // Idle→GeneratingCharge edge (not the start *event*) so a stray
+        // OperatorStart/DefendantButton in maintenance or mid-trial can never
+        // clobber the live draft.
+        let is_start = next.name() == "generating_charge" && prev_name != "generating_charge";
         if is_start {
             self.begin_draft().await;
         }
