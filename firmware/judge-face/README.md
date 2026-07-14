@@ -14,8 +14,9 @@ is commit `74330dc`.)
 
 The eye drifts its gaze vertically (the `judge-neck` pan/tilt mech that the
 panel is mounted on owns horizontal gaze), dilates its pupil with the
-defendant's voice level, darts faster while deliberating, strobes red on a
-guilty verdict and blooms green on an innocent one. Five judge personas
+defendant's voice level, darts faster while deliberating, slams red on a
+guilty verdict (three gavel-beat shocks settling into a smoldering ember)
+and blooms green on an innocent one. Five judge personas
 (palette + motion speed) are switchable at runtime.
 
 ## Files
@@ -89,7 +90,7 @@ With no orchestrator reachable (or `EYE_DEMO = 1`), it runs **demo mode**:
 cycles idle → listening → deliberating, rotates personas each cycle, and
 synthesizes a speech-like audio envelope — developable with zero
 infrastructure. The demo deliberately skips the verdict phases (the guilty
-strobe reads as a glitch out of context); exercise those by sending
+slams read as a fault out of context); exercise those by sending
 `FACE verdict:guilty` / `FACE verdict:innocent` from the host.
 
 ## Protocol
@@ -144,8 +145,10 @@ the displayio limits still stand):
 - **Gaze drifts vertically only**: the panel rides the `judge-neck` pan/tilt
   mech, which owns horizontal gaze; portrait width leaves no sideways room.
 - Iris **striations are static** per persona — no slow per-frame re-texturing.
-- Guilty **glitch** = whole-face ±2 px horizontal jitter + ~10 Hz red palette
-  strobe, not per-row shifts.
+- Guilty **slam & smolder** = three gavel-beat red palette slams (each with a
+  2 px downward jolt, ratcheting the pupil wider) settling into an ember
+  pulse with occasional ±1 px trembles — replaced the original ~10 Hz strobe,
+  which read poorly on the panel.
 - Innocent **bloom** = palette lerp toward green easing out over 2 s
   (displayio has no alpha blending).
 - `deliberating` (faster gaze darts) is the brief's *recommended extension*,

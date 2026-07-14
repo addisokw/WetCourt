@@ -16,12 +16,13 @@
 # No eyelids/blink: the prototype's lid bars read as the frame shrinking on
 # the physical portrait panel, so they're removed (operator preference).
 #
-# Verdict effects don't touch the bitmaps at all: guilty strobes by lerping
-# every palette entry toward red at ~10 Hz plus a whole-face horizontal
-# jitter (stands in for the prototype's per-row glitch shifts); innocent
-# blooms green via the same palette lerp, easing out over ~2 s. displayio
-# has no alpha blending, so palette recolor is the cheap faithful substitute
-# for the prototype's full-frame overlays.
+# Verdict effects don't touch the bitmaps at all: guilty is a "slam &
+# smolder" — a cold pinprick beat, then three gavel-beat red slams (palette
+# lerp spike + downward jolt, each ratcheting the pupil wider), settling
+# into an indefinite ember pulse; innocent blooms green via the same
+# palette lerp, easing out over ~2 s. displayio has no alpha blending, so
+# palette recolor is the cheap faithful substitute for the prototype's
+# full-frame overlays.
 #
 # Geometry is parameterized from the display (works portrait or landscape).
 # Deviation from the prototype: iris striations are static per persona
@@ -48,8 +49,16 @@ _P_COUNT = 64                     # bitmap value_count (>=59, power of two)
 _BRIGHT = (0.30, 0.55, 0.80, 1.00)  # limbal-ring brightness quantization
 
 _BG = (0, 0, 0)                   # off pixels stay truly off (was (8,6,8))
-_RED = (255, 36, 18)              # guilty strobe target
+_RED = (255, 36, 18)              # guilty slam/ember target
 _GREEN = (46, 220, 96)            # innocent bloom target
+
+# Guilty "slam & smolder" choreography (seconds since phase entry): a cold
+# pinprick beat, then a red slam on each gavel-beat time below — every slam
+# jolts the face down and ratchets the pupil wider — and from _SMOLDER_AT
+# onward an ember pulse that holds until the host resets the phase.
+_SLAMS = (0.25, 0.85, 1.45)
+_SLAM_JOLT_SECS = 0.08            # frames this close after a slam shove down
+_SMOLDER_AT = 1.9
 
 # Catchlight: 2x2 specular blob, resting at (-3,-3) from the eye center.
 _CATCH_BASE = -3.0
@@ -170,6 +179,7 @@ class EyeFace:
         if not phase.startswith("verdict"):
             self._apply_blend((0, 0, 0), 0.0)
             self.group.x = 0
+            self.group.y = 0
 
     def set_audio(self, level):
         self._a_target = min(1.0, max(0.0, level))
@@ -227,7 +237,16 @@ class EyeFace:
             # Quicker, irregular wandering (3..7 px) — thinking hard.
             dil_f = 3.0 + snoise(t * 1.9, self._seed * 0.31 + 2.4) * 4.0
         elif phase == "verdict:guilty":
-            dil_f = 8.0                     # sharp full dilation for the strobe
+            # Slam & smolder: pinprick shock first, each gavel beat ratchets
+            # the pupil wider (3 → 8) with a kick that eases back, then a
+            # full-bore hold with a 7↔8 flicker.
+            e = self._phase_elapsed
+            passed = sum(1 for s in _SLAMS if e >= s)
+            dil_f = 3.0 + passed * (5.0 / len(_SLAMS))
+            if passed and e < _SMOLDER_AT:
+                dil_f += 1.5 * math.exp(-(e - _SLAMS[passed - 1]) * 6.0)
+            elif e >= _SMOLDER_AT:
+                dil_f = 7.0 + snoise(t * 1.1, self._seed * 0.17 + 6.6)
         else:                               # verdict:innocent
             # Full dilation settling back as the green bloom eases (~2 s).
             dil_f = 8.0 - min(1.0, self._phase_elapsed / 2.0) * 4.0
@@ -260,9 +279,28 @@ class EyeFace:
         # 4. Verdict overrides (palette recolor + jitter). (No blink/lids —
         #    see header note.)
         if phase == "verdict:guilty":
-            on = (self._phase_elapsed * 10.0) % 1.0 < 0.5   # ~10 Hz strobe
-            self._apply_blend(_RED, 0.85 if on else 0.0)
-            self.group.x = random.randint(-2, 2) if on else 0
+            # Slam & smolder (replaces the old 10 Hz strobe, which read as a
+            # glitch): a cold red tint while the pupil pin-pricks, then each
+            # gavel beat slams the face deep red with a downward jolt and
+            # decays fast, and after the last beat the red eases into a slow
+            # ember pulse with an occasional micro-tremble.
+            e = self._phase_elapsed
+            f = 0.15
+            jolt = 0
+            for s in _SLAMS:
+                if e >= s:
+                    f = max(f, 0.92 * math.exp(-(e - s) * 5.0))
+                    if e - s < _SLAM_JOLT_SECS:
+                        jolt = 2
+            if e >= _SMOLDER_AT:
+                ember = 0.62 + 0.16 * math.sin((e - _SMOLDER_AT) * 2.6)
+                f = max(f, ember * min(1.0, (e - _SMOLDER_AT) / 0.6))
+            # Quantize so _apply_blend's same-value cache skips most of the
+            # 64-entry palette rewrites during the slow ember drift.
+            self._apply_blend(_RED, int(f * 50) / 50.0)
+            self.group.y = jolt
+            tremble = e >= _SMOLDER_AT and snoise(t * 3.1, self._seed * 0.41 + 8.8) > 0.82
+            self.group.x = random.randint(-1, 1) if tremble else 0
         elif phase == "verdict:innocent":
             f = max(0.0, 1.0 - self._phase_elapsed / 2.0) * 0.75
             self._apply_blend(_GREEN, f)

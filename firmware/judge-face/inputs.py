@@ -98,9 +98,9 @@ _EAGAIN = (11, 35, 110, 116)  # lwIP / BSD spellings of "no data yet"
 
 
 class DemoSource:
-    # No verdict phases here: the guilty strobe is a deliberate rapid red
-    # flash (synced to the squirt when the host commands it) and reads as a
-    # glitch when the idle demo rehearses it. Trigger verdicts via FACE.
+    # No verdict phases here: the guilty slam-and-smolder is a deliberate
+    # shock (synced to the squirt when the host commands it) and reads as a
+    # fault when the idle demo rehearses it. Trigger verdicts via FACE.
     _SCRIPT = (("idle", 6.0), ("listening", 9.0), ("deliberating", 5.0))
 
     def __init__(self):
