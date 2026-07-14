@@ -222,9 +222,28 @@ impl Builder {
     }
 
     pub fn line(&mut self, s: &str) -> &mut Self {
+        // In flip mode a segment must be at most one physical line: build()
+        // reverses whole segments under per-line rotation, so a line the
+        // printer auto-wraps would read bottom-half-first on the flipped
+        // paper. Pre-wrap over-width text and close one segment per chunk.
+        if self.flip && s.len() > self.line_cols() {
+            for chunk in crate::text::wrap(s, self.line_cols()) {
+                self.text(&chunk);
+                self.content(&[LF]);
+            }
+            return self;
+        }
         self.text(s);
         self.content(&[LF]);
         self
+    }
+
+    /// Characters that fit on one physical line under the current style
+    /// (font cell width × GS ! width magnification).
+    fn line_cols(&self) -> usize {
+        let per = if self.cur.font == Font::B as u8 { 9 } else { 12 };
+        let mult = ((self.cur.size >> 4) & 0x07) as usize + 1;
+        (self.width_dots as usize / (per * mult)).max(1)
     }
 
     pub fn feed(&mut self, lines: u8) -> &mut Self {
@@ -529,6 +548,28 @@ mod tests {
         // The feed(2) sits at the front of the content (visual bottom margin).
         let feed = out.windows(3).position(|w| w == [ESC, b'd', 2]).unwrap();
         assert!(feed < second);
+    }
+
+    #[test]
+    fn flip_prewraps_overwidth_lines_so_halves_read_in_order() {
+        // 60 dots / 12 = 5 cols in Font A: "aaa bbb" must become two
+        // segments, so the reversed replay prints "bbb" first and the
+        // flipped paper reads "aaa" then "bbb". Unsplit, the printer would
+        // auto-wrap inside one segment and the halves would read swapped.
+        let mut b = Builder::new().with_width(60).with_flip(true);
+        b.init();
+        b.line("aaa bbb");
+        let out = b.build();
+        let a = out.windows(4).position(|w| w == b"aaa\n").unwrap();
+        let bb = out.windows(4).position(|w| w == b"bbb\n").unwrap();
+        assert!(bb < a, "second physical line must print first under flip");
+
+        // Width doubling halves the columns: 4 chars at size(2,_) on 96 dots
+        // (96 / (12*2) = 4 cols) still fits unsplit.
+        let mut b = Builder::new().with_width(96).with_flip(true);
+        b.size(2, 2).line("wxyz");
+        let out = b.build();
+        assert!(out.windows(5).any(|w| w == b"wxyz\n"), "exact-fit line stays whole");
     }
 
     #[test]
