@@ -1,0 +1,3 @@
+# Local network config + WiFi credentials — never publish to the repo.
+# Copy secrets.example.py to secrets.py and fill it in.
+secrets.py

@@ -5,9 +5,14 @@
 # commands, acking exactly once per command (see ../../protocol/README.md).
 # The role name and its verb handlers come from each board's main.py.
 #
-# SHARED by all the MicroPython boards (judge-neck, turret, squirt, gavel):
-# this file lives once here in firmware/micropython/ and every board's
-# deploy.sh copies it onto the device — edit it here, not per board.
+# SHARED by all the MicroPython boards (judge-neck, turret, squirt, gavel,
+# swear-in): this file lives once here in firmware/micropython/ and every
+# board's deploy.sh copies it onto the device — edit it here, not per board.
+#
+# Boards with local inputs/outputs (the swear-in button) pass run(..., tick=fn):
+# tick(send) is called continuously — send is a line-sender while the link is
+# up, None while it is down — so firmware can scan inputs, animate LEDs, and
+# emit unsolicited events (e.g. "BUTTON") without owning the serve loop.
 #
 # Status RGB LED (NanoC6 onboard WS2812):
 #   red   = WiFi down / associating
@@ -99,7 +104,7 @@ def _connect(role, version):
     return s
 
 
-def _serve(sock, wlan, handlers, ota):
+def _serve(sock, wlan, handlers, ota, tick):
     """Service the link until it drops (always exits by raising OSError)."""
     buf = bytearray()
 
@@ -134,6 +139,8 @@ def _serve(sock, wlan, handlers, ota):
             if ota:
                 ota.poll()
             time.sleep_ms(10)
+        if tick:
+            tick(send)                                   # link up: may emit events
         now = time.ticks_ms()
         if time.ticks_diff(now, wifi_check) > 2000:
             wifi_check = now
@@ -151,11 +158,13 @@ def _make_ota():
         return None
 
 
-def run(role, version, handlers):
+def run(role, version, handlers, tick=None):
     """Run forever: WiFi -> dial -> HELLO -> serve, reconnecting on failure.
 
     The OTA listener is polled at every idle point WiFi allows, so firmware
-    can be pushed even while the orchestrator is down.
+    can be pushed even while the orchestrator is down. `tick(send)`, if given,
+    is called at the same points: send is live while connected, None while
+    down (events have nowhere to go; local outputs should show "not ready").
     """
     try:
         network.hostname(role)     # mDNS: the board answers <role>.local
@@ -174,12 +183,14 @@ def run(role, version, handlers):
             for _ in range(20):            # ~2 s backoff, OTA stays serviced
                 if ota:
                     ota.poll()
+                if tick:
+                    tick(None)             # link down: no event sink
                 time.sleep_ms(100)
             continue
         _led(_GREEN)
         print("connected to orchestrator")
         try:
-            _serve(sock, wlan, handlers, ota)
+            _serve(sock, wlan, handlers, ota, tick)
         except OSError as e:
             print("link dropped:", e)
         try:

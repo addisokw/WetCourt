@@ -27,9 +27,10 @@ firmware and microcontroller, plus a non-MCU vision process:
   (`vision/`) for person-tracking and a manual-aim feed.
 - **Gavel** — a NanoC6 driving a servo-actuated gavel (verdicts, and "order in
   the court").
-- **Swear-in object** *(future, not started)* — a capacitive swear-in object on
-  its own micro that triggers the start of a trial (and possibly oath-presence
-  sensing later).
+- **Swear-in button** — the defendant's arcade button (built-in lamp) on its
+  own NanoC6: a press starts the trial or serves as a non-verbal
+  acknowledgement; the host drives the lamp (`LED`) to cue when a press means
+  something.
 - More to come, each as an independent firmware set.
 
 Two things are intentionally **out of scope** for now:
@@ -62,7 +63,7 @@ WetCourt/
 │   ├── gavel/             #   M5 NanoC6 (esp32c6): servo gavel
 │   ├── turret/            #   M5 NanoC6 (esp32c6): pan/tilt servos — AIM
 │   ├── squirt/            #   M5 NanoC6 (esp32c6): firing relay — FIRE
-│   ├── swear-in/          #   (future) capacitive swear-in object: emits the start trigger
+│   ├── swear-in/          #   M5 NanoC6 (esp32c6): defendant's arcade button — LED; emits BUTTON
 │   └── README.md          #   board map: subsystem → board → MCU → verbs owned
 ├── vision/                # non-MCU host process: turret camera person-tracking + aim feed
 ├── protocol/              # language-neutral device⇄orchestrator wire spec (versioned)
@@ -85,7 +86,7 @@ hardware = a new sibling dir + one registry entry + a role in the spec.
 | Gavel | M5Stack NanoC6 (esp32c6) | `GAVEL` | `firmware/gavel/` |
 | Turret (aim) | M5Stack NanoC6 (esp32c6) + camera | turret `AIM`; tracking | `firmware/turret/` + `vision/` |
 | Squirt (fire) | M5Stack NanoC6 (esp32c6) | `FIRE` | `firmware/squirt/` |
-| Swear-in object *(future)* | TBD micro | `BUTTON` (start trigger) | `firmware/swear-in/` |
+| Swear-in button | M5Stack NanoC6 (esp32c6) | `LED` (emits `BUTTON`) | `firmware/swear-in/` |
 
 `LIGHTS` is deferred (no owner); e-stop is operator-panel + hardware power, not
 a device.
@@ -132,5 +133,7 @@ Nothing above is big-bang; each step is independent and tied to a real need.
 
 ## Open items (need your call)
 
-- **Swear-in object micro** — board choice, and whether it also does oath /
-  presence sensing (it currently only owns the start trigger). Not started.
+- **Swear-in button semantics** — board is settled (NanoC6, arcade button on
+  G1 + lamp on G2; firmware in `firmware/swear-in/`). Open: which trial states
+  treat a press as a non-verbal acknowledgement (vs. ignore it), and the
+  per-state lamp cue map.

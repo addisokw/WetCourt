@@ -52,7 +52,7 @@ the table below (`judge-neck`); the host also accepts the underscore form
 | `gavel` | servo gavel | `GAVEL`, `GJOG`, `PING` |
 | `turret` | squirt-gun pan/tilt aim | `AIM`, `PING` |
 | `squirt` | squirt-gun firing relay | `FIRE`, `PING` |
-| `swear-in` *(future)* | capacitive start trigger | `PING` (emits `BUTTON`) |
+| `swear-in` | defendant's arcade button (start trigger + non-verbal acks) | `LED`, `PING` (emits `BUTTON`) |
 
 Two subsystems are split across two boards each. `turret` and `squirt`: the
 servo board claims the NanoC6's only I2C-capable Grove pins for pan/tilt,
@@ -79,6 +79,7 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | `AUDIO <level>` | judge-face | Live mic envelope, `0.0`–`1.0`; stream at ~20–30 Hz while `listening` (drives pupil dilation). Acked like any command. |
 | `PERSONA <name>` | judge-face | Switch the judge's visual persona (see vocab). |
 | `PANEL <pattern>` | judge-face | *Legacy* face animation (see vocab); kept while the host migrates to `FACE`. |
+| `LED <mode>` | swear-in | Drive the arcade button's built-in lamp (see vocab) — the light cues the defendant when a press means something. |
 | `LIGHTS <state>` | *(retired)* | Booth lighting never got a device owner; the orchestrator no longer emits it. Reintroduce verb + emissions together with a splash-lights device. |
 | `PING` | any | Keepalive; acknowledged with `OK PING`, like any other command. |
 
@@ -91,6 +92,10 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 - `PANEL <pattern>` *(legacy)*: `idle` · `thinking` · `verdict`. The firmware
   maps these onto `FACE` phases: `idle`→`idle`, `thinking`→`deliberating`,
   `verdict`→`verdict:guilty`.
+- `LED <mode>`: `off` · `on` · `blink` (attract flash — "press me") ·
+  `pulse` (slow breathe — armed / acknowledgement window open). The firmware
+  additionally flashes the lamp briefly on every press as local feedback, and
+  forces it dark while its orchestrator link is down.
 
 `PANEL` mirrors the orchestrator's `PanelPattern` — extend in both places
 together. The trial FSM now drives the face through
@@ -117,7 +122,7 @@ Sent any time, not in reply to a command:
 
 | Line | Meaning |
 |---|---|
-| `BUTTON` | Start trigger (capacitive swear-in object) → begins a trial. |
+| `BUTTON` | One debounced press of the defendant's arcade button (`swear-in` role). What a press *means* is the host's call, by trial state: from `Idle` it starts a trial; other states may treat it as a non-verbal acknowledgement or ignore it. The firmware rate-limits emission (≥ 250 ms apart) and drops presses while disconnected. |
 
 `PING` is acknowledged with `OK PING` (not a separate `PONG`), so every command
 resolves through the same one-ack-per-command path; the host tolerates a stray
