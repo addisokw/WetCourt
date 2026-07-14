@@ -121,7 +121,7 @@ impl HardwareDriver for TcpRegistry {
             reg_rx,
             event_tx.clone(),
             devices,
-            presence,
+            presence.clone(),
         ));
 
         loop {
@@ -135,10 +135,12 @@ impl HardwareDriver for TcpRegistry {
             let _ = socket.set_nodelay(true);
             let reg_tx = reg_tx.clone();
             let event_tx = event_tx.clone();
+            let presence = presence.clone();
             let ack_timeout = self.ack_timeout;
             tokio::spawn(async move {
                 if let Err(e) =
-                    handle_connection(socket, peer.to_string(), reg_tx, event_tx, ack_timeout).await
+                    handle_connection(socket, peer.to_string(), reg_tx, event_tx, presence, ack_timeout)
+                        .await
                 {
                     warn!("tcp_hw: connection {peer} ended: {e:#}");
                 }
@@ -268,6 +270,7 @@ fn role_for(cmd: &HardwareCommand) -> RouteTarget {
         HardwareCommand::Face(_) | HardwareCommand::Persona(_) => {
             RouteTarget::Role(Role::JudgeFace)
         }
+        HardwareCommand::Led(_) => RouteTarget::Role(Role::SwearIn),
         HardwareCommand::Ping => RouteTarget::SynthAck,
     }
 }
@@ -279,6 +282,7 @@ async fn handle_connection(
     addr: String,
     reg_tx: mpsc::Sender<RouterMsg>,
     event_tx: mpsc::Sender<Event>,
+    presence: broadcast::Sender<DisplayMessage>,
     ack_timeout: Duration,
 ) -> anyhow::Result<()> {
     let (read_half, mut write_half) = socket.into_split();
@@ -396,6 +400,12 @@ async fn handle_connection(
                 },
                 Some(Inbound::Button) => {
                     let _ = event_tx.send(Event::OperatorStart).await;
+                    // Console press indicator — sent for every wire press so
+                    // bringup can see the switch even when the FSM ignores the
+                    // event (maintenance mode, mid-trial).
+                    let _ = presence.send(DisplayMessage::Json(DisplayEvent::ButtonPressed {
+                        role: role.as_str().into(),
+                    }));
                 }
                 None => break, // reader ended (EOF)
             },

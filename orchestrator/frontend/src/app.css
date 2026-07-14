@@ -971,6 +971,34 @@ button.plea.recording:hover { background: #8b2326; }
 }
 .fire-btn:hover, .gavel-btn:hover { background: #5a2629; }
 
+/* Swear-in: last-commanded lamp mode + the live wire-BUTTON press dot. */
+.panel-card .btn-row button.active {
+  background: rgba(31, 111, 235, 0.2);
+  border-color: #58a6ff;
+  color: #fff;
+}
+.press-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+.press-indicator .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #484f58;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.press-indicator.lit { color: #56d364; }
+.press-indicator.lit .dot {
+  background: #56d364;
+  box-shadow: 0 0 10px #56d364;
+  transition: none;
+}
+
 .ack-chip {
   font-size: 0.78rem;
   padding: 0.2rem 0.55rem;

@@ -22,7 +22,7 @@ use crate::calibration::{Calibration, CalibrationRegistry};
 use crate::config::InferenceConfig;
 use crate::crimes::{Crime, CrimeStore};
 use crate::hardware::maintenance::{DeviceInfo, HwAckResult, MaintenanceCommand, Role};
-use crate::hardware::protocol::{HardwareCommand, PanelPattern};
+use crate::hardware::protocol::{HardwareCommand, LedMode, PanelPattern};
 use crate::inference::client::LlmClient;
 use crate::personas::{verdict_parse, Persona, PersonaRegistry};
 use crate::state_machine::{Command, Event};
@@ -282,6 +282,8 @@ enum CmdSpec {
     GavelJog { us: i32 },
     Aim { pan: f32, tilt: f32 },
     Panel { pattern: String },
+    /// Drive the swear-in button's lamp (`off`/`on`/`blink`/`pulse`).
+    Led { mode: String },
     Ping,
 }
 
@@ -334,6 +336,13 @@ async fn maintenance_command(
             strikes,
         },
         CmdSpec::GavelJog { us } => HardwareCommand::GavelJog(us),
+        CmdSpec::Led { mode } => match LedMode::from_str(&mode) {
+            Some(m) => HardwareCommand::Led(m),
+            None => {
+                return (StatusCode::BAD_REQUEST, format!("unknown led mode '{mode}'"))
+                    .into_response()
+            }
+        },
         CmdSpec::Ping => HardwareCommand::Ping,
         CmdSpec::Panel { pattern } => match pattern.as_str() {
             "idle" => HardwareCommand::Panel(PanelPattern::Idle),

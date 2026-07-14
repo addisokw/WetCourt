@@ -79,6 +79,11 @@ pub enum DisplayEvent {
     DeviceConnected { role: String, addr: String },
     /// A device's connection dropped.
     DeviceDisconnected { role: String },
+    /// A wire `BUTTON` press arrived (the defendant's swear-in button).
+    /// Surfaced to the console as a live press indicator — emitted for every
+    /// press regardless of trial state, so bringup can see the switch work
+    /// even while the FSM ignores the event (e.g. in maintenance mode).
+    ButtonPressed { role: String },
     /// Maintenance mode entered/left — confirms the FSM transition to the
     /// console (whose direct-control tabs gate on it).
     Maintenance { active: bool },

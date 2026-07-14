@@ -45,6 +45,39 @@ impl FacePhase {
     }
 }
 
+/// Lamp animation for the swear-in button (`LED <mode>` on the wire). The
+/// light is the defendant's cue for when a press means something: `Blink` is
+/// the "press me" attract, `Pulse` a breathing "acknowledgement window open".
+#[derive(Debug, Clone)]
+pub enum LedMode {
+    Off,
+    On,
+    Blink,
+    Pulse,
+}
+impl fmt::Display for LedMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            LedMode::Off => "off",
+            LedMode::On => "on",
+            LedMode::Blink => "blink",
+            LedMode::Pulse => "pulse",
+        })
+    }
+}
+impl LedMode {
+    /// Parse the console's mode string (the wire vocabulary).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "off" => Some(LedMode::Off),
+            "on" => Some(LedMode::On),
+            "blink" => Some(LedMode::Blink),
+            "pulse" => Some(LedMode::Pulse),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum HardwareCommand {
     Fire(u32),
@@ -83,6 +116,8 @@ pub enum HardwareCommand {
     /// `firmware/judge-face/personas.py`, carried by the orchestrator persona's
     /// `face_persona` field — not the orchestrator persona id).
     Persona(String),
+    /// Drive the swear-in button's lamp — the defendant's "press me" cue.
+    Led(LedMode),
     Ping,
 }
 
@@ -108,6 +143,7 @@ impl HardwareCommand {
             HardwareCommand::Panel(p) => format!("PANEL {p}"),
             HardwareCommand::Face(p) => format!("FACE {p}"),
             HardwareCommand::Persona(slug) => format!("PERSONA {slug}"),
+            HardwareCommand::Led(mode) => format!("LED {mode}"),
             HardwareCommand::Ping => "PING".into(),
         }
     }
@@ -155,5 +191,19 @@ mod tests {
     #[test]
     fn persona_serialises_slug() {
         assert_eq!(HardwareCommand::Persona("cosmic".into()).to_line(), "PERSONA cosmic");
+    }
+
+    #[test]
+    fn led_uses_firmware_vocabulary() {
+        assert_eq!(HardwareCommand::Led(LedMode::Blink).to_line(), "LED blink");
+        assert_eq!(HardwareCommand::Led(LedMode::Off).to_line(), "LED off");
+    }
+
+    #[test]
+    fn led_mode_round_trips_the_wire_vocab() {
+        for s in ["off", "on", "blink", "pulse"] {
+            assert_eq!(LedMode::from_str(s).unwrap().to_string(), s);
+        }
+        assert!(LedMode::from_str("strobe").is_none());
     }
 }

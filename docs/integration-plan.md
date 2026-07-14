@@ -222,6 +222,60 @@ pre-generated list/queue, so this phase is near-instant in practice.)
 already verified; the firmware README "not yet verified" notes are stale and
 can be cleaned up in the sweep.)
 
+## Phase 6 — Swear-in button joins the trial (M) *(added 2026-07-13)*
+
+The defendant's arcade button (NanoC6, role `swear-in`, firmware in
+`firmware/swear-in/`) — a press emits `BUTTON`; the host drives the button's
+lamp with `LED off|on|blink|pulse` so the light cues when pressing matters.
+Items 26–28 make the button start trials with a working lamp; 29–30 are the
+mid-trial acknowledgement layer and can ship later.
+
+**Status 2026-07-13:** 26, 27, and 31 are DONE (wire-verified end-to-end with
+a scripted fake device: handshake, presence, LED routing + acks, 400 on a bad
+mode, and `button_pressed` reaching `/ws` while maintenance blocked the trial
+start). The console also gets a `button_pressed` broadcast for every wire
+press (`DisplayEvent::ButtonPressed`), emitted from the TCP registry so
+bringup can see the switch even when the FSM ignores the event. Remaining:
+28 (FSM lamp cues), 29–30 (acknowledgements).
+
+26. ~~**Host role registration**~~ (S, **done**) — add `Role::SwearIn` to
+    `hardware/maintenance.rs` (`as_str` → `swear_in`; `from_wire` accepts
+    both spellings). Without it the handshake answers `BYE unknown_role`, so
+    nothing else is testable. The presence badge comes free from the registry.
+27. ~~**`LED` command plumbing**~~ (S, **done**) — `HardwareCommand::Led(LedMode)`
+    in `hardware/protocol.rs` (serialises to `LED <mode>`), routed to
+    `Role::SwearIn`. No calibration file — there's nothing to tune.
+28. **Lamp cues from the FSM** (M) — emit `LED` on state edges the way `FACE`
+    is emitted: `Idle` → `blink` (the attract "press me to stand trial"),
+    trial start → `off`, back to `blink` on return to Idle. Reuse the
+    device-reconnect resync hook (the one that replays `PERSONA` to a
+    rebooting face) so a power-cycled button comes back with the right lamp —
+    the firmware boots dark and stays dark until commanded. Trial start
+    already works with zero host changes beyond item 26: `tcp.rs:350` maps
+    `BUTTON` → `Event::OperatorStart` and `(Idle, OperatorStart)` starts a
+    trial — the button is exactly the console start button.
+29. **A distinct `Event::DefendantButton`** (S, prerequisite for 30) — don't
+    reuse `OperatorStart` for mid-trial presses: `mod.rs:157` calls
+    `begin_draft()` on *every* `OperatorStart` regardless of state, so a
+    mid-trial press would open a fresh casebook draft over the live one. Map
+    the swear-in connection's `BUTTON` to `DefendantButton`, give it an
+    `(Idle, DefendantButton)` arm identical to `OperatorStart`, and let every
+    other state ignore it by default. (Also closes today's quirk where a
+    `BUTTON` line from *any* device role acts as a start trigger.)
+30. **Non-verbal acknowledgements** (M, decision first) — proposal: in
+    `AwaitingPlea` and `CrossAwaitingAnswer` a press means "I'm done
+    talking" and closes the answer window early (same path as the deadline
+    expiring, into `FlushingPlea`/`CrossFlushingAnswer`); lamp `pulse` while
+    those windows are open cues that the button is live. Optionally later: a
+    press during `PronouncingVerdict`/sentence as a defiant "acknowledged."
+    Each state that consumes a press gets its lamp cue in the same
+    transition, so light and meaning can't drift apart.
+31. ~~**Console: swear-in maintenance strip**~~ (S, **done**) — the `Swear-in`
+    hardware tab: LED mode test buttons with ack chips, Ping, a live press
+    indicator fed by the `button_pressed` broadcast (flashes + counts on every
+    wire `BUTTON`), and a "simulate press" that injects the same trial-start
+    event, so the start path is testable without the physical button.
+
 ---
 
 ## Decisions to make before starting
@@ -233,3 +287,7 @@ can be cleaned up in the sweep.)
 - **Do "Fire now" / manual arm also get maintenance-gated** (Phase 0 item 3)?
 - **Cross-exam ring timing** (Phase 3 item 13) — ring as the answer window
   opens, or as the question is being asked?
+- **Which trial states consume a defendant button press** (Phase 6 item 30) —
+  the "done talking" early-close is the safe core; decide whether a
+  verdict-acknowledgement press (and any lamp theatrics around the sentence)
+  is wanted.

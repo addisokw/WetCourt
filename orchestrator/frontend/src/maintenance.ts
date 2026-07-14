@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 
 // Mirrors the backend `Role` wire names (src/hardware/maintenance.rs).
-export type Role = 'judge_face' | 'judge_neck' | 'gavel' | 'turret' | 'squirt';
+export type Role = 'judge_face' | 'judge_neck' | 'gavel' | 'turret' | 'squirt' | 'swear_in';
 
 export interface ServoCal {
   min: number;
@@ -71,7 +71,11 @@ export type CmdSpec =
   | { cmd: 'gavel_jog'; us: number }
   | { cmd: 'aim'; pan: number; tilt: number }
   | { cmd: 'panel'; pattern: 'idle' | 'thinking' | 'verdict' }
+  | { cmd: 'led'; mode: LedMode }
   | { cmd: 'ping' };
+
+// The swear-in button's lamp vocabulary (`LED <mode>` on the wire).
+export type LedMode = 'off' | 'on' | 'blink' | 'pulse';
 
 // True while the FSM is in maintenance mode. Driven by the `maintenance`
 // broadcast (see ws.ts) and set optimistically by enter/exit.
@@ -90,6 +94,16 @@ export function onDeviceConnected(role: string, addr: string): void {
 }
 export function onDeviceDisconnected(role: string): void {
   setDevices((prev) => prev.filter((d) => d.role !== role));
+}
+
+// Live wire-`BUTTON` presses (the swear-in button), for the console's press
+// indicator. Every press bumps the count; `at` is the client-clock arrival.
+export const [buttonPresses, setButtonPresses] = createSignal<{ count: number; at: number }>({
+  count: 0,
+  at: 0,
+});
+export function onButtonPressed(): void {
+  setButtonPresses((prev) => ({ count: prev.count + 1, at: Date.now() }));
 }
 
 async function asError(res: Response): Promise<string> {

@@ -43,6 +43,9 @@ pub enum Role {
     Turret,
     /// Squirt-gun firing relay — owns `FIRE`.
     Squirt,
+    /// Defendant's arcade button — owns `LED` (its lamp) and emits the
+    /// unsolicited `BUTTON` press event.
+    SwearIn,
 }
 
 impl Role {
@@ -54,6 +57,7 @@ impl Role {
             Role::Gavel => "gavel",
             Role::Turret => "turret",
             Role::Squirt => "squirt",
+            Role::SwearIn => "swear_in",
         }
     }
 
@@ -67,6 +71,7 @@ impl Role {
             "gavel" => Some(Role::Gavel),
             "judge-face" | "judge_face" => Some(Role::JudgeFace),
             "judge-neck" | "judge_neck" => Some(Role::JudgeNeck),
+            "swear-in" | "swear_in" => Some(Role::SwearIn),
             _ => None,
         }
     }

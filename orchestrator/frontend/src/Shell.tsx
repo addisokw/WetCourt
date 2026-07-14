@@ -14,8 +14,9 @@ import TurretPanel from './panels/TurretPanel';
 import VisionPanel from './panels/VisionPanel';
 import LawyerPanel from './panels/LawyerPanel';
 import PrintPanel from './panels/PrintPanel';
+import SwearInPanel from './panels/SwearInPanel';
 
-type Tab = 'operator' | 'judge_mind' | 'vision' | 'lawyer' | 'print' | 'judge_body' | 'gavel' | 'turret';
+type Tab = 'operator' | 'judge_mind' | 'vision' | 'lawyer' | 'print' | 'judge_body' | 'gavel' | 'turret' | 'swear_in';
 type Kind = 'operator' | 'config' | 'hardware';
 
 // 'config' tabs hit the /operator/* endpoints and are safe live (ungated).
@@ -30,6 +31,7 @@ const TABS: Array<{ id: Tab; label: string; kind: Kind }> = [
   { id: 'judge_body', label: 'Judge Body', kind: 'hardware' },
   { id: 'gavel', label: 'Gavel', kind: 'hardware' },
   { id: 'turret', label: 'Turret', kind: 'hardware' },
+  { id: 'swear_in', label: 'Swear-in', kind: 'hardware' },
 ];
 
 export default function Shell() {
@@ -155,6 +157,7 @@ export default function Shell() {
                 <Match when={tab() === 'judge_body'}><JudgeBodyPanel /></Match>
                 <Match when={tab() === 'gavel'}><GavelPanel /></Match>
                 <Match when={tab() === 'turret'}><TurretPanel /></Match>
+                <Match when={tab() === 'swear_in'}><SwearInPanel /></Match>
               </Switch>
             </Show>
           </div>

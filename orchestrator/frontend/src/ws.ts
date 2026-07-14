@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import { enqueuePcmFrame, endTtsSession, resetPcmResidue, resumeAudio, startRecording, startTtsSession, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
-import { onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
+import { onButtonPressed, onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 import { applyRobotParamsToGraph } from './robotParams';
 
 export type DisplayEvent = { type: string;[k: string]: unknown };
@@ -313,6 +313,9 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'device_disconnected':
       onDeviceDisconnected(String(ev.role ?? ''));
+      break;
+    case 'button_pressed':
+      onButtonPressed();
       break;
     case 'robot_params':
       // Active persona's voice colour — apply to this client's audio graph.
