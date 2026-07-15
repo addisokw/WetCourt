@@ -11,7 +11,7 @@ debug_rms = false # flip on when calibrating VAD against the real handset
 vad_rms_threshold = 100
 max_call_secs = 180
 # Back-and-forths before a scripted mishap (persona hangup_lines) ends the call.
-max_exchanges = 5
+max_exchanges = 2
 
 [inference]
 mode = "real"
