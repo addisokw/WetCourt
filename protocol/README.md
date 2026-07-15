@@ -74,7 +74,7 @@ the table below (`judge-neck`); the host also accepts the underscore form
 | Role | Subsystem | Verbs it must accept |
 |---|---|---|
 | `judge-face` | LED-matrix judge face | `FACE`, `AUDIO`, `PERSONA`, `AIM`, `PANEL` *(legacy)*, `PING` |
-| `judge-neck` | judge-head pan/tilt gaze | `AIM`, `PING` |
+| `judge-neck` | judge-head pan/tilt gaze | `AIM`, `PING` (emits `OVERCURRENT`) |
 | `gavel` | servo gavel | `GAVEL`, `GJOG`, `PING` |
 | `turret` | squirt-gun pan/tilt aim | `AIM`, `PING` |
 | `squirt` | squirt-gun firing relay | `FIRE`, `PING` |
@@ -97,7 +97,7 @@ Every command is acknowledged (see Acks). `<...>` are required args.
 | Line | Role(s) | Meaning |
 |---|---|---|
 | `FIRE <ms>` | squirt | Fire the squirt gun for `<ms>` milliseconds. |
-| `AIM <pan> <tilt>` | turret, judge-neck | Point the pan/tilt mech (raw device units; the host applies calibration). |
+| `AIM <pan> <tilt>` | turret, judge-neck | Point the pan/tilt mech (raw device units; the host applies calibration). judge-neck slew-limits the move in firmware (mount protection) — `OK AIM` acks the accepted target, not arrival. |
 | `AIM <pan> <tilt>` | judge-face | The neck pose in *degrees* — the host mirrors every judge-neck `AIM` to the face, which counter-moves the eye's catchlight (specular parallax). Moves no hardware. |
 | `GAVEL [<rest> <raise> <strike> <raise_dwell_ms> <strike_dwell_ms> <settle_dwell_ms> <strikes>]` | gavel | One gavel strike sequence — REST → RAISE, then STRIKE → RAISE per rap (`strikes`), then → REST. The host normally sends all seven tunables (servo µs positions + dwell ms + rap count, from `gavel.toml`) so the firmware stays stateless; a bare `GAVEL` uses the firmware's compiled defaults. |
 | `GJOG <us>` | gavel | Move the gavel servo to a raw pulse-width (µs) and hold — live position preview for console tuning. |
@@ -149,6 +149,7 @@ Sent any time, not in reply to a command:
 | Line | Meaning |
 |---|---|
 | `BUTTON` | One debounced press of the defendant's arcade button (`swear-in` role only; the host drops it from any other role). What a press *means* is the host's call, by trial state: from `Idle` it starts a trial; during an open plea/answer window it means "I'm done talking" and closes the window early (ignored while the countdown is paused on the lawyer phone); every other state ignores it. The firmware rate-limits emission (≥ 250 ms apart) and drops presses while disconnected. |
+| `OVERCURRENT <amps>` | Sustained overcurrent on the judge-neck's 8-servo board (`judge-neck` role only) — a stall/jam guard: by the time this is emitted the firmware has already eased tilt to the top of its working range (not full droop — droop only clears the booth with pan centered). `<amps>` is the board-total reading. The host does not yet handle it (unrecognized lines are logged and skipped); surfacing it on the console is a candidate follow-up. |
 
 `PING` is acknowledged with `OK PING` (not a separate `PONG`), so every command
 resolves through the same one-ack-per-command path; the host tolerates a stray
