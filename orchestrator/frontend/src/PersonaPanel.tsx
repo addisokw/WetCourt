@@ -36,7 +36,9 @@ const EMPTY: Persona = {
 const FACE_PERSONAS = ['honorable', 'magistrate', 'cosmic', 'nullpointer', 'petunia'];
 
 export default function PersonaPanel() {
-  const [open, setOpen] = createSignal(false);
+  // Starts open: the Judge Mind switcher shows one editor at a time, so
+  // reaching this panel already took an explicit click.
+  const [open, setOpen] = createSignal(true);
   const [form, setForm] = createSignal<Persona>({ ...EMPTY });
   const [mode, setMode] = createSignal<'existing' | 'new'>('existing');
   // originalId is set when editing an existing persona (the id the form was loaded from).

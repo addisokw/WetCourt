@@ -691,6 +691,41 @@ button.plea.recording:hover { background: #8b2326; }
   gap: 0.5rem;
   color: #e3b341;
 }
+.crimes-panel .cat-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+.crimes-panel .cat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.5rem;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  background: #161b22;
+}
+.crimes-panel .cat-toggle label.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #d2a8ff;
+  cursor: pointer;
+}
+.crimes-panel .cat-toggle.off { border-style: dashed; background: transparent; }
+.crimes-panel .cat-toggle.off label.checkbox { color: #484f58; text-decoration: line-through; }
+.crimes-panel .cat-toggle button.mini,
+.crimes-panel .cat-toggles > button.mini {
+  padding: 0.05rem 0.45rem;
+  font-size: 0.72rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+}
+.crimes-panel .cat-toggle button.mini:hover,
+.crimes-panel .cat-toggles > button.mini:hover:not(:disabled) { border-color: #58a6ff; }
 .crimes-panel .row-line input[type="text"] { flex: 1; }
 .crimes-panel .category-input { max-width: 12ch; flex: 0 1 auto !important; }
 .crimes-panel .crime-search { flex: 1 1 16ch; min-width: 12ch; }
@@ -1065,18 +1100,44 @@ button.plea.recording:hover { background: #8b2326; }
 .tab-lock { margin-left: 0.4rem; font-size: 0.8rem; opacity: 0.8; }
 
 /* ---- Judge Mind (config) tab ---- */
-/* Same tiling as the hardware panels, but a wider column floor since the
-   persona/crimes editors are form-heavy. Intro copy + the behavior section
-   span the full row; persona and crimes tile beside each other when there's
-   room. */
+/* One full-width editor at a time (persona OR crimes, picked by the
+   switcher) — they're form-heavy and unreadable when tiled side by side. */
 .config-tab {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
-  align-items: start;
+  align-items: stretch;
 }
-.config-tab > .muted { margin: 0; grid-column: 1 / -1; }
-.config-tab > .judge-section { grid-column: 1 / -1; }
+.config-tab > .muted { margin: 0; }
+.editor-switch {
+  display: flex;
+  gap: 0.3rem;
+}
+.editor-switch button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.5rem 1.2rem;
+  color: #8b949e;
+  min-height: 40px;
+}
+.editor-switch button:hover { background: #161b22; }
+.editor-switch button.active {
+  background: #161b22;
+  border-color: #30363d;
+  color: #58a6ff;
+}
+.editor-pane.hidden { display: none; }
+/* One page-level scroll: the editors grow to full height here instead of
+   nesting their own scrollboxes (panel-body's 70vh cap, crime-list's 40vh). */
+.config-tab .panel-body {
+  max-height: none;
+  overflow-y: visible;
+}
+.config-tab .crime-list {
+  max-height: none;
+  overflow-y: visible;
+}
 .judge-section {
   border: 1px solid #21262d;
   border-radius: 8px;

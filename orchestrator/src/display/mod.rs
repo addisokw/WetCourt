@@ -144,7 +144,7 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/persona/{id}/test", post(test_persona))
         .route("/operator/crimes", get(list_crimes).post(add_crime))
         .route("/operator/crimes/reload", post(reload_crimes))
-        .route("/operator/crimes/filter", post(set_crime_filter))
+        .route("/operator/crimes/categories", post(set_disabled_categories))
         .route("/operator/crimes/queue", post(queue_charge))
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
@@ -1480,7 +1480,7 @@ async fn test_persona(
 struct CrimesResp {
     crimes: Vec<Crime>,
     categories: Vec<String>,
-    category_filter: Option<String>,
+    disabled_categories: Vec<String>,
     queue: Vec<String>,
 }
 
@@ -1489,7 +1489,7 @@ async fn crimes_snapshot(s: &AppState) -> CrimesResp {
     CrimesResp {
         crimes: store.list().to_vec(),
         categories: store.categories(),
-        category_filter: store.category_filter().map(str::to_string),
+        disabled_categories: store.disabled_categories().iter().cloned().collect(),
         queue: store.queue().map(str::to_string).collect(),
     }
 }
@@ -1565,19 +1565,19 @@ async fn delete_crime(
 }
 
 #[derive(Deserialize)]
-struct FilterReq {
-    /// None / null clears the filter (draw from all categories).
-    category: Option<String>,
+struct DisabledCategoriesReq {
+    /// Full replacement set; empty list re-enables every category.
+    disabled: std::collections::BTreeSet<String>,
 }
 
-async fn set_crime_filter(
+async fn set_disabled_categories(
     AxumState(s): AxumState<AppState>,
-    Json(body): Json<FilterReq>,
+    Json(body): Json<DisabledCategoriesReq>,
 ) -> impl IntoResponse {
     let mut store = s.crimes.write().await;
-    match store.set_category_filter(body.category) {
+    match store.set_disabled_categories(body.disabled) {
         Ok(()) => {
-            info!(filter = ?store.category_filter(), "crime category filter set");
+            info!(disabled = ?store.disabled_categories(), "crime categories updated");
             (StatusCode::NO_CONTENT, String::new()).into_response()
         }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),

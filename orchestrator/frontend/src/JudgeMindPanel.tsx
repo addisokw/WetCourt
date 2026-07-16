@@ -1,4 +1,4 @@
-import { onMount } from 'solid-js';
+import { createSignal, onMount } from 'solid-js';
 import PersonaPanel from './PersonaPanel';
 import CrimesPanel from './CrimesPanel';
 import { crossExamEnabled, fetchCrossExam, setCrossExam } from './ws';
@@ -6,6 +6,11 @@ import { crossExamEnabled, fetchCrossExam, setCrossExam } from './ws';
 export default function JudgeMindPanel() {
   // Keep the cross-exam toggle in sync with the server when this tab opens.
   onMount(() => void fetchCrossExam());
+
+  // One full-width editor at a time — the two are form-heavy and unreadable
+  // side by side. Both stay mounted so switching doesn't drop in-progress
+  // edits; the switcher just hides the inactive one.
+  const [editor, setEditor] = createSignal<'persona' | 'crimes'>('persona');
 
   return (
     <div class="config-tab">
@@ -27,8 +32,31 @@ export default function JudgeMindPanel() {
         </label>
       </section>
 
-      <PersonaPanel />
-      <CrimesPanel />
+      <div class="editor-switch" role="tablist">
+        <button
+          class={editor() === 'persona' ? 'active' : ''}
+          role="tab"
+          aria-selected={editor() === 'persona'}
+          onClick={() => setEditor('persona')}
+        >
+          Persona
+        </button>
+        <button
+          class={editor() === 'crimes' ? 'active' : ''}
+          role="tab"
+          aria-selected={editor() === 'crimes'}
+          onClick={() => setEditor('crimes')}
+        >
+          Crimes
+        </button>
+      </div>
+
+      <div class="editor-pane" classList={{ hidden: editor() !== 'persona' }}>
+        <PersonaPanel />
+      </div>
+      <div class="editor-pane" classList={{ hidden: editor() !== 'crimes' }}>
+        <CrimesPanel />
+      </div>
     </div>
   );
 }

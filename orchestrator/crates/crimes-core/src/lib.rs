@@ -5,7 +5,7 @@
 //! is fully self-contained — no orchestrator types leak in — so both binaries
 //! reuse the same validation, atomic persistence, and id bookkeeping.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -64,6 +64,10 @@ struct CrimesFile {
     exhibit: String,
     #[serde(default)]
     description: String,
+    /// Categories excluded from the random draw. Persisted so e.g. "creator"
+    /// crimes stay off across booth restarts during normal operation.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    disabled_categories: BTreeSet<String>,
     crimes: Vec<Crime>,
 }
 
@@ -71,8 +75,8 @@ pub struct CrimeStore {
     path: PathBuf,
     header: (String, String), // (exhibit, description) preserved on save
     crimes: Vec<Crime>,
-    /// Category filter for the draw (creator mode etc.). None = all categories.
-    category_filter: Option<String>,
+    /// Categories excluded from the random draw (creator mode etc.).
+    disabled_categories: BTreeSet<String>,
     /// Operator-queued charges; popped before any random draw.
     queue: VecDeque<String>,
     /// Recently drawn crime ids, newest last, to avoid repeats.
@@ -99,7 +103,7 @@ impl CrimeStore {
             path,
             header: (file.exhibit, file.description),
             crimes: file.crimes,
-            category_filter: None,
+            disabled_categories: file.disabled_categories,
             queue: VecDeque::new(),
             recent: VecDeque::new(),
             no_repeat_window,
@@ -107,12 +111,14 @@ impl CrimeStore {
     }
 
     /// Re-read the crimes file in place (the crimes-editor writes it from a
-    /// separate process). Replaces the crime list + header; live operator
-    /// state — queue, category filter, no-repeat history — is preserved.
+    /// separate process). Replaces the crime list, header, and disabled
+    /// categories (all persisted state); live operator state — queue,
+    /// no-repeat history — is preserved.
     pub fn reload(&mut self) -> Result<()> {
         let fresh = Self::load_from_file(&self.path, self.no_repeat_window)?;
         self.crimes = fresh.crimes;
         self.header = fresh.header;
+        self.disabled_categories = fresh.disabled_categories;
         Ok(())
     }
 
@@ -120,6 +126,7 @@ impl CrimeStore {
         let file = CrimesFile {
             exhibit: self.header.0.clone(),
             description: self.header.1.clone(),
+            disabled_categories: self.disabled_categories.clone(),
             crimes: self.crimes.clone(),
         };
         let mut text = serde_json::to_string_pretty(&file).context("serializing crimes")?;
@@ -180,17 +187,22 @@ impl CrimeStore {
         Ok(())
     }
 
-    pub fn category_filter(&self) -> Option<&str> {
-        self.category_filter.as_deref()
+    pub fn disabled_categories(&self) -> &BTreeSet<String> {
+        &self.disabled_categories
     }
 
-    pub fn set_category_filter(&mut self, category: Option<String>) -> Result<()> {
-        if let Some(cat) = &category {
+    /// Replace the set of categories excluded from the random draw. Every
+    /// entry must name an existing category (a full replacement naturally
+    /// drops entries whose category has since been deleted). Persists to disk
+    /// so the exclusions survive booth restarts.
+    pub fn set_disabled_categories(&mut self, disabled: BTreeSet<String>) -> Result<()> {
+        for cat in &disabled {
             if !self.crimes.iter().any(|c| c.category == *cat) {
                 bail!("no crimes in category '{cat}'");
             }
         }
-        self.category_filter = category;
+        self.disabled_categories = disabled;
+        self.save()?;
         Ok(())
     }
 
@@ -223,7 +235,7 @@ impl CrimeStore {
     }
 
     /// Next charge for a trial: operator queue first, then a random enabled
-    /// crime matching the category filter, avoiding the last
+    /// crime from an enabled category, avoiding the last
     /// `no_repeat_window` draws. Returns None only when the queue is empty
     /// AND no crime is eligible (caller falls back to canned charges).
     pub fn draw(&mut self) -> Option<String> {
@@ -234,11 +246,7 @@ impl CrimeStore {
             .crimes
             .iter()
             .filter(|c| c.enabled)
-            .filter(|c| {
-                self.category_filter
-                    .as_ref()
-                    .is_none_or(|cat| c.category == *cat)
-            })
+            .filter(|c| !self.disabled_categories.contains(&c.category))
             .collect();
         if eligible.is_empty() {
             return None;
@@ -272,6 +280,7 @@ mod tests {
         let file = CrimesFile {
             exhibit: "Wet Court".into(),
             description: "test".into(),
+            disabled_categories: BTreeSet::new(),
             crimes: crimes
                 .iter()
                 .map(|(id, cat, charge)| Crime {
@@ -331,8 +340,28 @@ mod tests {
             s.draw().unwrap(),
             "The defendant stands accused of a queued crime."
         );
-        s.set_category_filter(Some("social".into())).unwrap();
+        s.set_disabled_categories(BTreeSet::from(["tech".to_string()]))
+            .unwrap();
         assert_eq!(s.draw().unwrap(), C2);
+    }
+
+    #[test]
+    fn disabled_categories_persist_and_can_empty_the_pool() {
+        let mut s = store_with(&[(1, "tech", C1), (2, "creator", C2)]);
+        s.set_disabled_categories(BTreeSet::from(["creator".to_string()]))
+            .unwrap();
+        assert_eq!(s.draw().unwrap(), C1);
+
+        // persisted: a fresh load from disk keeps the exclusion
+        let mut reloaded = CrimeStore::load_from_file(s.path.clone(), 3).unwrap();
+        assert!(reloaded.disabled_categories().contains("creator"));
+        assert_eq!(reloaded.draw().unwrap(), C1);
+
+        // disabling everything empties the pool (caller falls back to canned)
+        reloaded
+            .set_disabled_categories(BTreeSet::from(["creator".to_string(), "tech".to_string()]))
+            .unwrap();
+        assert!(reloaded.draw().is_none());
     }
 
     #[test]
@@ -360,9 +389,13 @@ mod tests {
     #[test]
     fn filter_rejects_unknown_category() {
         let mut s = store_with(&[(1, "tech", C1)]);
-        assert!(s.set_category_filter(Some("nope".into())).is_err());
-        assert!(s.set_category_filter(Some("tech".into())).is_ok());
-        assert!(s.set_category_filter(None).is_ok());
+        assert!(s
+            .set_disabled_categories(BTreeSet::from(["nope".to_string()]))
+            .is_err());
+        assert!(s
+            .set_disabled_categories(BTreeSet::from(["tech".to_string()]))
+            .is_ok());
+        assert!(s.set_disabled_categories(BTreeSet::new()).is_ok());
     }
 
     #[test]

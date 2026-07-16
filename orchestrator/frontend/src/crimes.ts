@@ -12,13 +12,13 @@ export interface Crime {
 export interface CrimesResponse {
   crimes: Crime[];
   categories: string[];
-  category_filter: string | null;
+  disabled_categories: string[];
   queue: string[];
 }
 
 export const [crimes, setCrimes] = createSignal<Crime[]>([]);
 export const [categories, setCategories] = createSignal<string[]>([]);
-export const [categoryFilter, setCategoryFilter] = createSignal<string | null>(null);
+export const [disabledCategories, setDisabledCategories] = createSignal<string[]>([]);
 export const [chargeQueue, setChargeQueue] = createSignal<string[]>([]);
 
 export function validateCharge(charge: string): string | null {
@@ -46,7 +46,7 @@ async function asError(res: Response): Promise<string> {
 function apply(data: CrimesResponse) {
   setCrimes(data.crimes);
   setCategories(data.categories);
-  setCategoryFilter(data.category_filter);
+  setDisabledCategories(data.disabled_categories);
   setChargeQueue(data.queue);
 }
 
@@ -95,11 +95,12 @@ export async function reloadCrimes(): Promise<number> {
   return body.count;
 }
 
-export async function setCrimeFilter(category: string | null): Promise<void> {
-  const res = await fetch('/operator/crimes/filter', {
+/** Replace the set of categories excluded from the random draw (persisted). */
+export async function updateDisabledCategories(disabled: string[]): Promise<void> {
+  const res = await fetch('/operator/crimes/categories', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ category }),
+    body: JSON.stringify({ disabled }),
   });
   if (!res.ok) throw new Error(await asError(res));
   await fetchCrimes();

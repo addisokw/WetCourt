@@ -3,22 +3,24 @@ import {
   Crime,
   addCrime,
   categories,
-  categoryFilter,
   chargeQueue,
   crimes,
   deleteCrime,
+  disabledCategories,
   fetchCrimes,
   queueCharge,
   reloadCrimes,
-  setCrimeFilter,
   unqueueCharge,
   updateCrime,
+  updateDisabledCategories,
   validateCategory,
   validateCharge,
 } from './crimes';
 
 export default function CrimesPanel() {
-  const [open, setOpen] = createSignal(false);
+  // Starts open: the Judge Mind switcher shows one editor at a time, so
+  // reaching this panel already took an explicit click.
+  const [open, setOpen] = createSignal(true);
   const [status, setStatus] = createSignal('');
   const [error, setError] = createSignal('');
 
@@ -61,6 +63,11 @@ export default function CrimesPanel() {
   }
 
   const enabledCount = createMemo(() => crimes().filter((c) => c.enabled).length);
+  // crimes actually eligible for a random draw: enabled AND in an enabled category
+  const drawPool = createMemo(
+    () =>
+      crimes().filter((c) => c.enabled && !disabledCategories().includes(c.category)).length
+  );
   const visible = createMemo(() => {
     const q = search().trim().toLowerCase();
     return crimes().filter(
@@ -83,7 +90,7 @@ export default function CrimesPanel() {
     <section class="persona-panel crimes-panel">
       <button class="panel-toggle" onClick={() => setOpen(!open())}>
         {open() ? '▼' : '▶'} Crimes Panel ({enabledCount()}/{crimes().length} enabled
-        {categoryFilter() ? `, drawing only: ${categoryFilter()}` : ''})
+        {disabledCategories().length > 0 ? `, off: ${disabledCategories().join(', ')}` : ''})
       </button>
       <Show when={open()}>
         <div class="panel-body">
@@ -136,21 +143,63 @@ export default function CrimesPanel() {
             </Show>
           </div>
 
-          {/* Draw filter — restricts random selection (creator mode etc.) */}
-          <div class="field inline">
-            <label>draw only from</label>
-            <select
-              value={categoryFilter() ?? ''}
-              onChange={(e) =>
-                run('filter', () => setCrimeFilter(e.currentTarget.value || null))
-              }
-            >
-              <option value="">all categories</option>
-              <For each={categories()}>{(c) => <option value={c}>{c}</option>}</For>
-            </select>
+          {/* Draw pool — per-category on/off, persisted to the crimes file so
+              e.g. creator crimes stay off across restarts during normal ops */}
+          <div class="field">
+            <label>draw pool — categories ({drawPool()} crimes eligible)</label>
+            <div class="cat-toggles">
+              <For each={categories()}>
+                {(c) => {
+                  const off = () => disabledCategories().includes(c);
+                  const count = () =>
+                    crimes().filter((x) => x.category === c && x.enabled).length;
+                  return (
+                    <span class={`cat-toggle${off() ? ' off' : ''}`}>
+                      <label class="checkbox" title={off() ? 'excluded from random draws' : 'in the draw pool'}>
+                        <input
+                          type="checkbox"
+                          checked={!off()}
+                          onChange={(e) =>
+                            run('categories', () =>
+                              updateDisabledCategories(
+                                e.currentTarget.checked
+                                  ? disabledCategories().filter((x) => x !== c)
+                                  : [...disabledCategories(), c]
+                              )
+                            )
+                          }
+                        />
+                        {c} ({count()})
+                      </label>
+                      <button
+                        class="mini"
+                        title="draw only from this category"
+                        onClick={() =>
+                          run('categories', () =>
+                            updateDisabledCategories(categories().filter((x) => x !== c))
+                          )
+                        }
+                      >
+                        only
+                      </button>
+                    </span>
+                  );
+                }}
+              </For>
+              <button
+                class="mini"
+                disabled={disabledCategories().length === 0}
+                onClick={() => run('categories', () => updateDisabledCategories([]))}
+              >
+                all on
+              </button>
+            </div>
             <span class="muted small">
-              random draws come only from this category until cleared
+              unchecked categories are skipped by random draws — persists across restarts
             </span>
+            <Show when={drawPool() === 0}>
+              <span class="err">draw pool empty — trials will fall back to canned charges</span>
+            </Show>
           </div>
 
           {/* Add a new crime */}
