@@ -17,7 +17,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOST="${AI_STACK_HOST:?set AI_STACK_HOST=user@host in dgx-ai-stack/.env}"
 DIR="${AI_STACK_DIR:-/home/${HOST%@*}/ai-stack}"
 
-run() { ssh -t "$HOST" "cd $DIR && docker compose $*"; }
+# cd -P: on the Spark ~/ai-stack is a symlink into the WetCourt checkout;
+# without resolving it, compose build contexts like ../orchestrator resolve
+# against the symlink's parent ($HOME) and the build fails.
+run() { ssh -t "$HOST" "cd -P $DIR && docker compose $*"; }
 
 cmd="${1:-up}"; shift || true
 case "$cmd" in
