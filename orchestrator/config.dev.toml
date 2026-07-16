@@ -58,7 +58,7 @@ source = "list"
 no_repeat_window = 15
 
 [trial]
-plea_window_secs = 20
+plea_window_secs = 45
 charge_display_secs = 5
 cooldown_secs = 4
 # Fallback/mock conviction rate. The live path uses the active persona's own
@@ -134,7 +134,7 @@ image_dither = "atkinson"
 [capture]
 enabled = true
 dir = "captures"        # one <case_label>/ subdir per guilty trial
-fire_delay_ms = 250     # wait after FIRE so the water is on the defendant
+fire_delay_ms = 100     # wait after FIRE so the water is on the defendant
 frames = 8
 interval_ms = 110       # frames × interval spans the burst (~0.8s)
 
