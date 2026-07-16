@@ -1,0 +1,31 @@
+# Wet Court kiosk — the Spark-attached monitor/speakers/microphone head.
+# systemd USER unit: install to ~/.config/systemd/user/ on the Spark and run
+# inside the auto-logged-in graphical session (see README.md).
+#
+# /case?audio=1&mic=1 makes this browser the booth's speakers AND microphone;
+# the operator console (any device) keeps every control and auto-reclaims the
+# mic if this kiosk dies. --use-fake-ui-for-media-stream only auto-ACCEPTS the
+# permission prompt (real devices are used — not to be confused with
+# --use-fake-device-for-media-stream).
+
+[Unit]
+Description=Wet Court kiosk (case display + booth speakers/mic)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/snap/bin/chromium \
+    --kiosk \
+    --user-data-dir=%h/.wetcourt-kiosk \
+    --autoplay-policy=no-user-gesture-required \
+    --use-fake-ui-for-media-stream \
+    --noerrdialogs \
+    --disable-session-crashed-bubble \
+    --hide-crash-restore-bubble \
+    --disable-infobars \
+    "http://localhost:8080/case?audio=1&mic=1"
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

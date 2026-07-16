@@ -95,12 +95,23 @@ let readOnly = false;
 // Set when this read-only view opted in as the booth's speakers (?audio=1 on
 // /ws/view): it receives + plays the PCM stream like the operator console.
 let audioView = false;
+// Set when this read-only view opted in as the booth's microphone (?mic=1 on
+// /ws/view): it records the plea and uploads it over its own socket.
+let micView = false;
 // Whether THIS client should produce sound (operator console, or audio view).
 const audioEnabled = () => !readOnly || audioView;
+// True while a dedicated ?mic=1 kiosk is live somewhere (from mic_owner
+// events / the snapshot); the operator console defers to it.
+export const [micOwnerPresent, setMicOwnerPresent] = createSignal<boolean>(false);
+// Whether THIS client should capture the plea: a mic view always does (the
+// server drops uplink from superseded ones); the operator console does only
+// when no dedicated mic kiosk is live.
+const micEnabled = () => (readOnly ? micView : !micOwnerPresent());
 
-export function connect(opts: { readOnly?: boolean; audio?: boolean } = {}) {
+export function connect(opts: { readOnly?: boolean; audio?: boolean; mic?: boolean } = {}) {
   readOnly = !!opts.readOnly;
   audioView = !!opts.audio;
+  micView = !!opts.mic;
   // Tear down any prior socket so we don't accumulate listeners. Without this,
   // a Vite HMR reload or accidental double-mount stacks multiple live sockets
   // — every broadcast event then fires its handler N times, and signals like
@@ -117,7 +128,8 @@ export function connect(opts: { readOnly?: boolean; audio?: boolean } = {}) {
     }
     socket = null;
   }
-  const path = readOnly ? `/ws/view${audioView ? '?audio=1' : ''}` : '/ws';
+  const viewFlags = [audioView && 'audio=1', micView && 'mic=1'].filter(Boolean).join('&');
+  const path = readOnly ? `/ws/view${viewFlags ? `?${viewFlags}` : ''}` : '/ws';
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
   socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
@@ -157,7 +169,7 @@ export function connect(opts: { readOnly?: boolean; audio?: boolean } = {}) {
       return;
     }
     setCurrentState('reconnecting');
-    setTimeout(() => connect({ readOnly, audio: audioView }), reconnectDelay);
+    setTimeout(() => connect({ readOnly, audio: audioView, mic: micView }), reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 8000);
   };
 
@@ -228,9 +240,10 @@ function handleEvent(ev: DisplayEvent) {
       }
       setPleaWindowOpen(phase === 'awaiting_plea' || crossAnswer);
       setPleaRecordingActive(false);
+      setMicOwnerPresent(Boolean(ev.mic_owner));
       // Reconnected into an open window: restart the mic (recording is
       // browser-local, so whatever was captured died with the old socket).
-      if (!readOnly && (phase === 'awaiting_plea' || crossAnswer)) void beginPlea({ auto: true });
+      if (micEnabled() && (phase === 'awaiting_plea' || crossAnswer)) void beginPlea({ auto: true });
       setMaintenanceActive(Boolean(ev.maintenance));
       if (phase === 'idle') setDeliberation('');
       break;
@@ -272,9 +285,23 @@ function handleEvent(ev: DisplayEvent) {
       setPleaRecordingActive(false);
       setCrossAnswerWindow(Boolean(ev.cross));
       // The mic opens the moment the window does — no "Plead" press needed.
-      // Only the operator console owns the mic; P still toggles (early stop /
-      // restart) and the defendant's button still closes the window early.
-      if (!readOnly) void beginPlea({ auto: true });
+      // The booth-mic client owns it (a ?mic=1 kiosk when live, else the
+      // operator console); P still toggles (early stop / restart) and the
+      // defendant's button still closes the window early.
+      if (micEnabled()) void beginPlea({ auto: true });
+      break;
+    case 'mic_owner':
+      setMicOwnerPresent(Boolean(ev.present));
+      if (readOnly) break;
+      if (ev.present) {
+        // A mic kiosk appeared while we were capturing: yield without
+        // uploading (the kiosk's recording is the plea now).
+        if (recording()) void cancelPlea();
+      } else if (pleaWindowOpen() && !recording()) {
+        // The mic kiosk died mid-window: take the mic back so the plea
+        // window isn't silently lost.
+        void beginPlea({ auto: true });
+      }
       break;
     case 'plea_recording':
       setPleaRecordingActive(Boolean(ev.active));
@@ -366,6 +393,14 @@ export async function endPlea() {
   socket?.send(JSON.stringify({ type: 'plea_audio_complete' }));
 }
 
+/** Stop capturing WITHOUT uploading — used when a dedicated mic kiosk takes
+ * over mid-recording (its capture is the plea; ours would corrupt it). */
+async function cancelPlea() {
+  if (!recording()) return;
+  setRecording(false);
+  await stopRecording(); // discard the blob
+}
+
 export async function fetchCrossExam(): Promise<void> {
   try {
     const res = await fetch('/operator/cross_exam');
@@ -398,7 +433,7 @@ export async function setCrossExam(enabled: boolean): Promise<void> {
 /// and the other goes dormant.
 export function reconnect() {
   reconnectDelay = 500;
-  connect({ readOnly, audio: audioView });
+  connect({ readOnly, audio: audioView, mic: micView });
 }
 
 export async function startTrial() {

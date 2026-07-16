@@ -203,11 +203,16 @@ export default function CaseView() {
   onMount(() => {
     // /case?audio=1 makes this kiosk the booth's speakers: it receives and
     // plays the TTS PCM + theater pad, decoupling show audio from the
-    // operator laptop. Launch the kiosk browser with
-    // --autoplay-policy=no-user-gesture-required (or click once) so the
-    // AudioContext may start.
-    const wantAudio = new URLSearchParams(location.search).has('audio');
-    connect({ readOnly: true, audio: wantAudio });
+    // operator laptop. /case?mic=1 makes it the booth's microphone: it
+    // records the plea and uploads it over its own socket (the operator
+    // console defers while a mic kiosk is live). Launch the kiosk browser
+    // with --autoplay-policy=no-user-gesture-required (or click once) so the
+    // AudioContext may start, and grant mic permission (kiosk setup uses
+    // --use-fake-ui-for-media-stream to auto-accept — see deploy/spark-kiosk).
+    const params = new URLSearchParams(location.search);
+    const wantAudio = params.has('audio');
+    const wantMic = params.has('mic');
+    connect({ readOnly: true, audio: wantAudio, mic: wantMic });
     if (wantAudio) window.addEventListener('pointerdown', resumeAudio);
   });
   return (

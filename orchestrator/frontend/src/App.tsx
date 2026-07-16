@@ -13,8 +13,10 @@ import {
   clockPausedMs,
   serverError,
   log,
+  micOwnerPresent,
   phaseDeadlineAt,
   phaseDeadlineLabel,
+  pleaRecordingActive,
   pleaWindowOpen,
   recording,
   startTrial,
@@ -98,12 +100,30 @@ export default function App() {
       if (e.code === 'Space') { e.preventDefault(); startTrial(); }
       if (e.code === 'KeyP' && pleaWindowOpen()) {
         e.preventDefault();
-        if (recording()) void endPlea(); else void beginPlea();
+        void pleaAction();
       }
     });
   });
 
+  // The plea control adapts to who owns the booth mic. Local mic (no kiosk):
+  // toggle this console's recorder. Kiosk mic (?mic=1 view live): the kiosk
+  // records; the console's press closes the window early through the server
+  // (same path as the defendant's done-talking button), which flushes the
+  // kiosk's capture.
+  async function pleaAction() {
+    if (micOwnerPresent()) {
+      if (pleaWindowOpen()) await fetch('/operator/defendant_press', { method: 'POST' });
+      return;
+    }
+    if (recording()) void endPlea(); else void beginPlea();
+  }
+
   const pleaButtonLabel = () => {
+    if (micOwnerPresent()) {
+      if (pleaRecordingActive()) return 'End plea (P) — kiosk mic';
+      if (pleaWindowOpen()) return 'Close plea window (P) — kiosk mic';
+      return 'Plea (kiosk mic)';
+    }
     if (recording()) return 'Stop pleading (P)';
     if (pleaWindowOpen()) return 'Plead (P)';
     return 'Plea (waiting for plea window)';
@@ -119,8 +139,8 @@ export default function App() {
         <div class="controls">
           <button onClick={startTrial}>Start (Space)</button>
           <button
-            class={`plea ${recording() ? 'recording' : ''}`}
-            onClick={() => (recording() ? endPlea() : beginPlea())}
+            class={`plea ${recording() || (micOwnerPresent() && pleaRecordingActive()) ? 'recording' : ''}`}
+            onClick={() => void pleaAction()}
             disabled={!pleaWindowOpen() && !recording()}
           >
             {pleaButtonLabel()}
@@ -131,6 +151,11 @@ export default function App() {
       <Show when={recording()}>
         <div class="recording-banner">
           <span class="dot" /> Recording — speak your plea, click Stop or press P when done.
+        </div>
+      </Show>
+      <Show when={!recording() && micOwnerPresent() && pleaRecordingActive()}>
+        <div class="recording-banner">
+          <span class="dot" /> Recording on the booth mic (kiosk) — P closes the window early.
         </div>
       </Show>
       <Show when={fireHeldReason()}>

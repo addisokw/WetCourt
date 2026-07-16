@@ -60,6 +60,13 @@ pub struct AppState {
     /// Monotonic `/ws/view?audio=1` generation — the newest audio viewer is the
     /// booth's speakers; older ones silently stop receiving PCM.
     pub audio_generation: Arc<AtomicUsize>,
+    /// Monotonic `/ws/view?mic=1` generation — the newest mic viewer is the
+    /// booth's microphone; uplink from superseded ones is silently dropped.
+    pub mic_generation: Arc<AtomicUsize>,
+    /// True while a live `?mic=1` viewer is connected. Mirrored into the
+    /// snapshot and broadcast as `MicOwner` so the operator console knows to
+    /// keep its own microphone shut (and to take over if the kiosk dies).
+    pub mic_present: Arc<AtomicBool>,
     /// Buffer for binary plea audio uploaded by the frontend across multiple
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
@@ -1009,21 +1016,43 @@ async fn view_ws_handler(
     Query(q): Query<ViewWsParams>,
     AxumState(state): AxumState<AppState>,
 ) -> impl IntoResponse {
-    let audio_gen = q
-        .audio
-        .filter(|a| matches!(a.as_str(), "1" | "true" | "yes"))
-        .map(|_| state.audio_generation.fetch_add(1, Ordering::SeqCst) + 1);
-    ws.on_upgrade(move |socket| view_ws_session(socket, state, audio_gen))
+    let flag = |v: &Option<String>| {
+        v.as_deref()
+            .is_some_and(|a| matches!(a, "1" | "true" | "yes"))
+    };
+    let audio_gen = flag(&q.audio)
+        .then(|| state.audio_generation.fetch_add(1, Ordering::SeqCst) + 1);
+    let mic_gen = flag(&q.mic)
+        .then(|| state.mic_generation.fetch_add(1, Ordering::SeqCst) + 1);
+    ws.on_upgrade(move |socket| view_ws_session(socket, state, audio_gen, mic_gen))
 }
 
 #[derive(Deserialize)]
 struct ViewWsParams {
     #[serde(default)]
     audio: Option<String>,
+    #[serde(default)]
+    mic: Option<String>,
 }
 
-async fn view_ws_session(mut socket: WebSocket, state: AppState, audio_gen: Option<usize>) {
-    info!(audio = audio_gen.is_some(), "view ws client connected");
+async fn view_ws_session(
+    mut socket: WebSocket,
+    state: AppState,
+    audio_gen: Option<usize>,
+    mic_gen: Option<usize>,
+) {
+    info!(
+        audio = audio_gen.is_some(),
+        mic = mic_gen.is_some(),
+        "view ws client connected"
+    );
+    // A mic viewer announces itself so the operator console shuts its own mic.
+    if mic_gen.is_some() {
+        state.mic_present.store(true, Ordering::SeqCst);
+        let _ = state
+            .display_bcast
+            .send(DisplayMessage::Json(DisplayEvent::MicOwner { present: true }));
+    }
     let _ = socket
         .send(Message::Text(
             serde_json::to_string(&snapshot_event(&state)).unwrap().into(),
@@ -1060,12 +1089,33 @@ async fn view_ws_session(mut socket: WebSocket, state: AppState, audio_gen: Opti
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
-            msg = socket.recv() => match msg {
-                Some(Ok(Message::Close(_))) | None => break,
-                Some(Ok(_)) => {} // ignore — read-only
-                Some(Err(e)) => { warn!("view ws error: {e}"); break; }
+            msg = socket.recv() => {
+                // Uplink is accepted only from the *current* mic viewer: the
+                // plea lifecycle events and the recorded audio frames. Everyone
+                // else stays read-only (superseded mic viewers included).
+                let live_mic = mic_gen
+                    .is_some_and(|g| state.mic_generation.load(Ordering::SeqCst) == g);
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Text(t))) if live_mic => {
+                        handle_client_text(&t, &state).await;
+                    }
+                    Some(Ok(Message::Binary(b))) if live_mic => {
+                        state.plea_buffer.lock().await.extend_from_slice(&b);
+                    }
+                    Some(Ok(_)) => {} // ignore — read-only
+                    Some(Err(e)) => { warn!("view ws error: {e}"); break; }
+                }
             }
         }
+    }
+    // If the live mic viewer is going away, hand the mic back to the operator
+    // console (superseded viewers don't clear the newer owner's claim).
+    if mic_gen.is_some_and(|g| state.mic_generation.load(Ordering::SeqCst) == g) {
+        state.mic_present.store(false, Ordering::SeqCst);
+        let _ = state
+            .display_bcast
+            .send(DisplayMessage::Json(DisplayEvent::MicOwner { present: false }));
     }
     info!("view ws client disconnected");
 }
@@ -1105,6 +1155,7 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
         }),
         clock_paused: snap.paused_remaining.is_some(),
         maintenance: s.maintenance.load(Ordering::Relaxed),
+        mic_owner: s.mic_present.load(Ordering::SeqCst),
     }
 }
 
@@ -1194,6 +1245,10 @@ async fn handle_client_text(text: &str, state: &AppState) {
     match serde_json::from_str::<ClientEvent>(text) {
         Ok(ClientEvent::Ready) => debug!("client ready"),
         Ok(ClientEvent::PleaRecordingStarted) => {
+            // A fresh recording is starting: drop any bytes a dead client
+            // uploaded before it vanished mid-window (a stale partial blob
+            // prepended to the new one would corrupt the container format).
+            state.plea_buffer.lock().await.clear();
             // Hand to the state machine — it resets the plea-window deadline
             // and emits the PleaRecording + PhaseDeadline broadcasts.
             let _ = state.event_tx.send(Event::PleaRecordingStarted).await;

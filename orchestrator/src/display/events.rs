@@ -31,6 +31,9 @@ pub enum DisplayEvent {
         /// The window's clock is paused for a lawyer consultation.
         clock_paused: bool,
         maintenance: bool,
+        /// A dedicated booth-mic client (`/ws/view?mic=1` kiosk) is live, so
+        /// the operator console must keep its own microphone shut.
+        mic_owner: bool,
     },
     ShowCharge { text: String },
     /// "next binary frame is audio in this format" — emitted before each chunk
@@ -109,6 +112,11 @@ pub enum DisplayEvent {
     /// Operator-facing problem banner (e.g. printer not ready / print failed).
     /// The show goes on; this is "something needs a human" feedback.
     Error { message: String },
+    /// A dedicated booth-mic client (`/ws/view?mic=1`) connected or dropped.
+    /// While present, the operator console suppresses its own microphone; on
+    /// `present: false` mid-window the console takes the mic back so the plea
+    /// isn't lost to a kiosk crash.
+    MicOwner { present: bool },
 }
 
 #[derive(Debug, Clone, Deserialize)]
