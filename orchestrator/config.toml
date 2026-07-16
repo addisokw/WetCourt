@@ -1,9 +1,11 @@
 # Production config — orchestrator container on the DGX Spark.
-# Talks to LiteLLM over the private docker network. Real microcontroller on USB.
+# The container runs with host networking (the MCU TCP dial-in and the UDP
+# discovery beacon need the host's LAN presence), so sibling services are
+# reached via their host-published ports on 127.0.0.1.
 
 [inference]
 mode = "real"
-base_url = "http://litellm:4000"
+base_url = "http://127.0.0.1:4000"
 chat_model = "qwen3.6-35b-a3b"
 stt_model = "whisper-1"     # LiteLLM route name; resolves to Parakeet on the Spark
 tts_model = "kokoro-tts"
@@ -38,7 +40,7 @@ tts_latency_ms = 200
 # Fallback fire duration (ms) used only when no squirt calibration exists.
 # The show's guilty shot uses the console-tuned `fire_ms` from
 # calibration/squirt.toml — tune it there, not here.
-duration_ms = 150
+duration_ms = 30
 
 [crimes]
 # Curated charge list (dir mounted into the container; operator edits
@@ -48,7 +50,7 @@ source = "list"
 no_repeat_window = 15
 
 [trial]
-plea_window_secs = 20
+plea_window_secs = 45
 charge_display_secs = 5
 cooldown_secs = 4
 # Fallback/mock conviction rate. The live path uses the active persona's own
@@ -68,6 +70,24 @@ question_timeout_secs = 12
 [display]
 listen_addr = "0.0.0.0:8080"
 
+[vision]
+# Turret vision container (serves /feed + /state); host networking, so
+# localhost reaches it. The orchestrator reverse-proxies it at /vision/* and
+# re-pushes the saved calibration/vision.toml tuning whenever it (re)starts.
+base_url = "http://127.0.0.1:8091"
+trial_targeting = true
+
+# Guilty "moment of justice" capture: burst of clean frames from the vision
+# service around the blast; one is dithered onto the keepsake receipt.
+# dir is absolute — the relative default would resolve against the container's
+# CWD (/), not the bind-mounted /app.
+[capture]
+enabled = true
+dir = "/app/captures"
+fire_delay_ms = 100
+frames = 8
+interval_ms = 110
+
 [logging]
 level = "info"
 log_file = "/var/log/booth/booth.log"
@@ -75,7 +95,7 @@ transcripts_jsonl = "/var/log/booth/transcripts.jsonl"
 
 # Thermal-printer keepsake transcript handed to defendants. The casebook trial
 # log (transcripts_jsonl above) is written regardless; this governs the physical
-# receipt only. mode: "off" | "mock" (render, no USB) | "real" (send to USB).
+# receipt only. mode: "off" | "mock" (render, no output) | "real" (USB/LAN).
 # qr_url and booth_location are meant to be edited on-site as the booth moves.
 [printer]
 mode = "real"
@@ -86,15 +106,22 @@ net_addr = "192.168.123.100"
 width_dots = 576
 qr_url = "https://wetcourt.lol"
 booth_location = "Find the Wet Court near you"
-# Fixed-length strip calibration (2026-07-11 calipers pass): 17.0mm from the
-# cut edge to the first printable line, and vertical commands (ESC J / ESC 3)
-# move in Epson-default 1/360" units, not 203-dpi dots.
-head_to_cutter_dots = 136
-feed_units_per_inch = 360
+# Motion calibration for the booth LAN printer (2026-07-12 bounded-strip
+# pass): vertical unit is 1/414.5", the cutter self-feeds ~2.65mm before the
+# blade drops, head-to-blade gap 15.9mm. These three are PER-PRINTER — the
+# USB dev POS-80 uses 360/136/0 — don't copy between units.
+feed_units_per_inch = 414
+head_to_cutter_dots = 127
+cut_advance_dots = 21
 # The booth unit is mounted upside down: rotate every print 180° (reversed
 # content order + ESC { per-line rotation) so the emerging receipt reads
 # correctly in the mount.
 upside_down = true
+# Image tone for this head (2026-07-12 ladder pass against a capture frame):
+# it crushes shadows, so lift mid-tones hard and dither with Atkinson.
+image_gamma = 0.5
+image_contrast = 0.85
+image_dither = "atkinson"
 
 # Call-your-lawyer phone service (counsel). On the Spark both run with host
 # networking, so localhost reaches it; the console proxies /lawyer/* there.

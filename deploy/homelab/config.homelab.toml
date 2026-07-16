@@ -16,7 +16,6 @@ base_url = "http://your-spark:4000"
 chat_model = "qwen3.6-35b-a3b"
 stt_model = "whisper-1"
 tts_model = "kokoro-tts"
-tts_voice = "bm_george"
 charge_timeout_secs = 10
 verdict_first_token_timeout_secs = 15
 verdict_total_timeout_secs = 30
@@ -29,8 +28,6 @@ enable_thinking = false
 # booth dials in over the network, set driver = "tcp" (the MCU connects to this
 # host's :8090) — or override with BOOTH__HARDWARE__DRIVER=tcp.
 driver = "mock"
-serial_port = "COM4"        # ignored unless driver = "serial"
-baud = 115200
 ack_timeout_ms = 3000
 bind_addr = "0.0.0.0:8090"
 
@@ -46,9 +43,10 @@ deliberate_latency_ms = 1200
 tts_latency_ms = 200
 
 [squirt]
-# The squirt gun is binary: every guilty verdict fires for this fixed
-# duration (ms).
-duration_ms = 150
+# Fallback fire duration (ms) used only when no squirt calibration exists
+# (mock hardware here, so it's cosmetic — kept in step with the tuned dev
+# value).
+duration_ms = 30
 
 [crimes]
 # Path relative to this config file → /app/crimes/wet_court_crimes.json inside
@@ -58,10 +56,12 @@ source = "list"
 no_repeat_window = 15
 
 [trial]
-plea_window_secs = 20
+plea_window_secs = 45
 charge_display_secs = 5
 cooldown_secs = 4
-guilty_bias = 0.7
+# Fallback/mock conviction rate (the live path uses the active persona's own
+# guilty_bias) — kept in step with the tuned dev value.
+guilty_bias = 0.55
 
 [cross_examination]
 enabled = true

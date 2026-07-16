@@ -105,20 +105,21 @@ services:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
 
+  # Host networking on purpose (like counsel): the MCU fleet dials the TCP
+  # listener on :8090, and the UDP discovery beacon broadcasts to
+  # 255.255.255.255:8091 — broadcast doesn't cross the bridge network's NAT,
+  # so in bridge mode the beacon-discovery NanoC6s would never find the Spark.
+  # It reaches litellm/vision/counsel via their host ports (127.0.0.1).
+  # Host ports used: 8080 (console), 8090 (MCU TCP).
   orchestrator:
     image: local/booth-orchestrator:latest
     build:
       context: ../orchestrator
     container_name: orchestrator
     restart: unless-stopped
-    networks: [ai]
+    network_mode: host
     depends_on:
       - litellm
-    ports:
-      - "0.0.0.0:8080:8080"
-    # Phase 4 will plug in the microcontroller; uncomment when ready:
-    # devices:
-    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
     environment:
       BOOTH__INFERENCE__API_KEY: ${LITELLM_MASTER_KEY}
       RUST_LOG: info
@@ -127,7 +128,38 @@ services:
       # Writable: persona Save and crime curation persist back into the checkout.
       - ../orchestrator/personas:/app/personas
       - ../orchestrator/crimes:/app/crimes
+      # Writable: console-tuned per-device calibration (squirt fire_ms, vision
+      # gains/boresight, servo trims) — without this mount every container
+      # rebuild silently reverts to defaults.
+      - ../orchestrator/calibration:/app/calibration
+      # Writable: custom print templates saved from the console's Print tab.
+      - ../orchestrator/print_templates.json:/app/print_templates.json
+      # Guilty-moment capture frames ([capture] dir in config.toml).
+      - ../orchestrator/captures:/app/captures
       - booth-logs:/var/log/booth
+
+  # Turret vision (webcam bolted to the gun → pose detection → /feed + /state).
+  # Host networking like counsel/orchestrator: the orchestrator proxies it at
+  # 127.0.0.1:8091 and it streams aim back to the console at 127.0.0.1:8080.
+  # CPU-only. The webcam must be plugged into the Spark itself.
+  vision:
+    image: local/booth-vision:latest
+    build:
+      context: ../vision
+    container_name: vision
+    restart: unless-stopped
+    network_mode: host
+    devices:
+      - "/dev/video0:/dev/video0"
+    environment:
+      BOOTH_VISION_PORT: "8091"
+      BOOTH_VISION_ORCH: http://127.0.0.1:8080
+    volumes:
+      # Pre-downloaded pose model (vision/models/pose_landmarker_lite.task):
+      # no internet needed at the venue. Tuning (gains/boresight/target) is
+      # NOT stored here — the orchestrator re-pushes the saved values from
+      # calibration/vision.toml whenever this service (re)starts.
+      - ../vision/models:/app/models
 
   # Call-your-lawyer phone (SIP endpoint for the booth's HT801 + analog
   # phone). Host networking on purpose: SIP advertises real IPs inside

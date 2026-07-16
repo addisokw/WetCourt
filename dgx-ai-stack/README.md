@@ -4,12 +4,17 @@ A single OpenAI-compatible endpoint on an NVIDIA DGX Spark exposing **chat
 completions, text-to-speech, and audio transcription** for the booth.
 
 ```
-LAN ─► :4000  litellm  (the only thing exposed on the LAN)
+LAN ─► :4000  litellm
               │  /v1/chat/completions       ─► vllm-nvfp4   :8000  (Qwen3.6-35B-A3B-NVFP4, vLLM)
               │  /v1/audio/speech           ─► kokoro       :8880  (Kokoro-FastAPI, 67 voices)
               │  /v1/audio/transcriptions   ─► parakeet     :8082  (NVIDIA Parakeet TDT 0.6B v2)
               │  /v1/models
               └──────────── ai-stack docker network (private) ────────────
+
+LAN ─► :8080  orchestrator (host net) — console + visitor UI, proxies /vision/* and /lawyer/*
+       :8090  orchestrator — MCU fleet dials in (TCP line protocol; UDP beacon → 255.255.255.255:8091)
+       :8091  vision (host net) — turret webcam → pose targeting (/feed, /state)
+       :5060  counsel (host net) — call-your-lawyer SIP + RTP
 ```
 
 Hardware: DGX Spark (`user@dgx-spark`) — Grace Blackwell GB10 (sm_121),
@@ -20,7 +25,7 @@ CUDA 13.0, driver 580.142, Ubuntu 24.04 aarch64, 121 GiB unified memory.
 ```
 dgx-ai-stack/
 ├── ai-stack                  Wrapper script — run from the Mac to control the stack
-├── docker-compose.yml        Services (vllm-nvfp4, parakeet, kokoro, litellm, orchestrator)
+├── docker-compose.yml        Services (vllm-nvfp4, parakeet, kokoro, litellm, orchestrator, vision, counsel)
 ├── .env                      Secrets + model paths (chmod 600, do not commit)
 ├── .env.example              Template
 ├── litellm/config.yaml       Routes /v1/* to the right backend
@@ -64,11 +69,14 @@ reboot of the Spark the stack comes back automatically — you only need
 | `parakeet` | `local/parakeet:latest` (NeMo on NGC pytorch:25.11) | 8082 | ~2 GiB | STT / `/v1/audio/transcriptions` |
 | `kokoro` | `kokoro-tts-arm64:latest` | 8880 | ~2 GiB | TTS / `/v1/audio/speech` |
 | `litellm` | `ghcr.io/berriai/litellm:main-stable` | 4000 (LAN-exposed) | ~1 GiB | OpenAI router |
-| `orchestrator` | `local/booth-orchestrator:latest` (built from `../orchestrator`) | 8080 (LAN-exposed) | small | Booth state machine + operator/visitor UI |
+| `orchestrator` | `local/booth-orchestrator:latest` (built from `../orchestrator`) | host net: 8080 console, 8090 MCU TCP + UDP beacon | small | Booth state machine + operator/visitor UI |
+| `vision` | `local/booth-vision:latest` (built from `../vision`) | host net: 8091 | ~1 GiB, CPU-only | Turret webcam → pose targeting (`/feed`, `/state`); needs `/dev/video0` |
+| `counsel` | `local/booth-counsel:latest` (built from `../orchestrator`) | host net: SIP 5060 + RTP range | small | Call-your-lawyer phone (HT801) |
 
-The orchestrator can instead run on another machine against this stack
-(`../orchestrator/README.md` § Deployment topologies). In that shape, stop
-the Spark's copy: `./ai-stack stop orchestrator`.
+The orchestrator and vision can instead run on another machine against this
+stack (`../orchestrator/README.md` § Deployment topologies). In that shape,
+stop the Spark's copies — `./ai-stack stop orchestrator vision` — and
+remember only one `driver = "tcp"` orchestrator may beacon per LAN.
 
 Working set: ~67 GiB out of 121 GiB — vLLM reserves ~60 GiB up front (model ~20 GiB +
 KV cache at `--gpu-memory-utilization 0.5`), parakeet ~3 GiB, the rest small. Lower the

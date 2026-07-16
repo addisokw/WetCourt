@@ -43,14 +43,13 @@ stack. `./ai-stack` brings it all up together.
 `cargo run` on a laptop or booth PC that reaches LiteLLM over the network.
 This is the everyday dev loop, but it's equally valid for production: the
 MCU dials the orchestrator over WiFi, so real hardware works from any host
-the MCU can reach. (Today this shape needs *no* compose change for hardware,
-unlike A — see the `:8090` gap note under Production.)
+the MCU can reach.
 
 What actually differs:
 
 | Knob | A: co-located (`config.toml`) | B: remote (`config.dev.toml`) |
 |---|---|---|
-| `inference.base_url` | `http://litellm:4000` (docker network) | Spark's LAN/Tailscale address, e.g. `http://<spark-tailscale-ip>:4000` |
+| `inference.base_url` | `http://127.0.0.1:4000` (host networking) | Spark's LAN/Tailscale address, e.g. `http://<spark-tailscale-ip>:4000` |
 | API key | injected by compose from the Spark's `.env` | auto-loaded from `.env` (repo root or `dgx-ai-stack/.env`) |
 | `hardware.driver` | `tcp` — MCU dials the Spark's `:8090` | `mock` by default; set `tcp` and the MCU dials this machine's `:8090` |
 | Personas + crime list | bind-mounted from the Spark's checkout | read/written in the local checkout |
@@ -223,10 +222,24 @@ cd dgx-ai-stack
 ./ai-stack    # builds and starts everything including orchestrator
 ```
 
-Production `config.toml` runs `inference.mode = "real"` against
-`http://litellm:4000` and `hardware.driver = "tcp"` listening on `:8090` for
-the MCU. **Gap:** the compose file currently publishes only `8080`, so the
-MCU can't reach the containerized `:8090` listener — add a
-`"0.0.0.0:8090:8090"` port mapping before pairing real hardware in
-production (laptop-hosted runs are unaffected). Logs and trial transcripts
-(JSONL) land in the `booth-logs` volume at `/var/log/booth/`.
+Production `config.toml` runs `inference.mode = "real"` and
+`hardware.driver = "tcp"` listening on `:8090` for the MCU fleet. The
+container uses **host networking**: the TCP listener sits directly on the
+Spark's LAN address and the UDP discovery beacon (broadcast to
+`255.255.255.255:8091`) actually reaches the LAN — from a bridge network the
+broadcast would die at the NAT and beacon-discovery firmware would never
+find the Spark. Sibling services are therefore addressed as
+`127.0.0.1:<host port>` in `config.toml` (litellm `:4000`, vision `:8091`,
+counsel `:8092`). Console-tuned state persists into the checkout via bind
+mounts (personas, crimes, `calibration/`, `print_templates.json`,
+`captures/`); logs and trial transcripts (JSONL) land in the `booth-logs`
+volume at `/var/log/booth/`.
+
+Careful: only ONE beaconing orchestrator per LAN — when the Spark's
+container is up, don't also run a laptop copy with `driver = "tcp"`
+(`./ai-stack stop orchestrator` to hand the fleet back to a laptop).
+
+With a monitor/speaker/mic attached to the Spark, a Chromium kiosk at
+`/case?audio=1&mic=1` becomes the booth's whole A/V head (case display, TTS
+playback, plea recording) while the operator console keeps every control —
+see [`deploy/spark-kiosk/`](../deploy/spark-kiosk/README.md).

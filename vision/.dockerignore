@@ -1,0 +1,5 @@
+# Keep the build context tiny — the image only needs vision.py.
+.venv
+__pycache__
+models
+*.mp4
