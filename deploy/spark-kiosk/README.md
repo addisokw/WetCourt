@@ -64,6 +64,25 @@ control. Division of labor during a trial:
    systemctl --user enable --now wetcourt-kiosk
    ```
 
+## Manual launch (testing, before the unit is installed)
+
+From a terminal in the Spark's desktop session:
+
+```sh
+chromium --user-data-dir=$HOME/.wetcourt-kiosk \
+  --autoplay-policy=no-user-gesture-required \
+  --use-fake-ui-for-media-stream \
+  "http://localhost:8080/case?audio=1&mic=1"
+```
+
+Same flags as the unit minus `--kiosk`, so you keep window controls while
+testing (add `--kiosk` for full-screen; exit that with Alt+F4 — Esc doesn't
+quit it). Drop `&mic=1` if you only want the display + speakers. Using the
+same `--user-data-dir` as the unit means anything you grant or set here
+carries over. Don't run the manual copy and the systemd unit at the same
+time — they'd fight over the profile dir (the newest connection still wins
+speakers/mic server-side, but Chromium itself will complain).
+
 ## Verify (mock trial)
 
 1. Kiosk shows the case view full-screen; booth log shows

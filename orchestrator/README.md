@@ -110,10 +110,13 @@ Everything is served on `:8080` (`display.listen_addr`):
 | `/` | Operator console: state banner, Start/Plea/E-Stop, turret-feed + case-view preview panes, event log, persona panel | Operator |
 | `/case` | Standalone case view: charge, plea countdown, transcript, verdict | Visitor-facing monitor |
 | `/case?audio=1` | Case view that is also the booth's speakers: plays TTS + theater pad (newest audio viewer wins; launch the kiosk with `--autoplay-policy=no-user-gesture-required`) | Booth kiosk |
+| `/case?audio=1&mic=1` | …and also the booth's microphone: records + uploads the plea (newest mic viewer wins; the console defers while one is live and takes over if it dies). Manual-launch command in [`deploy/spark-kiosk/`](../deploy/spark-kiosk/README.md) | Booth kiosk (Spark A/V head) |
 
 Keyboard on the console: **Space** starts a trial, **P** starts/stops plea
-recording (browser asks for mic permission on first use). Plea audio is
-captured with MediaRecorder and uploaded over the WS as binary.
+recording (browser asks for mic permission on first use) — or, when a
+`?mic=1` kiosk owns the booth mic, **P** closes the plea window early
+through the server. Plea audio is captured with MediaRecorder and uploaded
+over the WS as binary.
 
 The console uses the single-client `/ws` socket (read+write); `/case` uses
 the multi-client read-only `/ws/view`, so you can mirror it on as many
