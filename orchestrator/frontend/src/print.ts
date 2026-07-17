@@ -13,6 +13,7 @@ export type Font = 'a' | 'b';
 export type Ecc = 'l' | 'm' | 'q' | 'h';
 export type Symbology = 'code128' | 'code39' | 'ean13' | 'upca';
 export type DitherKind = 'fs' | 'atkinson' | 'bayer' | 'none';
+export type BannerStyle = 'solid' | 'outline' | 'ascii';
 
 // Client-only fields are prefixed with `_` and stripped before POSTing.
 export interface TextBlock {
@@ -67,7 +68,23 @@ export interface ImageBlock {
   _name?: string;
   _uid: string;
 }
-export type PrintBlock = TextBlock | RuleBlock | FeedBlock | QrBlock | BarcodeBlock | ImageBlock;
+/** Sideways banner: huge letters spanning the paper width, text running down
+ * the tape — rotate the strip counter-clockwise to read it. */
+export interface BannerBlock {
+  type: 'banner';
+  text: string;
+  /** Letter height as % of the printable width (20–100). */
+  height_pct: number;
+  style: BannerStyle;
+  _uid: string;
+}
+export type PrintBlock = TextBlock | RuleBlock | FeedBlock | QrBlock | BarcodeBlock | ImageBlock | BannerBlock;
+
+/** Blocks whose exact raster comes from a server preview round-trip. */
+export type PreviewedBlock = QrBlock | ImageBlock | BannerBlock;
+export function needsPreview(b: PrintBlock): b is PreviewedBlock {
+  return b.type === 'qr' || b.type === 'image' || b.type === 'banner';
+}
 
 export interface TemplateMeta {
   name: string;
@@ -133,6 +150,8 @@ export function newBlock(type: PrintBlock['type']): PrintBlock {
       return { type, data: '', symbology: 'code128', height: 80, width: 3, _uid };
     case 'image':
       return { type, data_b64: '', dither: printerInfo().image_dither, width_pct: 100, shrink: false, gamma: null, brightness: null, contrast: null, _uid };
+    case 'banner':
+      return { type, text: '', height_pct: 100, style: 'solid', _uid };
   }
 }
 
@@ -219,6 +238,7 @@ export function blockHeight(
       return bounded && b.flex > 0 ? 0 : b.lines * FEED_LINE_DOTS;
     case 'qr':
     case 'image':
+    case 'banner':
       return preview?.h ?? 0;
     case 'barcode':
       return b.height + (bounded ? 0 : FEED_LINE_DOTS);
@@ -377,15 +397,15 @@ function setPreview(uidKey: string, p: BlockPreview) {
 
 const previewTimers: Record<string, number> = {};
 
-/** Debounced server round-trip for a QR/image block's exact raster. */
-export function schedulePreview(b: QrBlock | ImageBlock): void {
+/** Debounced server round-trip for a QR/image/banner block's exact raster. */
+export function schedulePreview(b: PreviewedBlock): void {
   clearTimeout(previewTimers[b._uid]);
   previewTimers[b._uid] = window.setTimeout(() => {
     void refreshPreview(b);
   }, 300);
 }
 
-export async function refreshPreview(b: QrBlock | ImageBlock): Promise<void> {
+export async function refreshPreview(b: PreviewedBlock): Promise<void> {
   try {
     if (b.type === 'qr') {
       if (!b.data) return;
@@ -393,6 +413,13 @@ export async function refreshPreview(b: QrBlock | ImageBlock): Promise<void> {
         data: asciify(b.data),
         module: b.module,
         ecc: b.ecc,
+      }));
+    } else if (b.type === 'banner') {
+      if (!b.text.trim()) return;
+      setPreview(b._uid, await fetchPreviewPng('/operator/print/preview_banner', {
+        text: b.text,
+        height_pct: b.height_pct,
+        style: b.style,
       }));
     } else {
       if (!b.data_b64) return;

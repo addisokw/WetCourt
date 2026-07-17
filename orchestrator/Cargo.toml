@@ -40,6 +40,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 base64 = "0.22"
 image = "0.25"
 qrcode = { version = "0.14", default-features = false }
+font8x8 = "0.3"
 
 [profile.release]
 lto = "thin"

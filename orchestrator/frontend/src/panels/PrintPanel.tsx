@@ -1,5 +1,6 @@
 import { createMemo, createSignal, Index, onMount, Show } from 'solid-js';
 import {
+  BannerBlock,
   BarcodeBlock,
   DOTS_PER_MM,
   FeedBlock,
@@ -8,6 +9,7 @@ import {
   QrBlock,
   TextBlock,
   blocks,
+  needsPreview,
   colsFor,
   deleteTemplate,
   fetchPrinterInfo,
@@ -50,7 +52,7 @@ export default function PrintPanel() {
     // Previews are session-scoped blob URLs — refetch for a draft that came
     // back from a tab switch with revoked/missing images.
     for (const b of blocks()) {
-      if ((b.type === 'qr' || b.type === 'image') && !previews()[b._uid]?.url) {
+      if (needsPreview(b) && !previews()[b._uid]?.url) {
         void refreshPreview(b);
       }
     }
@@ -83,7 +85,7 @@ export default function PrintPanel() {
         return changed;
       }),
     );
-    if (changed && (changed.type === 'qr' || changed.type === 'image')) {
+    if (changed && needsPreview(changed)) {
       schedulePreview(changed);
     }
   }
@@ -170,6 +172,7 @@ export default function PrintPanel() {
               <button onClick={() => add('qr')}>+ QR</button>
               <button onClick={() => add('barcode')}>+ Barcode</button>
               <button onClick={() => add('image')}>+ Image</button>
+              <button onClick={() => add('banner')}>+ Banner</button>
             </div>
 
             <Show when={blocks().length === 0}>
@@ -429,6 +432,47 @@ export default function PrintPanel() {
                       );
                     }}
                   </Show>
+
+                  <Show when={b().type === 'banner'}>
+                    {(_) => {
+                      const bn = () => b() as BannerBlock;
+                      return (
+                        <>
+                          <div class="row-line">
+                            <input
+                              type="text"
+                              placeholder="WET COURT"
+                              maxlength="32"
+                              value={bn().text}
+                              onInput={(e) => update(i, { text: e.currentTarget.value })}
+                            />
+                            <label class="mini-label">style</label>
+                            <select value={bn().style} onChange={(e) => update(i, { style: e.currentTarget.value as BannerBlock['style'] })}>
+                              <option value="solid">solid</option>
+                              <option value="outline">outline</option>
+                              <option value="ascii">ascii art</option>
+                            </select>
+                            <label class="mini-label">height %</label>
+                            <input
+                              type="number"
+                              min="20"
+                              max="100"
+                              step="5"
+                              value={bn().height_pct}
+                              onInput={(e) => update(i, { height_pct: Number(e.currentTarget.value) })}
+                            />
+                          </div>
+                          <p class="muted small">
+                            prints sideways down the tape — rotate the strip a quarter-turn
+                            counter-clockwise (start of the strip on the left) to read it
+                          </p>
+                          <Show when={previews()[bn()._uid]?.error}>
+                            <span class="err">{previews()[bn()._uid]?.error}</span>
+                          </Show>
+                        </>
+                      );
+                    }}
+                  </Show>
                 </div>
               )}
             </Index>
@@ -475,7 +519,7 @@ export default function PrintPanel() {
                         await loadTemplate(tplPick());
                         setTplName(tplPick());
                         for (const b of blocks()) {
-                          if (b.type === 'qr' || b.type === 'image') void refreshPreview(b);
+                          if (needsPreview(b)) void refreshPreview(b);
                         }
                       })
                     }
@@ -614,7 +658,7 @@ function BlockPreviewView(props: {
         }}
       </Show>
 
-      <Show when={b().type === 'qr' || b().type === 'image'}>
+      <Show when={b().type === 'qr' || b().type === 'image' || b().type === 'banner'}>
         {(_) => {
           const pv = () => previews()[b()._uid];
           return (
@@ -623,7 +667,7 @@ function BlockPreviewView(props: {
                 when={pv()?.url}
                 fallback={
                   <div class="print-placeholder" style={{ width: px(120), height: px(120) }}>
-                    {b().type === 'qr' ? 'QR' : 'image'}
+                    {b().type === 'qr' ? 'QR' : b().type}
                   </div>
                 }
               >

@@ -1,5 +1,6 @@
 //! Operator-authored custom prints: a block document (text / rule / feed / QR /
-//! barcode / image) composed in the console's Print panel, rendered to ESC/POS.
+//! barcode / image / banner) composed in the console's Print panel, rendered to
+//! ESC/POS.
 //!
 //! Two layout modes:
 //! - **Continuous** (`length_mm: None`): print the blocks, feed, cut — like the
@@ -39,8 +40,10 @@ use crate::config::PrinterConfig;
 /// 203 dpi.
 pub const DOTS_PER_MM: f32 = 203.0 / 25.4;
 
-/// Hard ceiling on rendered output — a runaway doc melts a paper roll.
-const MAX_BYTES: usize = 512 * 1024;
+/// Hard ceiling on rendered output — a runaway doc melts a paper roll. Sized
+/// for banners, the longest legitimate print: 2MB of full-width raster is
+/// ~29k rows ≈ 3.6m of paper.
+const MAX_BYTES: usize = 2 * 1024 * 1024;
 /// Tallest single image, in raster rows (~20cm of paper).
 const MAX_IMAGE_ROWS: u32 = 1600;
 /// Dots one fixed/empty "feed line" advances (matches the firmware default).
@@ -120,6 +123,20 @@ pub enum Block {
         #[serde(default = "d_bar_w")]
         width: u8, // module width 2..=6
     },
+    /// Sideways banner: huge letters spanning the paper width, text running
+    /// down the tape — rotate the printed strip a quarter-turn
+    /// counter-clockwise (tape start on the left) to read it. Rendered from
+    /// the classic 8×8 bitmap font, so it prints in the chunky dot-matrix
+    /// style of old tractor-feed banner programs.
+    Banner {
+        text: String,
+        /// Letter height as a percentage of the printable width.
+        #[serde(default = "d_100")]
+        height_pct: u8, // 20..=100
+        /// "solid" | "outline" | "ascii" (each pixel is the letter itself).
+        #[serde(default = "d_banner_style")]
+        style: String,
+    },
     Image {
         /// Base64 PNG/JPEG (no `data:` prefix).
         data_b64: String,
@@ -151,6 +168,7 @@ fn d_sym() -> String { "code128".into() }
 fn d_bar_h() -> u8 { 80 }
 fn d_bar_w() -> u8 { 3 }
 fn d_100() -> u8 { 100 }
+fn d_banner_style() -> String { "solid".into() }
 
 // ---- validation ---------------------------------------------------------------
 
@@ -184,6 +202,16 @@ pub fn validate(doc: &PrintDoc) -> anyhow::Result<()> {
                 anyhow::ensure!(!data.is_empty() && data.len() <= 512, at("QR data must be 1-512 bytes".into()));
                 anyhow::ensure!((1..=16).contains(module), at("QR module out of range (1-16)".into()));
                 parse_ecc(ecc).map_err(at)?;
+            }
+            Block::Banner { text, height_pct, style } => {
+                let inked = super::asciify(text);
+                anyhow::ensure!(!inked.trim().is_empty(), at("banner text is empty".into()));
+                anyhow::ensure!(
+                    inked.chars().count() <= BANNER_MAX_CHARS,
+                    at(format!("banner text too long ({} chars, max {})", inked.chars().count(), BANNER_MAX_CHARS))
+                );
+                anyhow::ensure!((20..=100).contains(height_pct), at("height_pct out of range (20-100)".into()));
+                parse_banner_style(style).map_err(at)?;
             }
             Block::Barcode { data, symbology, height, width } => {
                 validate_barcode(data, symbology).map_err(at)?;
@@ -429,6 +457,15 @@ fn prepare(blk: &Block, width_dots: u32, cfg: &PrinterConfig) -> anyhow::Result<
             raster: qr_raster(data, *module as u32, parse_ecc(ecc).map_err(anyhow::Error::msg)?)?,
             shrink: None,
         },
+        Block::Banner { text, height_pct, style } => Prep::Raster {
+            raster: banner_raster(
+                &super::asciify(text),
+                width_dots,
+                *height_pct as u32,
+                parse_banner_style(style).map_err(anyhow::Error::msg)?,
+            )?,
+            shrink: None,
+        },
         Block::Barcode { data, symbology, height, width } => {
             let sym = match symbology.as_str() {
                 "code128" => Sym::Code128,
@@ -491,6 +528,152 @@ fn qr_raster(data: &str, module: u32, ecc: qrcode::EcLevel) -> anyhow::Result<Ra
         }
     }
     Ok(c.raster())
+}
+
+// ---- banner rendering -----------------------------------------------------------
+
+/// Ceiling on banner text. 32 full-width glyphs are ~2.6m of paper — the
+/// MAX_BYTES guard would catch it anyway, but this fails with a message about
+/// the text instead of kilobytes.
+const BANNER_MAX_CHARS: usize = 32;
+/// Inter-letter gap, in glyph cells (a glyph is 8 cells tall).
+const BANNER_GAP_CELLS: u32 = 1;
+/// Advance for a word space, in glyph cells (no extra gap on top).
+const BANNER_SPACE_CELLS: u32 = 4;
+
+#[derive(Clone, Copy, PartialEq)]
+enum BannerStyle {
+    /// Filled block letters.
+    Solid,
+    /// Hollow letters — the glyph's outer edge only. Kind on the thermal head
+    /// (a solid 72mm letter is a lot of sustained heat) and on the ink look.
+    Outline,
+    /// Each glyph pixel is a miniature of the same character — the classic
+    /// line-printer banner fill.
+    Ascii,
+}
+
+fn parse_banner_style(s: &str) -> Result<BannerStyle, String> {
+    match s {
+        "solid" => Ok(BannerStyle::Solid),
+        "outline" => Ok(BannerStyle::Outline),
+        "ascii" => Ok(BannerStyle::Ascii),
+        other => Err(format!("unknown banner style '{other}'")),
+    }
+}
+
+/// 8×8 glyph rows for a printable-ASCII char; bit `x` of row `y` (LSB =
+/// leftmost pixel) is the pixel at (x, y). Input is already asciify'd, so
+/// anything out of range prints as '?'.
+fn banner_glyph(ch: char) -> [u8; 8] {
+    let i = ch as usize;
+    if (0x20..0x7f).contains(&i) { font8x8::legacy::BASIC_LEGACY[i] } else { font8x8::legacy::BASIC_LEGACY[b'?' as usize] }
+}
+
+/// Inked column extent (inclusive min..=max) of a glyph, `None` when blank.
+/// Trimming to the extent gives proportional letter spacing — the font pads
+/// narrow glyphs with blank columns that would read as ragged gaps at 9mm/cell.
+fn banner_glyph_cols(g: &[u8; 8]) -> Option<(u32, u32)> {
+    let cols: Vec<u32> = (0..8u32).filter(|gx| g.iter().any(|row| row >> gx & 1 == 1)).collect();
+    Some((*cols.first()?, *cols.last()?))
+}
+
+/// Rasterize `text` as a sideways banner. Each glyph is rotated 90° so the
+/// letters span the paper width and the text runs down the tape: glyph top
+/// faces the paper's right edge, glyph reading order runs in print order.
+/// Rotate the printed strip a quarter-turn counter-clockwise (tape start on
+/// the left) and it reads left to right.
+fn banner_raster(text: &str, width_dots: u32, height_pct: u32, style: BannerStyle) -> anyhow::Result<Raster> {
+    let scale = (width_dots * height_pct / 100 / 8).max(2);
+    let x0 = ((width_dots - (scale * 8).min(width_dots)) / 2) as i32;
+    let glyphs: Vec<([u8; 8], Option<(u32, u32)>)> = text
+        .chars()
+        .map(|ch| {
+            let g = banner_glyph(ch);
+            let cols = banner_glyph_cols(&g);
+            (g, cols)
+        })
+        .collect();
+    // Tape length: proportional advance per glyph, gap between inked glyphs.
+    let advance = |cols: &Option<(u32, u32)>| match cols {
+        Some((lo, hi)) => (hi - lo + 1 + BANNER_GAP_CELLS) * scale,
+        None => BANNER_SPACE_CELLS * scale,
+    };
+    let rows: u32 = glyphs.iter().map(|(_, cols)| advance(cols)).sum::<u32>();
+    let rows = rows.saturating_sub(BANNER_GAP_CELLS * scale); // no gap after the last glyph
+    anyhow::ensure!(rows > 0, "banner text is empty");
+    anyhow::ensure!(rows <= u16::MAX as u32, "banner renders {rows} rows — shorten the text");
+
+    let mut c = Canvas::new(width_dots, rows);
+    let mut y0 = 0i32;
+    for (g, cols) in &glyphs {
+        let Some((lo, _)) = cols else {
+            y0 += (BANNER_SPACE_CELLS * scale) as i32;
+            continue;
+        };
+        let on = |gx: i32, gy: i32| {
+            (0..8).contains(&gx) && (0..8).contains(&gy) && g[gy as usize] >> gx & 1 == 1
+        };
+        for gy in 0..8i32 {
+            for gx in 0..8i32 {
+                if !on(gx, gy) {
+                    continue;
+                }
+                // Rotation: glyph y (top→bottom) maps to paper x from the
+                // right edge inward; glyph x (left→right) maps down the tape.
+                let cx = x0 + (7 - gy) * scale as i32;
+                let cy = y0 + (gx - *lo as i32) * scale as i32;
+                let s = scale as i32;
+                match style {
+                    BannerStyle::Solid => c.fill_rect(cx, cy, s, s, true),
+                    BannerStyle::Outline => {
+                        // Draw only the cell edges that face un-inked
+                        // neighbors — the union outlines the letter.
+                        let t = (s / 8).max(2);
+                        if !on(gx, gy - 1) {
+                            c.fill_rect(cx + s - t, cy, t, s, true); // glyph-up = +x
+                        }
+                        if !on(gx, gy + 1) {
+                            c.fill_rect(cx, cy, t, s, true); // glyph-down = -x
+                        }
+                        if !on(gx - 1, gy) {
+                            c.fill_rect(cx, cy, s, t, true); // glyph-left = -y (earlier tape)
+                        }
+                        if !on(gx + 1, gy) {
+                            c.fill_rect(cx, cy + s - t, s, t, true); // glyph-right = +y
+                        }
+                    }
+                    BannerStyle::Ascii => {
+                        // Stamp the same glyph, mini, with the same rotation.
+                        let m = (s / 8).max(1);
+                        for my in 0..8i32 {
+                            for mx in 0..8i32 {
+                                if g[my as usize] >> mx & 1 == 1 {
+                                    c.fill_rect(cx + (7 - my) * m, cy + mx * m, m, m, true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        y0 += advance(cols) as i32;
+    }
+    Ok(c.raster())
+}
+
+/// The exact raster a [`Block::Banner`] prints, for pixel-true previews.
+pub fn preview_banner_raster(text: &str, width_dots: u32, height_pct: u8, style: &str) -> anyhow::Result<Raster> {
+    let inked = super::asciify(text);
+    anyhow::ensure!(!inked.trim().is_empty(), "banner text is empty");
+    anyhow::ensure!(
+        inked.chars().count() <= BANNER_MAX_CHARS,
+        "banner text too long ({} chars, max {})",
+        inked.chars().count(),
+        BANNER_MAX_CHARS
+    );
+    anyhow::ensure!((20..=100).contains(&height_pct), "height_pct out of range (20-100)");
+    banner_raster(&inked, width_dots, height_pct as u32, parse_banner_style(style).map_err(anyhow::Error::msg)?)
 }
 
 // ---- size-bounded fit -----------------------------------------------------------
@@ -822,6 +1005,114 @@ mod tests {
             panic!("text block must prepare to lines");
         };
         assert_eq!(lines, vec!["GUILTY".to_string()]);
+    }
+
+    /// Render a banner raster to ASCII art (rows down = tape direction) —
+    /// debugging aid for orientation work; run with `--nocapture`.
+    fn dump_raster(r: &Raster) -> String {
+        let w = r.width_bytes as usize * 8;
+        let mut out = String::new();
+        for y in 0..r.height as usize {
+            for x in 0..w {
+                let black = r.bits[y * r.width_bytes as usize + x / 8] & (0x80 >> (x % 8)) != 0;
+                out.push(if black { '#' } else { '.' });
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn banner_orientation_reads_after_ccw_rotation() {
+        // Un-rotate a single-glyph banner cell-by-cell and demand it matches
+        // the font bitmap exactly: glyph top must face the paper's RIGHT edge
+        // (cx = x0 + (7-gy)·scale) and glyph reading order must run down the
+        // tape (cy advances with gx). Any flip or mirror in the mapping makes
+        // some asymmetric cell mismatch.
+        let r = banner_raster("L", 16, 100, BannerStyle::Solid).unwrap();
+        println!("{}", dump_raster(&r));
+        let scale = 2u32; // 16 dots / 8 cells
+        let g = banner_glyph('L');
+        let (lo, hi) = banner_glyph_cols(&g).unwrap();
+        assert_eq!(r.height as u32, (hi - lo + 1) * scale, "advance = trimmed extent");
+        let sample = |x: u32, y: u32| -> bool {
+            let idx = y as usize * r.width_bytes as usize + (x / 8) as usize;
+            r.bits[idx] & (0x80 >> (x % 8)) != 0
+        };
+        for gy in 0..8u32 {
+            for gx in lo..=hi {
+                let want = g[gy as usize] >> gx & 1 == 1;
+                let cx = (7 - gy) * scale + scale / 2;
+                let cy = (gx - lo) * scale + scale / 2;
+                assert_eq!(sample(cx, cy), want, "cell mismatch at glyph ({gx},{gy})");
+            }
+        }
+    }
+
+    #[test]
+    fn banner_styles_and_spacing() {
+        // Proportional trim: 'I' is narrower than 'W', so it advances less tape.
+        let iw = banner_raster("I", 576, 100, BannerStyle::Solid).unwrap().height;
+        let ww = banner_raster("W", 576, 100, BannerStyle::Solid).unwrap().height;
+        assert!(iw < ww, "'I' ({iw} rows) should be narrower than 'W' ({ww} rows)");
+        // Word spaces advance blank tape.
+        let spaced = banner_raster("A A", 576, 100, BannerStyle::Solid).unwrap().height;
+        let tight = banner_raster("AA", 576, 100, BannerStyle::Solid).unwrap().height;
+        assert!(spaced > tight);
+        // Outline is a strict subset of solid's ink; ascii is sparser than solid.
+        let solid = banner_raster("O", 576, 100, BannerStyle::Solid).unwrap();
+        let outline = banner_raster("O", 576, 100, BannerStyle::Outline).unwrap();
+        let ink = |r: &Raster| r.bits.iter().map(|b| b.count_ones()).sum::<u32>();
+        assert!(ink(&outline) < ink(&solid));
+        assert!(ink(&outline) > 0);
+        let ascii = banner_raster("O", 576, 100, BannerStyle::Ascii).unwrap();
+        assert!(ink(&ascii) < ink(&solid));
+        assert!(ink(&ascii) > 0);
+    }
+
+    /// Visual check: `WETCOURT_BANNER_PNG=/some/dir cargo test banner_png`
+    /// writes a PNG per style — eyeball them before trusting a paper roll.
+    #[test]
+    fn banner_png_dump() {
+        let Ok(dir) = std::env::var("WETCOURT_BANNER_PNG") else { return };
+        for style in ["solid", "outline", "ascii"] {
+            let r = preview_banner_raster("WET COURT", 576, 100, style).unwrap();
+            let w = r.width_bytes as u32 * 8;
+            let img = image::GrayImage::from_fn(w, r.height as u32, |x, y| {
+                let idx = y as usize * r.width_bytes as usize + (x / 8) as usize;
+                let black = r.bits[idx] & (0x80 >> (x % 8)) != 0;
+                image::Luma([if black { 0u8 } else { 255 }])
+            });
+            img.save(format!("{dir}/banner-{style}.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn banner_block_renders_and_validates() {
+        let doc = PrintDoc {
+            blocks: vec![Block::Banner {
+                text: "WET COURT".into(),
+                height_pct: 100,
+                style: "solid".into(),
+            }],
+            length_mm: None,
+        };
+        let bytes = render_custom(&doc, &cfg()).unwrap();
+        assert!(bytes.len() > 100_000, "a full banner should be a big raster: {}", bytes.len());
+        assert!(bytes.len() <= MAX_BYTES);
+
+        for (text, style, why) in [
+            ("", "solid", "empty"),
+            ("   ", "solid", "blank"),
+            ("THIS BANNER TEXT IS WAY TOO LONG TO PRINT", "solid", "too long"),
+            ("OK", "graffiti", "bad style"),
+        ] {
+            let doc = PrintDoc {
+                blocks: vec![Block::Banner { text: text.into(), height_pct: 100, style: style.into() }],
+                length_mm: None,
+            };
+            assert!(validate(&doc).is_err(), "should reject: {why}");
+        }
     }
 
     #[test]

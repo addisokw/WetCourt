@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
         .route("/operator/print/config", get(printer_info))
         .route("/operator/print/preview_image", post(preview_image))
         .route("/operator/print/preview_qr", post(preview_qr))
+        .route("/operator/print/preview_banner", post(preview_banner))
         .route("/operator/print/templates", get(list_templates))
         .route(
             "/operator/print/templates/{name}",
@@ -167,6 +168,27 @@ fn d_ecc() -> String { "m".into() }
 
 async fn preview_qr(Json(req): Json<PreviewQrReq>) -> Response {
     match custom::preview_qr_raster(&req.data, req.module, &req.ecc) {
+        Ok(r) => png_response(raster_png(&r)),
+        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:#}")).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct PreviewBannerReq {
+    text: String,
+    #[serde(default = "d_100")]
+    height_pct: u8,
+    #[serde(default = "d_banner_style")]
+    style: String,
+}
+
+fn d_banner_style() -> String { "solid".into() }
+
+async fn preview_banner(
+    AxumState(s): AxumState<AppState>,
+    Json(req): Json<PreviewBannerReq>,
+) -> Response {
+    match custom::preview_banner_raster(&req.text, s.printer_cfg.width_dots, req.height_pct, &req.style) {
         Ok(r) => png_response(raster_png(&r)),
         Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:#}")).into_response(),
     }
