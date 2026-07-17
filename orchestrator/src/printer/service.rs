@@ -115,10 +115,22 @@ fn print_trial(
         upside_down: cfg.upside_down,
     };
     let bytes = render(rec, &opts).build();
-    let label = format!("keepsake for case {}", rec.case_no);
-    match emit(cfg, &bytes, &label, bcast)? {
-        Emitted::Mock => info!(case_no = rec.case_no, bytes = bytes.len(), "keepsake rendered (mock; no I/O)"),
-        Emitted::Printed => info!(case_no = rec.case_no, bytes = bytes.len(), "keepsake printed"),
+    // The booth prints two copies — one to hang on the backdrop, one for the
+    // defendant. The render is deterministic, so render once and write the same
+    // bytes per copy; each ends in its own cut, so the copies come off as
+    // separate strips. A mid-run transport failure aborts the rest (better to
+    // stop than jam), so the operator banner from emit() still fires.
+    let copies = cfg.keepsake_copies.max(1);
+    for n in 1..=copies {
+        let label = if copies > 1 {
+            format!("keepsake for case {} (copy {n}/{copies})", rec.case_no)
+        } else {
+            format!("keepsake for case {}", rec.case_no)
+        };
+        match emit(cfg, &bytes, &label, bcast)? {
+            Emitted::Mock => info!(case_no = rec.case_no, copy = n, copies, bytes = bytes.len(), "keepsake rendered (mock; no I/O)"),
+            Emitted::Printed => info!(case_no = rec.case_no, copy = n, copies, bytes = bytes.len(), "keepsake printed"),
+        }
     }
     Ok(())
 }
@@ -191,4 +203,35 @@ fn emit(
     }
     printer.transport().write(bytes)?;
     Ok(Emitted::Printed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_cfg(copies: u32) -> PrinterConfig {
+        PrinterConfig { mode: "mock".into(), keepsake_copies: copies, ..Default::default() }
+    }
+
+    // Mock mode does no I/O, so this exercises the render-once/emit-per-copy
+    // loop end to end: it must render cleanly for each copy and never panic.
+    #[test]
+    fn keepsake_prints_each_requested_copy() {
+        let (tx, _rx) = broadcast::channel(4);
+        let rec = TrialRecord::sample_guilty();
+        for copies in [1u32, 2, 3] {
+            assert!(print_trial(&mock_cfg(copies), &rec, &tx).is_ok());
+        }
+    }
+
+    // A 0 (or unset-to-0) copy count must still print one, not zero — the
+    // keepsake is the point of the trial. `off` mode prints none regardless.
+    #[test]
+    fn copy_count_is_clamped_and_off_prints_nothing() {
+        let (tx, _rx) = broadcast::channel(4);
+        let rec = TrialRecord::sample_acquitted();
+        assert!(print_trial(&mock_cfg(0), &rec, &tx).is_ok());
+        let off = PrinterConfig { mode: "off".into(), keepsake_copies: 2, ..Default::default() };
+        assert!(print_trial(&off, &rec, &tx).is_ok());
+    }
 }

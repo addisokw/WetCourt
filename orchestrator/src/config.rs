@@ -231,6 +231,12 @@ pub struct PrinterConfig {
     /// software-rotated rasters) so the emerging receipt reads correctly.
     #[serde(default)]
     pub upside_down: bool,
+    /// How many copies of each trial keepsake to print — the booth runs 2 (one
+    /// to hang on the backdrop, one for the defendant). Each copy is a separate
+    /// cut strip. Clamped to at least 1 at print time; only affects the trial
+    /// keepsake, not operator custom prints (those print exactly what's asked).
+    #[serde(default = "d_keepsake_copies")]
+    pub keepsake_copies: u32,
 }
 
 impl Default for PrinterConfig {
@@ -250,6 +256,7 @@ impl Default for PrinterConfig {
             image_contrast: d_image_contrast(),
             image_dither: d_image_dither(),
             upside_down: false,
+            keepsake_copies: d_keepsake_copies(),
         }
     }
 }
@@ -266,6 +273,7 @@ fn d_feed_units() -> u32 { 360 }
 fn d_image_gamma() -> f32 { 1.0 }
 fn d_image_contrast() -> f32 { 1.0 }
 fn d_image_dither() -> String { "fs".into() }
+fn d_keepsake_copies() -> u32 { 1 }
 fn d_printer_qr() -> String { "https://wetcourt.lol".into() }
 fn d_printer_loc() -> String { "Find the Wet Court near you".into() }
 

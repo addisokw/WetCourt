@@ -122,6 +122,9 @@ upside_down = true
 image_gamma = 0.5
 image_contrast = 0.85
 image_dither = "atkinson"
+# Print two keepsakes per trial: one to hang on the backdrop, one for the
+# defendant. Each is a separate cut strip.
+keepsake_copies = 2
 
 # Call-your-lawyer phone service (counsel). On the Spark both run with host
 # networking, so localhost reaches it; the console proxies /lawyer/* there.
