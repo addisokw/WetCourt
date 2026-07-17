@@ -82,7 +82,7 @@ TICK_DT_CAP_MS = 100         # a stalled loop must not smuggle in a big step
 # pulse — 0.4's always-on 4 Hz poll made the parked head twitch every few
 # seconds. Idle keeps the bus silent; a stall only develops while the servo
 # is being driven somewhere anyway.
-OC_LIMIT_A = 1.5
+OC_LIMIT_A = None
 OC_HOLD_MS = 700             # the spike must persist this long to trip
 OC_POLL_MS = 250
 OC_TAIL_MS = 1500            # keep watching this long after the last step
