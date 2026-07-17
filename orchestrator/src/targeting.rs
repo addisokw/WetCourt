@@ -6,13 +6,19 @@
 //! deliberation for suspense, freeze-then-fire on guilty, idle between trials);
 //! this performs the side effects.
 //!
-//! The arm/disarm flag is set **synchronously** so it is ordered against the
-//! commands around it (notably: `Freeze` disarms before the guilty `Fire` is
-//! dispatched, so the gun holds its lock instead of chasing new aim). The fire
-//! gate is independent of the arm flag — the shot still requires a fresh lock
-//! (see `hardware::gate`). The slower bits — the best-effort vision POST and
-//! the turret recenter — are spawned fire-and-forget so a downed vision process
-//! can never stall the state-machine loop.
+//! The **disarms** are set synchronously so they are ordered against the
+//! commands around them (notably: `Freeze` disarms before the guilty `Fire` is
+//! dispatched, so the gun holds its lock instead of chasing new aim). The
+//! `Acquire` **arm** is deliberately not: it lands only after vision confirms
+//! the aim-integrator reset. While disarmed the integrator winds up — its aim
+//! is not relayed, the gun doesn't move, so the boresight error never
+//! converges and the commanded aim saturates at the limits — and arming
+//! before the reset relayed that stale aim to the turret as a full-speed
+//! sling. Armed therefore implies the integrator was reset. The fire gate is
+//! independent of the arm flag — the shot still requires a fresh lock (see
+//! `hardware::gate`). The slower bits — vision POSTs, the arm that follows
+//! one, and the turret recenter — are spawned fire-and-forget so a downed
+//! vision process can never stall the state-machine loop.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -130,12 +136,17 @@ impl TargetingController {
         match cue {
             TargetingCue::Acquire => {
                 // Reset the vision aim integrator to center (via /target, which
-                // also re-selects the target part) so the gun visibly sweeps from
-                // idle onto the defendant, then arm so the orchestrator relays that
-                // aim to the turret. The part comes from the saved vision tuning
-                // (vision.toml, console "Save tuning"); "head" if none saved.
-                self.cancel_glide(); // vision owns the aim now
-                self.targeting_armed.store(true, Ordering::Relaxed);
+                // also re-selects the target part), then arm so the orchestrator
+                // relays that aim to the turret and the gun visibly sweeps from
+                // idle onto the defendant. The part comes from the saved vision
+                // tuning (vision.toml, console "Save tuning"); "head" if none
+                // saved. STRICTLY reset-then-arm: the integrator winds up while
+                // disarmed (see module doc), and arming first relayed the stale
+                // saturated aim — the turret slung off at full servo speed
+                // before the reset landed. Detached so the POST can't stall the
+                // FSM loop; the generation check drops the arm if a later cue
+                // superseded this one while the POST was in flight.
+                let my_gen = self.cancel_glide(); // vision owns the aim now
                 let (part, fallback) = {
                     let reg = self.calibration.read().await;
                     let v = reg.get("vision").and_then(|c| c.vision.as_ref());
@@ -144,22 +155,29 @@ impl TargetingController {
                         v.and_then(|v| v.fallback_aim),
                     )
                 };
-                self.spawn_vision_post("target", serde_json::json!({ "part": part }));
-                // Vision-failure fallback: if the pipeline is down right now,
-                // park the gun (and the judge's gaze) on the calibrated
-                // above-the-mic spot during the deliberation, so the guilty
-                // shot has somewhere real to land. Detached — the health probe
-                // must never stall the FSM loop.
-                if let Some([pan, tilt]) = fallback {
-                    let this = self.clone();
-                    tokio::spawn(async move {
-                        if !this.vision_healthy().await {
-                            warn!(pan, tilt, "targeting: vision down at acquire — gliding to fallback aim");
-                            this.spawn_glide(&[Role::Turret, Role::JudgeNeck], pan, tilt);
-                        }
-                    });
-                }
-                debug!("targeting: acquire (armed, aim reset to center)");
+                let this = self.clone();
+                tokio::spawn(async move {
+                    let reset_ok =
+                        this.vision_post("target", serde_json::json!({ "part": part })).await;
+                    if this.glide_gen.load(Ordering::Relaxed) != my_gen {
+                        return; // superseded — the newer cue owns the arm state
+                    }
+                    if reset_ok {
+                        this.targeting_armed.store(true, Ordering::Relaxed);
+                        debug!("targeting: acquire (aim reset to center, armed)");
+                    } else if let Some([pan, tilt]) = fallback {
+                        // Vision-failure fallback: park the gun (and the judge's
+                        // gaze) on the calibrated above-the-mic spot during the
+                        // deliberation, so the guilty shot has somewhere real to
+                        // land. Stays disarmed — a vision process recovering
+                        // mid-deliberation would stream its wound-up aim before
+                        // the tuning seeder gets to reset it.
+                        warn!(pan, tilt, "targeting: vision down at acquire — gliding to fallback aim, staying disarmed");
+                        this.spawn_glide(&[Role::Turret, Role::JudgeNeck], pan, tilt);
+                    } else {
+                        warn!("targeting: vision down at acquire, no fallback aim — staying disarmed");
+                    }
+                });
             }
             TargetingCue::Freeze => {
                 // Disarm in place: vision stops driving the turret, so the gun holds
@@ -382,13 +400,25 @@ impl TargetingController {
         );
     }
 
+    /// POST to the vision process, reporting whether it landed (2xx). For
+    /// callers that must order follow-up work after the POST — notably the
+    /// Acquire arm, which may only flip once the aim-integrator reset is
+    /// confirmed.
+    async fn vision_post(&self, path: &str, body: serde_json::Value) -> bool {
+        let url = format!("{}/{path}", self.vision_base_url.trim_end_matches('/'));
+        matches!(
+            self.vision_http.post(url).timeout(Duration::from_secs(2)).json(&body).send().await,
+            Ok(resp) if resp.status().is_success()
+        )
+    }
+
     /// Best-effort POST to the vision process, detached so a slow/down vision
     /// never blocks the caller (the FSM loop).
-    fn spawn_vision_post(&self, path: &str, body: serde_json::Value) {
-        let url = format!("{}/{path}", self.vision_base_url.trim_end_matches('/'));
-        let http = self.vision_http.clone();
+    fn spawn_vision_post(self: &Arc<Self>, path: &str, body: serde_json::Value) {
+        let this = self.clone();
+        let path = path.to_string();
         tokio::spawn(async move {
-            let _ = http.post(url).timeout(Duration::from_secs(2)).json(&body).send().await;
+            let _ = this.vision_post(&path, body).await;
         });
     }
 

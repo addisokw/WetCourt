@@ -831,10 +831,38 @@ async fn get_targeting_arm(AxumState(s): AxumState<AppState>) -> impl IntoRespon
 async fn set_targeting_arm(
     AxumState(s): AxumState<AppState>,
     Json(body): Json<ArmState>,
-) -> impl IntoResponse {
+) -> Response {
+    if body.armed {
+        // Fresh acquisition BEFORE the flag flips. While disarmed, vision's aim
+        // integrator winds up: its aim isn't relayed, the gun doesn't move, so
+        // the boresight error never converges and the commanded aim saturates
+        // at the limits. Arming without a reset slung the gun to that stale aim
+        // on the first relayed frame. Same /target reset the trial Acquire cue
+        // does (re-selects the saved target part, clears any person selection);
+        // refusing to arm when it fails keeps the invariant that armed ⇒
+        // integrator reset — the console poll snaps the button back.
+        let part = {
+            let reg = s.calibration.read().await;
+            reg.get("vision")
+                .and_then(|c| c.vision.as_ref())
+                .map(|v| v.target_part.clone())
+                .unwrap_or_else(|| "head".into())
+        };
+        let reset = s
+            .vision_http
+            .post(format!("{}/target", s.vision_base_url.trim_end_matches('/')))
+            .timeout(Duration::from_secs(2))
+            .json(&serde_json::json!({ "part": part }))
+            .send()
+            .await;
+        if !matches!(reset, Ok(ref resp) if resp.status().is_success()) {
+            warn!("vision targeting arm refused: aim reset unreachable (vision offline?)");
+            return (StatusCode::BAD_GATEWAY, "vision offline — not armed").into_response();
+        }
+    }
     s.targeting_armed.store(body.armed, Ordering::Relaxed);
     info!(armed = body.armed, "vision targeting arm");
-    StatusCode::NO_CONTENT
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[derive(Serialize)]
