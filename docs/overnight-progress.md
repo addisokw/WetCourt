@@ -28,6 +28,10 @@ Added after the batch, same branch. Config seeds the startup value; the console 
 - F7 neck droop deliberately left config-only (motion safety — enable via config after its hardware pass).
 - `cargo build` 0 errors, `cargo test` 147 passed, `npm run build` green.
 
+## POST-BATCH — acquittal keepsake photo ("THE VINDICATED")
+
+Completes the capture-all-verdicts feature. Acquittals were being captured to disk (verified live on the Spark: case 64 had 8 valid JPEGs) and printed, but the receipt's photo block was still `if rec.guilty`, so the acquittal's captured still never printed. Now `render()` prints the keepsake photo for EVERY verdict — guilty under "-- MOMENT OF JUSTICE --", acquitted under "-- THE VINDICATED --" (generalized `moment_of_justice` → `keepsake_photo(header)`). Test: `both_verdicts_render_the_keepsake_photo` (both headers + photo block present, neither cross-contaminates). `cargo test` 148.
+
 ## POST-BATCH — press-to-record plea/answer button
 
 Fix for a real-world confusion: the mic auto-opened when the plea window opened, so people who pressed the button to "start" actually *ended* their plea before speaking. Now the **first press starts recording, the second press ends it** — matching the on-screen "Press the button to begin… / Press again to end" prompts (which were already written for this).

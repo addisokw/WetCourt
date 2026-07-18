@@ -4,9 +4,10 @@
 //! The layout, top to bottom: a drawn court seal, the masthead, the docket
 //! caption (charge + generated defendant alias + case no/time), the verbatim
 //! transcript (plea, optional cross-examination, the judge's full
-//! deliberation), the verdict, a reserved "moment of justice" photo slot on
-//! guilty findings (filled by the vision still in M3), and a footer with a QR
-//! code, an on-site-editable booth location, and the social tag.
+//! deliberation), the verdict, a keepsake photo slot on EVERY verdict (filled
+//! by the vision still: "moment of justice" on a soaking, "the vindicated" on an
+//! acquittal), and a footer with a QR code, an on-site-editable booth location,
+//! and the social tag.
 //!
 //! Everything is built through [`thermal_printer::escpos::Builder`], so the
 //! result is testable without hardware: dump the bytes to a file, or send them
@@ -128,9 +129,10 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
     verdict(&mut b, rec);
     heavy_rule(&mut b, cols);
 
-    if rec.guilty {
-        moment_of_justice(&mut b, w, rec.still_jpeg.as_deref(), opts);
-    }
+    // Every verdict gets its keepsake photo (guilty and acquitted alike) so the
+    // wall of trial results has a picture for both. Only the header differs.
+    let photo_header = if rec.guilty { "-- MOMENT OF JUSTICE --" } else { "-- THE VINDICATED --" };
+    keepsake_photo(&mut b, w, rec.still_jpeg.as_deref(), opts, photo_header);
 
     //footer(&mut b, rec, opts);
 
@@ -268,12 +270,13 @@ fn verdict(b: &mut Builder, rec: &TrialRecord) {
 /// Reserved photo slot (guilty only). M1 draws a framed reticle placeholder so
 /// the layout and paper feed match the final receipt; M3 replaces the frame
 /// with the dithered firing-still from the vision service.
-fn moment_of_justice(b: &mut Builder, w: u32, still: Option<&[u8]>, opts: &ReportOpts) {
-    b.align(Align::Center)
-        .bold(true)
-        .line("-- MOMENT OF JUSTICE --")
-        .bold(false);
-    // Dither the captured blast frame to 1-bit at printer width; fall back to the
+/// The keepsake photo block: the dithered capture still (or a reticle
+/// placeholder when there's no capture). Printed for EVERY verdict — the guilty
+/// "moment of justice" soaking and the acquitted "vindicated" moment alike —
+/// under the given header.
+fn keepsake_photo(b: &mut Builder, w: u32, still: Option<&[u8]>, opts: &ReportOpts, header: &str) {
+    b.align(Align::Center).bold(true).line(header).bold(false);
+    // Dither the captured frame to 1-bit at printer width; fall back to the
     // reticle placeholder when there's no still (capture off / failed).
     let captured = still.and_then(|bytes| {
         let tone = raster::Options {
@@ -483,6 +486,29 @@ mod tests {
         assert!(has(&with, "DEWEY"), "coupon headline missing");
         assert!(has(&with, "ADMIT NOTHING"), "coupon footer missing");
         assert!(with.len() > plain.len(), "coupon should add bytes");
+    }
+
+    #[test]
+    fn both_verdicts_render_the_keepsake_photo() {
+        fn has(hay: &[u8], needle: &str) -> bool {
+            hay.windows(needle.len()).any(|w| w == needle.as_bytes())
+        }
+        let opts = ReportOpts::default();
+        let guilty = render(&TrialRecord::sample_guilty(), &opts).build();
+        let acquitted = render(&TrialRecord::sample_acquitted(), &opts).build();
+
+        // Guilty keeps the soaking-themed header; acquittals get "THE VINDICATED".
+        assert!(has(&guilty, "MOMENT OF JUSTICE"), "guilty photo header missing");
+        assert!(!has(&guilty, "THE VINDICATED"));
+        assert!(has(&acquitted, "THE VINDICATED"), "acquittal photo header missing");
+        assert!(!has(&acquitted, "MOMENT OF JUSTICE"));
+
+        // BOTH verdicts render the photo block — the reticle placeholder here,
+        // since the samples carry no capture still (the same block renders the
+        // real dithered frame at runtime). Previously acquittals rendered no
+        // photo block at all; this is the regression guard for that fix.
+        assert!(has(&guilty, "evidentiary still"), "guilty photo block missing");
+        assert!(has(&acquitted, "evidentiary still"), "acquittal photo block missing");
     }
 
     #[test]
