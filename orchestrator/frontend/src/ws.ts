@@ -445,6 +445,71 @@ export async function setCrossExam(enabled: boolean): Promise<void> {
   }
 }
 
+// --- F6 attract-mode toggle (mirrors /operator/attract) -------------------
+export const [attractEnabled, setAttractEnabledSig] = createSignal<boolean>(false);
+export async function fetchAttract(): Promise<void> {
+  try {
+    const res = await fetch('/operator/attract');
+    if (!res.ok) return;
+    const data = (await res.json()) as { enabled: boolean };
+    setAttractEnabledSig(Boolean(data.enabled));
+  } catch { /* keep current */ }
+}
+export async function setAttract(enabled: boolean): Promise<void> {
+  setAttractEnabledSig(enabled); // optimistic
+  try {
+    const res = await fetch('/operator/attract', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) await fetchAttract();
+  } catch { await fetchAttract(); }
+}
+
+// --- F5 lawyer-audio-over-speaker toggle (/operator/lawyer_speaker) --------
+export const [lawyerSpeaker, setLawyerSpeakerSig] = createSignal<boolean>(false);
+export async function fetchLawyerSpeaker(): Promise<void> {
+  try {
+    const res = await fetch('/operator/lawyer_speaker');
+    if (!res.ok) return;
+    const data = (await res.json()) as { enabled: boolean };
+    setLawyerSpeakerSig(Boolean(data.enabled));
+  } catch { /* keep current */ }
+}
+export async function setLawyerSpeaker(enabled: boolean): Promise<void> {
+  setLawyerSpeakerSig(enabled); // optimistic
+  try {
+    const res = await fetch('/operator/lawyer_speaker', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) await fetchLawyerSpeaker();
+  } catch { await fetchLawyerSpeaker(); }
+}
+
+// --- F4 coupon-frequency dropdown (/operator/coupons) ---------------------
+export const [couponFrequency, setCouponFrequencySig] = createSignal<string>('off');
+export async function fetchCoupons(): Promise<void> {
+  try {
+    const res = await fetch('/operator/coupons');
+    if (!res.ok) return;
+    const data = (await res.json()) as { frequency: string };
+    setCouponFrequencySig(String(data.frequency ?? 'off'));
+  } catch { /* keep current */ }
+}
+export async function setCoupons(frequency: string): Promise<void> {
+  setCouponFrequencySig(frequency); // optimistic
+  try {
+    const res = await fetch('/operator/coupons', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frequency }),
+    });
+    if (!res.ok) { await fetchCoupons(); return; }
+    const data = (await res.json()) as { frequency: string };
+    setCouponFrequencySig(String(data.frequency ?? 'off'));
+  } catch { await fetchCoupons(); }
+}
+
 /// Reclaim control in this tab after being superseded by another console.
 /// Reconnecting bumps the server generation, so this tab becomes the live one
 /// and the other goes dormant.

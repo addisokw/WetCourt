@@ -9,6 +9,9 @@
 //! - `mock`  — render and log the byte count, but never open the device.
 //! - `real`  — render and send to the printer.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
+
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{error, info, warn};
 
@@ -46,6 +49,9 @@ pub enum CustomOutcome {
 /// not stall the trial loop.
 pub fn spawn(
     cfg: PrinterConfig,
+    // F4: live coupon frequency (0=off,1=rare,2=sometimes,3=always), read fresh
+    // per receipt so the operator's dropdown takes effect without a restart.
+    coupon_frequency: Arc<AtomicU8>,
     // Operator feedback channel: printer problems (not ready, print failed)
     // surface as an Error banner on the console instead of only a log line.
     bcast: broadcast::Sender<DisplayMessage>,
@@ -60,7 +66,8 @@ pub fn spawn(
                 PrintJob::Trial(rec) => {
                     let case_no = rec.case_no;
                     let bc = b.clone();
-                    match tokio::task::spawn_blocking(move || print_trial(&cfg, &rec, &bc)).await {
+                    let level = coupon_frequency.load(Ordering::Relaxed);
+                    match tokio::task::spawn_blocking(move || print_trial(&cfg, &rec, level, &bc)).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => {
                             error!("keepsake print failed: {e:#}");
@@ -93,16 +100,36 @@ pub fn spawn(
     tx
 }
 
-/// Decide whether this receipt gets a coupon, per the runtime-switchable
-/// `[printer] coupon_frequency` ("off" | "rare" ~1/6 | "sometimes" ~1/3 |
-/// "always"). Unknown values are treated as "off".
-fn roll_coupon(frequency: &str) -> Option<super::report::CouponCopy> {
+/// Map a coupon-frequency string to a level (0=off,1=rare,2=sometimes,3=always).
+/// Unknown values map to 0 (off). Shared with the operator endpoint.
+pub fn coupon_level(frequency: &str) -> u8 {
+    match frequency {
+        "rare" => 1,
+        "sometimes" => 2,
+        "always" => 3,
+        _ => 0,
+    }
+}
+
+/// Inverse of [`coupon_level`], for reporting the current setting.
+pub fn coupon_level_str(level: u8) -> &'static str {
+    match level {
+        1 => "rare",
+        2 => "sometimes",
+        3 => "always",
+        _ => "off",
+    }
+}
+
+/// Decide whether this receipt gets a coupon, per the live coupon level
+/// (0=off,1=rare ~1/6,2=sometimes ~1/3,3=always).
+fn roll_coupon(level: u8) -> Option<super::report::CouponCopy> {
     use rand::Rng;
-    let p = match frequency {
-        "always" => 1.0,
-        "sometimes" => 1.0 / 3.0,
-        "rare" => 1.0 / 6.0,
-        _ => 0.0, // "off" and anything unrecognized
+    let p = match level {
+        3 => 1.0,
+        2 => 1.0 / 3.0,
+        1 => 1.0 / 6.0,
+        _ => 0.0,
     };
     (p > 0.0 && rand::thread_rng().gen_bool(p)).then(super::report::random_coupon)
 }
@@ -110,6 +137,7 @@ fn roll_coupon(frequency: &str) -> Option<super::report::CouponCopy> {
 fn print_trial(
     cfg: &PrinterConfig,
     rec: &TrialRecord,
+    coupon_level: u8,
     bcast: &broadcast::Sender<DisplayMessage>,
 ) -> anyhow::Result<()> {
     if cfg.mode == "off" {
@@ -129,7 +157,7 @@ fn print_trial(
         upside_down: cfg.upside_down,
         // Roll once per trial (so both keepsake copies match) whether to append a
         // "bad lawyer" coupon, per the runtime-switchable [printer] frequency.
-        coupon: roll_coupon(&cfg.coupon_frequency),
+        coupon: roll_coupon(coupon_level),
     };
     let bytes = render(rec, &opts).build();
     // The booth prints two copies — one to hang on the backdrop, one for the
@@ -237,7 +265,7 @@ mod tests {
         let (tx, _rx) = broadcast::channel(4);
         let rec = TrialRecord::sample_guilty();
         for copies in [1u32, 2, 3] {
-            assert!(print_trial(&mock_cfg(copies), &rec, &tx).is_ok());
+            assert!(print_trial(&mock_cfg(copies), &rec, 0, &tx).is_ok());
         }
     }
 
@@ -247,8 +275,8 @@ mod tests {
     fn copy_count_is_clamped_and_off_prints_nothing() {
         let (tx, _rx) = broadcast::channel(4);
         let rec = TrialRecord::sample_acquitted();
-        assert!(print_trial(&mock_cfg(0), &rec, &tx).is_ok());
+        assert!(print_trial(&mock_cfg(0), &rec, 0, &tx).is_ok());
         let off = PrinterConfig { mode: "off".into(), keepsake_copies: 2, ..Default::default() };
-        assert!(print_trial(&off, &rec, &tx).is_ok());
+        assert!(print_trial(&off, &rec, 0, &tx).is_ok());
     }
 }

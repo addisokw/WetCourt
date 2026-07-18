@@ -19,6 +19,15 @@ Legend: ✅ done · 🚧 partial · ⛔ blocked · 🔧 HARDWARE PASS NEEDED
 
 Final state: `cargo build` 0 errors, `cargo test` 147 passed, `npm run build` green, all 4 edited TOMLs parse. All motion/audio features ship OFF. **Deploy is a human step** (`deploy_spark.sh --build`, Rust changed) followed by the hardware passes noted per-feature below.
 
+## FOLLOW-UP — live operator-console toggles (F4/F5/F6)
+
+Added after the batch, same branch. Config seeds the startup value; the console now flips them live (no restart), following the existing cross-exam toggle pattern (`AtomicBool`/`AtomicU8` + `/operator/*` GET+POST + a panel control).
+- **F6 attract** — checkbox in the Judge's Mind tab (`/operator/attract`). Runtime reads an `Arc<AtomicBool>` instead of `cfg.attract.enabled`.
+- **F4 coupons** — dropdown (off/rare/sometimes/always) in the Print tab (`/operator/coupons`). Print service reads an `Arc<AtomicU8>` fresh per receipt; `coupon_level`/`coupon_level_str` map string↔level.
+- **F5 speaker audio** — checkbox in the Lawyer tab (`/operator/lawyer_speaker`), gates the orchestrator side live. Counsel's tee flag stays config (leave it on; the orchestrator gate is the live switch). 
+- F7 neck droop deliberately left config-only (motion safety — enable via config after its hardware pass).
+- `cargo build` 0 errors, `cargo test` 147 passed, `npm run build` green.
+
 Detail per feature:
 
 ---

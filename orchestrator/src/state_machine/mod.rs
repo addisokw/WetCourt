@@ -61,6 +61,9 @@ pub struct Runtime {
     next_attract: Option<Instant>,
     /// Rotates through the attract line pool + alternates the neck sweep side.
     attract_idx: usize,
+    /// Live operator toggle for attract mode (mirrors `/operator/attract`);
+    /// seeded from `[attract] enabled`. The interval/threshold stay in config.
+    attract_enabled: Arc<AtomicBool>,
     /// Drives the turret aiming sequence during trials (arm on deliberation,
     /// freeze-then-fire on guilty, idle between trials). `None` disables it (and
     /// in tests, which don't wire up vision/hardware).
@@ -130,6 +133,7 @@ impl Runtime {
         lawyer_enabled: Arc<AtomicBool>,
         lawyer_call_active: Arc<AtomicBool>,
         lawyer: Option<Arc<crate::lawyer::LawyerBridge>>,
+        attract_enabled: Arc<AtomicBool>,
     ) -> Self {
         let next_case_no = AtomicU64::new(casebook.next_case_no());
         Self {
@@ -151,6 +155,7 @@ impl Runtime {
             recent_anchors: VecDeque::new(),
             next_attract: None,
             attract_idx: 0,
+            attract_enabled,
             targeting,
             capture,
             lawyer_enabled,
@@ -281,7 +286,7 @@ impl Runtime {
         // F6 attract mode: while idle (and enabled), periodically entice
         // passers-by. Re-armed each time we're idle; cleared the moment a trial
         // (or any non-idle state) begins. Gated off by default.
-        if self.cfg.attract.enabled && matches!(self.state, State::Idle) {
+        if self.attract_enabled.load(Ordering::Relaxed) && matches!(self.state, State::Idle) {
             let now = Instant::now();
             let due = *self
                 .next_attract
@@ -547,6 +552,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)), // lawyer integration off
             Arc::new(AtomicBool::new(false)),
             None, // no lawyer bridge in the unit test
+            Arc::new(AtomicBool::new(false)), // attract off
         );
 
         rt.handle(Event::OperatorStart).await;
@@ -628,6 +634,7 @@ mod tests {
             Arc::new(AtomicBool::new(true)),  // lawyer integration ON
             Arc::new(AtomicBool::new(false)), // lawyer_call_active
             None, // no bridge — the LawyerCalling display event fires regardless
+            Arc::new(AtomicBool::new(false)), // attract off
         );
 
         // helper: collect the `on` values of any LawyerCalling display events
@@ -676,6 +683,7 @@ mod tests {
         let casebook = Arc::new(Casebook::open(&book));
         let mut cfg = mk_cfg();
         cfg.attract = attract;
+        let attract_on = cfg.attract.enabled;
         let (_ev_tx, ev_rx) = mpsc::channel::<Event>(16);
         let (inf_tx, inf_rx) = mpsc::channel::<Command>(64);
         let (hw_tx, _hw_rx) = mpsc::channel::<Command>(64);
@@ -692,6 +700,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicBool::new(false)),
             None,
+            Arc::new(AtomicBool::new(attract_on)), // F6 live toggle, seeded from cfg
         );
         (rt, inf_rx, pdir)
     }

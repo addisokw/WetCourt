@@ -1,4 +1,5 @@
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { fetchLawyerSpeaker, lawyerSpeaker, setLawyerSpeaker } from '../ws';
 
 // Status shape from counsel's /status, proxied at /lawyer/status.
 type LawyerStatus = {
@@ -45,6 +46,7 @@ export default function LawyerPanel() {
         /* keep optimistic default */
       }
     })();
+    void fetchLawyerSpeaker();
   });
 
   async function setIntegrationEnabled(enabled: boolean) {
@@ -127,6 +129,17 @@ export default function LawyerPanel() {
       <p class="muted">
         Disable when the line gets long — trials run straight through. The
         force-ring button below works either way.
+      </p>
+      <p>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            checked={lawyerSpeaker()}
+            onChange={(e) => void setLawyerSpeaker(e.currentTarget.checked)}
+          />{' '}
+          also play the lawyer's voice over the booth speaker (with a phone
+          effect) — needs counsel's speaker tee on
+        </label>
       </p>
 
       <h3>Ring the booth phone</h3>

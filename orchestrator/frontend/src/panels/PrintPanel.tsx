@@ -1,4 +1,5 @@
 import { createMemo, createSignal, Index, onMount, Show } from 'solid-js';
+import { couponFrequency, fetchCoupons, setCoupons } from '../ws';
 import {
   BannerBlock,
   BarcodeBlock,
@@ -49,6 +50,7 @@ export default function PrintPanel() {
   onMount(() => {
     void fetchPrinterInfo().catch((e) => setError(String(e)));
     void fetchTemplates().catch(() => {});
+    void fetchCoupons();
     // Previews are session-scoped blob URLs — refetch for a draft that came
     // back from a tab switch with revoked/missing images.
     for (const b of blocks()) {
@@ -160,6 +162,18 @@ export default function PrintPanel() {
             </button>
           </Show>
           <span class="muted small">printer: {printerInfo().mode}</span>
+        </div>
+
+        {/* F4: how often a trial keepsake gets a "bad lawyer" coupon. Live. */}
+        <div class="field inline">
+          <label title="How often a trial receipt gets a Dewey, Soakem & Howe coupon">coupons</label>
+          <select value={couponFrequency()} onChange={(e) => void setCoupons(e.currentTarget.value)}>
+            <option value="off">off</option>
+            <option value="rare">rare (~1 in 6)</option>
+            <option value="sometimes">sometimes (~1 in 3)</option>
+            <option value="always">always</option>
+          </select>
+          <span class="muted small">on trial keepsakes</span>
         </div>
 
         <div class="print-columns">

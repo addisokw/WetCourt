@@ -77,8 +77,13 @@ pub struct AppState {
     /// lawyer call is active. Off by default (motion feature, needs a hardware pass).
     pub lawyer_neck_droop_on_call: bool,
     /// F5: when true, fan lawyer call-audio POSTs to the primary-speaker kiosk.
-    /// Off by default (needs a live-call hardware pass).
-    pub lawyer_speaker_playback: bool,
+    /// Operator-toggleable (`/operator/lawyer_speaker`); seeded from config.
+    pub lawyer_speaker_playback: Arc<AtomicBool>,
+    /// F6: live operator toggle for idle attract mode (`/operator/attract`).
+    pub attract_enabled: Arc<AtomicBool>,
+    /// F4: live coupon frequency (0=off,1=rare,2=sometimes,3=always), shared with
+    /// the print service. Operator-toggleable via `/operator/coupons`.
+    pub coupon_frequency: Arc<std::sync::atomic::AtomicU8>,
     /// Operator-toggleable cross-examination switch, shared with the state
     /// machine `Runtime`, which reads it when a plea comes in.
     pub cross_enabled: Arc<AtomicBool>,
@@ -162,6 +167,9 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
         .route("/operator/cross_exam", get(get_cross_exam).post(set_cross_exam))
+        .route("/operator/attract", get(get_attract).post(set_attract))
+        .route("/operator/coupons", get(get_coupons).post(set_coupons))
+        .route("/operator/lawyer_speaker", get(get_lawyer_speaker).post(set_lawyer_speaker))
         // ---- Audio check (console Audio tab): end-to-end source verification ----
         .route("/operator/audio/tts_test", post(audio_tts_test))
         .route("/operator/audio/stt_test", post(audio_stt_test))
@@ -329,6 +337,56 @@ async fn set_cross_exam(
     s.cross_enabled.store(body.enabled, Ordering::Relaxed);
     info!(enabled = body.enabled, "operator: cross-examination toggled");
     (StatusCode::OK, Json(CrossExamState { enabled: body.enabled }))
+}
+
+// F6: attract-mode live toggle.
+async fn get_attract(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let enabled = s.attract_enabled.load(Ordering::Relaxed);
+    (StatusCode::OK, Json(CrossExamState { enabled }))
+}
+async fn set_attract(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<CrossExamState>,
+) -> impl IntoResponse {
+    s.attract_enabled.store(body.enabled, Ordering::Relaxed);
+    info!(enabled = body.enabled, "operator: attract mode toggled");
+    (StatusCode::OK, Json(CrossExamState { enabled: body.enabled }))
+}
+
+// F5: lawyer-audio-over-speaker live toggle (orchestrator-side gate).
+async fn get_lawyer_speaker(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let enabled = s.lawyer_speaker_playback.load(Ordering::Relaxed);
+    (StatusCode::OK, Json(CrossExamState { enabled }))
+}
+async fn set_lawyer_speaker(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<CrossExamState>,
+) -> impl IntoResponse {
+    s.lawyer_speaker_playback.store(body.enabled, Ordering::Relaxed);
+    info!(enabled = body.enabled, "operator: lawyer speaker playback toggled");
+    (StatusCode::OK, Json(CrossExamState { enabled: body.enabled }))
+}
+
+#[derive(Serialize, Deserialize)]
+struct CouponFreqState {
+    frequency: String,
+}
+
+// F4: coupon-frequency live dropdown (off | rare | sometimes | always).
+async fn get_coupons(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let frequency =
+        crate::printer::service::coupon_level_str(s.coupon_frequency.load(Ordering::Relaxed)).into();
+    (StatusCode::OK, Json(CouponFreqState { frequency }))
+}
+async fn set_coupons(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<CouponFreqState>,
+) -> impl IntoResponse {
+    let level = crate::printer::service::coupon_level(&body.frequency);
+    s.coupon_frequency.store(level, Ordering::Relaxed);
+    let frequency = crate::printer::service::coupon_level_str(level).to_string();
+    info!(frequency = %frequency, "operator: coupon frequency set");
+    (StatusCode::OK, Json(CouponFreqState { frequency }))
 }
 
 // ---- Maintenance / hardware test plane ----
@@ -692,7 +750,7 @@ async fn lawyer_audio(
     AxumState(s): AxumState<AppState>,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
-    if !s.lawyer_speaker_playback || body.is_empty() {
+    if !s.lawyer_speaker_playback.load(Ordering::Relaxed) || body.is_empty() {
         return StatusCode::NO_CONTENT;
     }
     let _ = s

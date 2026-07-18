@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{atomic::{AtomicBool, AtomicUsize}, Arc};
+use std::sync::{atomic::{AtomicBool, AtomicU8, AtomicUsize}, Arc};
 
 use anyhow::Result;
 use clap::Parser;
@@ -122,7 +122,17 @@ async fn main() -> Result<()> {
     // and before the printer service so it can raise operator Error banners.
     let display_bcast = broadcast::channel::<DisplayMessage>(256).0;
 
-    let print_tx = printer::service::spawn(cfg.printer.clone(), display_bcast.clone());
+    // Operator-toggleable coupon frequency (F4), shared between the print
+    // service (reads per receipt) and the HTTP endpoint (writes). Seeded from
+    // `[printer] coupon_frequency`.
+    let coupon_frequency = Arc::new(AtomicU8::new(printer::service::coupon_level(
+        &cfg.printer.coupon_frequency,
+    )));
+    let print_tx = printer::service::spawn(
+        cfg.printer.clone(),
+        coupon_frequency.clone(),
+        display_bcast.clone(),
+    );
 
     // Custom-print templates: same convention as personas/crimes — a JSON file
     // next to the config so it travels with the deployment.
@@ -323,6 +333,12 @@ async fn main() -> Result<()> {
     // (writes) and the state machine (reads). Seeded from config.
     let cross_enabled = Arc::new(AtomicBool::new(cfg.cross_examination.enabled));
 
+    // Operator-toggleable attract mode (F6) and lawyer-audio-on-speaker (F5),
+    // shared between the HTTP endpoints (writes) and their readers (the state
+    // machine / the /lawyer/audio handler). Seeded from config.
+    let attract_enabled = Arc::new(AtomicBool::new(cfg.attract.enabled));
+    let lawyer_speaker_playback = Arc::new(AtomicBool::new(cfg.lawyer.speaker_playback));
+
     // State mirrors for the maintenance REST gates, written by the state
     // machine: `maintenance` opens the direct-command path; `is_idle` gates
     // maintenance entry. Initial state is Idle.
@@ -420,7 +436,9 @@ async fn main() -> Result<()> {
         crimes,
         inference_cfg: cfg.inference.clone(),
         lawyer_neck_droop_on_call: cfg.lawyer.neck_droop_on_call,
-        lawyer_speaker_playback: cfg.lawyer.speaker_playback,
+        lawyer_speaker_playback: lawyer_speaker_playback.clone(),
+        attract_enabled: attract_enabled.clone(),
+        coupon_frequency: coupon_frequency.clone(),
         cross_enabled: cross_enabled.clone(),
         maint_cmd_tx,
         maintenance: maintenance.clone(),
@@ -469,6 +487,7 @@ async fn main() -> Result<()> {
         lawyer_enabled,
         lawyer_call_active,
         Some(lawyer_bridge),
+        attract_enabled,
     );
     let sm = tokio::spawn(async move { runtime.run().await });
 
