@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopAllPlayback, stopRecording } from './audio';
+import { enqueueCallFrame, enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopAllPlayback, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
 import { onButtonPressed, onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 import { applyRobotParamsToGraph } from './robotParams';
@@ -150,9 +150,18 @@ export function connect(opts: { readOnly?: boolean; audio?: boolean; mic?: boole
         pushLog({ ts: Date.now(), ev: { type: 'parse_error' } });
       }
     } else {
+      // Server→client binary frames carry a 1-byte stream tag (see
+      // DisplayMessage in display/mod.rs): 0 = judge TTS PCM (24 kHz, framed
+      // by tts_audio/tts_end), 1 = lawyer-call audio (8 kHz, continuous
+      // while a call is live). Tagging lets the two interleave safely — the
+      // handset can be lifted while the judge is mid-sentence.
       const buf = msg.data as ArrayBuffer;
-      if (nextBinaryIsAudio) {
-        enqueuePcmFrame(buf);
+      const tag = buf.byteLength > 0 ? new Uint8Array(buf, 0, 1)[0] : -1;
+      const payload = buf.slice(1);
+      if (tag === 0 && nextBinaryIsAudio) {
+        enqueuePcmFrame(payload);
+      } else if (tag === 1) {
+        if (audioEnabled()) enqueueCallFrame(payload);
       } else {
         pushLog({ ts: Date.now(), ev: { type: 'binary_frame', binary_bytes: buf.byteLength } });
       }

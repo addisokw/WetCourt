@@ -43,10 +43,28 @@ const WS_SUPERSEDED: u16 = 4000;
 
 /// What the orchestrator pushes down the WebSocket. The display task fans these
 /// out to whichever client is currently connected.
+///
+/// Binary payloads carry a 1-byte stream tag so judge TTS and lawyer-call
+/// audio can interleave on the one socket without corrupting each other
+/// (a defendant can lift the handset while the judge is mid-sentence).
 #[derive(Debug, Clone)]
 pub enum DisplayMessage {
     Json(DisplayEvent),
     Binary(Bytes),
+}
+
+/// Binary-frame stream tags (first byte of every server→client binary frame).
+/// Judge TTS: s16le @ 24 kHz, framed by `tts_audio`/`tts_end` events.
+pub const BIN_TAG_TTS: u8 = 0;
+/// Lawyer call audio: s16le @ 8 kHz, continuous while a call is live.
+pub const BIN_TAG_CALL_AUDIO: u8 = 1;
+
+/// Prefix a payload with its stream tag.
+fn tag_binary(tag: u8, b: &[u8]) -> Bytes {
+    let mut out = Vec::with_capacity(b.len() + 1);
+    out.push(tag);
+    out.extend_from_slice(b);
+    Bytes::from(out)
 }
 
 #[derive(Clone)]
@@ -188,6 +206,7 @@ pub fn router(state: AppState) -> Router {
         .route("/lawyer/status", get(lawyer_status))
         .route("/lawyer/call", post(lawyer_call))
         .route("/lawyer/event", post(lawyer_event))
+        .route("/lawyer/audio", post(lawyer_audio))
         .route("/operator/lawyer_integration", get(get_lawyer_integration).post(set_lawyer_integration))
         .route("/health", get(health))
         .fallback(assets::serve)
@@ -271,7 +290,7 @@ async fn audio_tts_test(
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(b) => {
-                    let _ = bcast.send(DisplayMessage::Binary(b));
+                    let _ = bcast.send(DisplayMessage::Binary(tag_binary(BIN_TAG_TTS, &b)));
                 }
                 Err(e) => {
                     warn!("audio check: tts stream error: {e:#}");
@@ -648,6 +667,32 @@ async fn lawyer_event(
         }
     }
     StatusCode::NO_CONTENT
+}
+
+/// Booth mirror of the lawyer call: counsel streams the caller's earpiece
+/// feed (s16le @ 8 kHz) as one chunked POST for the life of the call; each
+/// chunk is rebroadcast to the audio clients as a tagged binary frame so the
+/// audience hears the lawyer through the booth speakers too. Best-effort by
+/// contract — frames from a dead client stream just stop arriving.
+async fn lawyer_audio(AxumState(s): AxumState<AppState>, body: Body) -> impl IntoResponse {
+    info!("lawyer call audio stream opened");
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(b) if b.is_empty() => {}
+            Ok(b) => {
+                let _ = s
+                    .display_bcast
+                    .send(DisplayMessage::Binary(tag_binary(BIN_TAG_CALL_AUDIO, &b)));
+            }
+            Err(e) => {
+                debug!("lawyer call audio stream error: {e:#}");
+                break;
+            }
+        }
+    }
+    info!("lawyer call audio stream closed");
+    StatusCode::OK
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1704,7 +1749,7 @@ pub async fn forwarder(mut display_rx: mpsc::Receiver<Command>, bcast: broadcast
     while let Some(cmd) = display_rx.recv().await {
         let msg = match cmd {
             Command::Display(de) => DisplayMessage::Json(de),
-            Command::DisplayBinary(b) => DisplayMessage::Binary(b),
+            Command::DisplayBinary(b) => DisplayMessage::Binary(tag_binary(BIN_TAG_TTS, &b)),
             _ => continue,
         };
         let _ = bcast.send(msg);

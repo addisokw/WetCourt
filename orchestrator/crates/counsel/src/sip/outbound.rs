@@ -121,7 +121,9 @@ pub async fn ring_out(ctx: Arc<SipCtx>, reason: Option<String>) -> Result<RingOu
             format!("{}:{}", media.ip, media.port),
         ))
     });
-    let session = rtp::start(socket, peer, media.dtmf_pt, token.clone(), recorder.clone())?;
+    let mirror = crate::audio::mirror::BoothMirror::from_shared(&ctx.shared);
+    let session =
+        rtp::start(socket, peer, media.dtmf_pt, token.clone(), recorder.clone(), mirror)?;
     let ctx2 = ctx.clone();
     let note = Some(reason.unwrap_or_else(|| {
         "checking in on your case unprompted, as good lawyers do".to_string()

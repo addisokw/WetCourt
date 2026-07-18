@@ -19,6 +19,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Notify};
 use tokio_util::sync::CancellationToken;
 
+use crate::audio::mirror::BoothMirror;
 use crate::config::RtpConfig;
 
 pub const SAMPLES_PER_FRAME: usize = 160; // 20 ms @ 8 kHz
@@ -125,12 +126,14 @@ pub struct RtpSession {
 
 /// Spawn the send/recv tasks for an answered call. `peer` comes from the
 /// remote SDP; `dtmf_pt` is the negotiated telephone-event payload type.
+/// `mirror` tees the outbound (lawyer) leg to the booth speakers.
 pub fn start(
     socket: UdpSocket,
     peer: SocketAddr,
     dtmf_pt: Option<u8>,
     token: CancellationToken,
     recorder: Option<Arc<crate::recorder::CallRecorder>>,
+    mirror: Option<BoothMirror>,
 ) -> Result<RtpSession> {
     let socket = Arc::new(socket);
     let mixer = MixerHandle {
@@ -154,6 +157,7 @@ pub fn start(
         peer_slot.clone(),
         token.clone(),
         recorder.clone(),
+        mirror,
     ));
     tokio::spawn(recv_task(
         socket,
@@ -173,6 +177,7 @@ async fn send_task(
     peer_slot: Arc<Mutex<SocketAddr>>,
     token: CancellationToken,
     recorder: Option<Arc<crate::recorder::CallRecorder>>,
+    mirror: Option<BoothMirror>,
 ) {
     let ssrc: u32 = rand::random();
     let mut seq: u16 = rand::random();
@@ -222,8 +227,14 @@ async fn send_task(
         let marker = is_speech && !in_talkspurt;
         in_talkspurt = is_speech;
 
-        if let Some(rec) = &recorder {
-            rec.push_lawyer(&g711::decode(&frame));
+        if recorder.is_some() || mirror.is_some() {
+            let pcm = g711::decode(&frame);
+            if let Some(rec) = &recorder {
+                rec.push_lawyer(&pcm);
+            }
+            if let Some(m) = &mirror {
+                m.push(&pcm);
+            }
         }
 
         let packet = match RtpPacketBuilder::new()

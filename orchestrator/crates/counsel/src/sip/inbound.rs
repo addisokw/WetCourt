@@ -102,7 +102,9 @@ async fn run_call(
             format!("{}:{}", media.ip, media.port),
         ))
     });
-    let session = rtp::start(socket, peer, media.dtmf_pt, token.clone(), recorder.clone())?;
+    let mirror = crate::audio::mirror::BoothMirror::from_shared(&ctx.shared);
+    let session =
+        rtp::start(socket, peer, media.dtmf_pt, token.clone(), recorder.clone(), mirror)?;
 
     let result = crate::call::session_loop(&ctx.shared, session, token).await;
     if let (Some(rec), Some(dir)) = (recorder, &ctx.shared.recording_dir) {
