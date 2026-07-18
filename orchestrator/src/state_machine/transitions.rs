@@ -259,21 +259,26 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             )
         }
         (
-            CrossAwaitingAnswer { charge, plea, question, paused_remaining: Some(rem), .. },
+            CrossAwaitingAnswer { charge, plea, question, paused_remaining: Some(_), .. },
             LawyerCallEnded,
-        ) => (
-            CrossAwaitingAnswer {
-                charge,
-                plea,
-                question,
-                deadline: Instant::now() + rem,
-                paused_remaining: None,
-            },
-            vec![Command::Display(DisplayEvent::PhaseDeadline {
-                phase: "cross_answer".into(),
-                deadline_ms: rem.as_millis() as u64,
-            })],
-        ),
+        ) => {
+            // Reset to the FULL answer window (not the frozen remainder): after
+            // consulting counsel the defendant gets a clean shot at the question.
+            let window = Duration::from_secs(cfg.cross_examination.answer_window_secs);
+            (
+                CrossAwaitingAnswer {
+                    charge,
+                    plea,
+                    question,
+                    deadline: Instant::now() + window,
+                    paused_remaining: None,
+                },
+                vec![Command::Display(DisplayEvent::PhaseDeadline {
+                    phase: "cross_answer".into(),
+                    deadline_ms: window.as_millis() as u64,
+                })],
+            )
+        }
         (
             CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None },
             Tick,
@@ -1036,6 +1041,38 @@ mod tests {
         assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
         let (s, _) = step(s, Event::LawyerCallEnded, &cfg, true);
         assert!(matches!(s, State::CrossAwaitingAnswer { paused_remaining: None, .. }));
+    }
+
+    #[test]
+    fn cross_answer_window_resets_to_full_on_call_end() {
+        // After the call ends, the defendant gets the FULL window again, not the
+        // frozen remainder. test_cfg answer_window_secs = 1; we pause with 4s
+        // remaining, so a reset lands at ~1s (a resume would land at ~4s).
+        let cfg = test_cfg();
+        let s = State::CrossAwaitingAnswer {
+            charge: "c".into(),
+            plea: "p".into(),
+            question: "q?".into(),
+            deadline: Instant::now(),
+            paused_remaining: Some(Duration::from_secs(4)),
+        };
+        let (s, cmds) = step(s, Event::LawyerCallEnded, &cfg, true);
+        match &s {
+            State::CrossAwaitingAnswer { deadline, paused_remaining, .. } => {
+                assert!(paused_remaining.is_none());
+                let rem = deadline.saturating_duration_since(Instant::now());
+                // Reset to the full 1s window, NOT the 4s that was frozen.
+                assert!(rem > Duration::from_millis(500) && rem <= Duration::from_secs(1),
+                    "expected ~1s full window, got {rem:?}");
+            }
+            other => panic!("expected CrossAwaitingAnswer, got {}", other.name()),
+        }
+        // Emits a PhaseDeadline for the full window (1000ms).
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::PhaseDeadline { phase, deadline_ms })
+                if phase == "cross_answer" && *deadline_ms == 1000
+        )));
     }
 
     #[test]
