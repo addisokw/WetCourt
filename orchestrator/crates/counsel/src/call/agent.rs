@@ -252,6 +252,7 @@ pub(super) async fn synth_to_queue(
     speed: Option<f32>,
 ) -> Result<()> {
     let icfg = &shared.cfg.inference;
+    let gain = shared.cfg.audio.tts_gain.clamp(0.0, 8.0);
     match &shared.backend {
         Backend::Real(client) => {
             let stream = client
@@ -278,26 +279,27 @@ pub(super) async fn synth_to_queue(
                     anyhow::bail!("tts stream exceeded total timeout");
                 }
                 let chunk = chunk?;
-                queue_pcm24(mixer, &mut decimator, &mut leftover, &chunk);
+                queue_pcm24(mixer, &mut decimator, &mut leftover, &chunk, gain);
             }
         }
         Backend::Mock { .. } => {
             let pcm = crate::inference::mock_tts_pcm(1.2);
             let mut decimator = Decimator::new();
             let mut leftover: Option<u8> = None;
-            queue_pcm24(mixer, &mut decimator, &mut leftover, &pcm);
+            queue_pcm24(mixer, &mut decimator, &mut leftover, &pcm, gain);
         }
     }
     Ok(())
 }
 
-/// 24 kHz s16le bytes → 8 kHz µ-law into the mixer, carrying an odd byte
-/// across chunk seams.
+/// 24 kHz s16le bytes → gain → 8 kHz µ-law into the mixer, carrying an odd
+/// byte across chunk seams.
 fn queue_pcm24(
     mixer: &MixerHandle,
     decimator: &mut Decimator,
     leftover: &mut Option<u8>,
     chunk: &[u8],
+    gain: f32,
 ) {
     let mut bytes: Vec<u8> = Vec::with_capacity(chunk.len() + 1);
     if let Some(b) = leftover.take() {
@@ -309,7 +311,7 @@ fn queue_pcm24(
     }
     let samples: Vec<i16> = bytes
         .chunks_exact(2)
-        .map(|b| i16::from_le_bytes([b[0], b[1]]))
+        .map(|b| amplify(i16::from_le_bytes([b[0], b[1]]), gain))
         .collect();
     if samples.is_empty() {
         return;
@@ -318,6 +320,23 @@ fn queue_pcm24(
     if !down.is_empty() {
         mixer.queue_speech(&g711::encode(&down));
     }
+}
+
+/// Scale a sample by `gain`, soft-clipping above ~80% full scale so boosted
+/// speech saturates smoothly instead of crackling at the rails.
+fn amplify(sample: i16, gain: f32) -> i16 {
+    if gain == 1.0 {
+        return sample;
+    }
+    const KNEE: f32 = 0.8 * 32767.0;
+    const HEADROOM: f32 = 32767.0 - KNEE;
+    let x = sample as f32 * gain;
+    let y = if x.abs() <= KNEE {
+        x
+    } else {
+        x.signum() * (KNEE + HEADROOM * ((x.abs() - KNEE) / HEADROOM).tanh())
+    };
+    y as i16
 }
 
 /// Drop frames that queued up while we were busy speaking, and reset the

@@ -108,6 +108,7 @@ pub enum DisplayEvent {
         ring_hz: f32,
         saturation: f32,
         peak_hz: f32,
+        gain: f32,
     },
     /// Operator-facing problem banner (e.g. printer not ready / print failed).
     /// The show goes on; this is "something needs a human" feedback.

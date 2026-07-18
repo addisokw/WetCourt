@@ -361,6 +361,7 @@ function handleEvent(ev: DisplayEvent) {
         ring_hz: Number(ev.ring_hz),
         saturation: Number(ev.saturation),
         peak_hz: Number(ev.peak_hz),
+        gain: Number(ev.gain ?? 1),
       });
       break;
   }

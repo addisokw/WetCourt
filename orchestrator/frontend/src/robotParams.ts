@@ -5,6 +5,7 @@
 // is the source of truth.
 
 import {
+  setRobotGain,
   setRobotGlitchRate,
   setRobotIntensity,
   setRobotPeakHz,
@@ -18,6 +19,7 @@ export interface RobotParams {
   ring_hz: number;
   saturation: number;
   peak_hz: number;
+  gain: number;
 }
 
 export const ROBOT_DEFAULTS: RobotParams = {
@@ -26,6 +28,7 @@ export const ROBOT_DEFAULTS: RobotParams = {
   ring_hz: 52,
   saturation: 0.5,
   peak_hz: 2200,
+  gain: 1,
 };
 
 export interface RobotFieldSpec {
@@ -45,6 +48,7 @@ export const ROBOT_FIELDS: RobotFieldSpec[] = [
   { key: 'ring_hz', label: 'Ring-mod', min: 10, max: 400, step: 1, apply: setRobotRingHz, fmt: (v) => `${Math.round(v)} Hz` },
   { key: 'saturation', label: 'Saturation', min: 0, max: 1, step: 0.01, apply: setRobotSaturation, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'peak_hz', label: 'Honk freq', min: 500, max: 5000, step: 50, apply: setRobotPeakHz, fmt: (v) => `${Math.round(v)} Hz` },
+  { key: 'gain', label: 'Gain', min: 0, max: 3, step: 0.05, apply: setRobotGain, fmt: (v) => `${Math.round(v * 100)}%` },
 ];
 
 /** Apply a full set of robot params to the live audio graph. */

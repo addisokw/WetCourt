@@ -20,6 +20,9 @@ silence_reprompt_secs = 12
 max_call_secs = 180
 # Back-and-forths before a scripted mishap (persona hangup_lines) ends the call.
 max_exchanges = 2
+# Linear gain on the lawyer's TTS voice (1.0 = unity); soft-clipped, so
+# modest boosts (1.5–2.0) stay clean on a quiet handset.
+tts_gain = 1.0
 
 [inference]
 mode = "real"
