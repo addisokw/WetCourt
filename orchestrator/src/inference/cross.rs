@@ -23,10 +23,12 @@ struct CrossOut {
 }
 
 const TASK: &str = "Do NOT deliver a verdict yet. You are cross-examining the defendant. \
-Ask ONE short, pointed follow-up question that zeroes in on the single weakest, \
-vaguest, or most suspicious part of what they just said. Stay completely in \
-character. One or two sentences, answerable aloud in about ten seconds, and it \
-must end with a question mark. Output only the question.";
+Pick the weakest or vaguest part of what they just said and ask ONE short follow-up \
+that gives them a real chance to clarify or strengthen it — an opening they can \
+seize, NOT a trap engineered to make them fail. Stay completely in character (you \
+may be skeptical or theatrical), but a sharp defendant should be able to turn this \
+question to their advantage. One or two sentences, answerable aloud in about ten \
+seconds, and it must end with a question mark. Output only the question.";
 
 pub async fn mock(
     cfg: Arc<Config>,

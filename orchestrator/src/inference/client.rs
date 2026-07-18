@@ -142,6 +142,7 @@ impl LlmClient {
         &self,
         system: &str,
         user: &str,
+        temperature: f64,
         first_token_timeout: Duration,
         total_timeout: Duration,
     ) -> Result<impl Stream<Item = Result<String>>> {
@@ -153,7 +154,7 @@ impl LlmClient {
             ],
             "stream": true,
             "chat_template_kwargs": { "enable_thinking": self.enable_thinking },
-            "temperature": 0.9,
+            "temperature": temperature,
             "max_tokens": 4096,
         });
 

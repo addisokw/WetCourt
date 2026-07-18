@@ -33,8 +33,23 @@ pub async fn mock(
 
 /// Assemble the verdict user message, folding in the cross-examination exchange
 /// when one took place so the judge can weigh the answer.
-fn build_user_msg(charge: &str, plea: &str, cross: &Option<CrossExam>) -> String {
-    let mut msg = format!("CHARGE: {charge}\n\nPLEA: {plea}");
+fn build_user_msg(charge: &str, plea: &str, cross: &Option<CrossExam>, anchors: &[String]) -> String {
+    let mut msg = String::new();
+    // History-anchoring block (verdict-neutral): recent verdicts as a bar
+    // reference. Prepended so the CHARGE/PLEA it must actually judge is last.
+    if !anchors.is_empty() {
+        msg.push_str(
+            "=== TONIGHT'S RECENT VERDICTS (calibration reference only) ===\n\
+             Your last few decisions tonight, most recent first. Keep your bar consistent \
+             with these — but THIS defendant's own words decide their fate. NEVER convict or \
+             acquit merely to match the pattern, and never mention these past cases.\n",
+        );
+        for a in anchors {
+            msg.push_str(&format!("- {a}\n"));
+        }
+        msg.push('\n');
+    }
+    msg.push_str(&format!("CHARGE: {charge}\n\nPLEA: {plea}"));
     if let Some(c) = cross {
         msg.push_str(&format!(
             "\n\nCROSS-EXAMINATION:\nYou asked: {}\nThe defendant answered: {}",
@@ -56,6 +71,7 @@ pub async fn real(
     charge: String,
     plea: String,
     cross: Option<CrossExam>,
+    anchors: Vec<String>,
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
     maint_cmd_tx: mpsc::Sender<MaintenanceCommand>,
@@ -71,12 +87,13 @@ pub async fn real(
     };
 
     let client = LlmClient::new(&cfg.inference);
-    let user_msg = build_user_msg(&charge, &plea, &cross);
+    let user_msg = build_user_msg(&charge, &plea, &cross, &anchors);
     let first_to = Duration::from_secs(cfg.inference.verdict_first_token_timeout_secs);
     let total_to = Duration::from_secs(cfg.inference.verdict_total_timeout_secs);
     let tts_connect_to = Duration::from_secs(cfg.inference.tts_timeout_secs);
 
-    let stream = match client.chat_stream(&system_prompt, &user_msg, first_to, total_to).await {
+    let temperature = cfg.inference.verdict_temperature;
+    let stream = match client.chat_stream(&system_prompt, &user_msg, temperature, first_to, total_to).await {
         Ok(s) => s,
         Err(e) => {
             warn!("verdict stream failed to open: {e:#}; falling back");

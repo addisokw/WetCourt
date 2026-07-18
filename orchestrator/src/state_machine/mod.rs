@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,6 +51,10 @@ pub struct Runtime {
     print_tx: mpsc::Sender<PrintJob>,
     /// Accumulates the in-flight trial's pieces; `None` between trials.
     draft: Option<TrialDraft>,
+    /// Ring of recent "VERDICT — key_factor" lines (most-recent last) for the
+    /// history-anchoring calibration reference. Verdict + key_factor only — never
+    /// any defendant text — so a prior plea can't inject into a later trial.
+    recent_anchors: VecDeque<String>,
     /// Drives the turret aiming sequence during trials (arm on deliberation,
     /// freeze-then-fire on guilty, idle between trials). `None` disables it (and
     /// in tests, which don't wire up vision/hardware).
@@ -118,6 +123,7 @@ impl Runtime {
             next_case_no,
             print_tx,
             draft: None,
+            recent_anchors: VecDeque::new(),
             targeting,
             capture,
             lawyer_enabled,
@@ -306,11 +312,13 @@ impl Runtime {
             still_jpeg: None,
         };
 
-        // Guilty verdicts get a "moment of justice" burst: record the capture dir
-        // in the casebook now, then hand the record to the capture task, which
-        // grabs the frames, attaches the receipt still, and queues the print.
-        // (Not-guilty / capture-off prints immediately.)
-        let cap = match (record.guilty && self.cfg.capture.enabled).then_some(()) {
+        // EVERY verdict gets a capture burst so the wall of trial results has a
+        // photo for acquittals too, not just soakings: record the capture dir in
+        // the casebook now, then hand the record to the capture task, which grabs
+        // the frames (the blast on guilty, the verdict-reveal moment on acquittal),
+        // attaches the receipt still, and queues the print. (Capture-off prints
+        // immediately with the placeholder still.)
+        let cap = match self.cfg.capture.enabled.then_some(()) {
             Some(()) => self.capture.clone(),
             None => None,
         };
@@ -321,6 +329,18 @@ impl Runtime {
         match self.casebook.record(&record) {
             Ok(()) => info!(case_no = record.case_no, guilty = record.guilty, "trial recorded"),
             Err(e) => tracing::error!("casebook append failed: {e:#}"),
+        }
+
+        // Feed the history-anchoring ring with this verdict's summary (verdict +
+        // key_factor only — no defendant text). Bounded to the configured count.
+        let keep_n = self.cfg.trial.history_anchor_count;
+        if keep_n > 0 {
+            let verdict = if record.guilty { "GUILTY" } else { "ACQUITTED" };
+            let kf = record.key_factor.as_deref().unwrap_or("(no reason recorded)");
+            self.recent_anchors.push_back(format!("{verdict} — {kf}"));
+            while self.recent_anchors.len() > keep_n {
+                self.recent_anchors.pop_front();
+            }
         }
 
         if let Some(c) = &cap {
@@ -334,7 +354,16 @@ impl Runtime {
 
     async fn dispatch(&self, cmd: Command) {
         match cmd {
-            Command::GenerateCharge | Command::Transcribe(_) | Command::CrossExamine { .. } | Command::Deliberate { .. } | Command::Speak(_) | Command::CancelSpeech => {
+            // Fill the deliberation's anchors from the recent-verdict ring
+            // (most-recent first) just before it goes to inference.
+            Command::Deliberate { charge, plea, cross, .. } => {
+                let anchors: Vec<String> = self.recent_anchors.iter().rev().cloned().collect();
+                let cmd = Command::Deliberate { charge, plea, cross, anchors };
+                if self.inference_tx.send(cmd).await.is_err() {
+                    tracing::error!("inference channel closed");
+                }
+            }
+            Command::GenerateCharge | Command::Transcribe(_) | Command::CrossExamine { .. } | Command::Speak(_) | Command::CancelSpeech => {
                 if self.inference_tx.send(cmd).await.is_err() {
                     tracing::error!("inference channel closed");
                 }
@@ -373,13 +402,13 @@ mod tests {
                 stt_model: "x".into(), tts_model: "x".into(),
                 charge_timeout_secs: 10, verdict_first_token_timeout_secs: 15,
                 verdict_total_timeout_secs: 30, stt_timeout_secs: 5, tts_timeout_secs: 10,
-                enable_thinking: false, api_key: None,
+                enable_thinking: false, api_key: None, verdict_temperature: 0.5,
             },
             hardware: HardwareConfig { driver: "mock".into(), ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into(), beacon_port: 0 },
             mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
             mock_inference: MockInferenceConfig::default(),
             squirt: SquirtConfig { duration_ms: 150 },
-            trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 0, cooldown_secs: 1, guilty_bias: 1.0 },
+            trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 0, cooldown_secs: 1, guilty_bias: 1.0, history_anchor_count: 0 },
             cross_examination: CrossExamConfig { enabled: false, answer_window_secs: 1, question_timeout_secs: 1 },
             display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
             logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },

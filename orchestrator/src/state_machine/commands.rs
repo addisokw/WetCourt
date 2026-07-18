@@ -10,7 +10,10 @@ pub enum Command {
     Transcribe(Vec<u8>),
     /// Generate the judge's one cross-examination follow-up question.
     CrossExamine { charge: String, plea: String },
-    Deliberate { charge: String, plea: String, cross: Option<CrossExam> },
+    /// `anchors` are preformatted "VERDICT — key_factor" lines from recent
+    /// trials (most-recent first), injected as a calibration reference. Empty
+    /// unless history anchoring is enabled; the Runtime fills them at dispatch.
+    Deliberate { charge: String, plea: String, cross: Option<CrossExam>, anchors: Vec<String> },
     Speak(String),
     /// Abort every in-flight inference task (TTS streams included) — the
     /// e-stop's "shut up NOW". Clients stop their own playback on the

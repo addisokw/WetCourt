@@ -64,10 +64,10 @@ pub async fn run(
                     else    { cross::mock(cfg, c, plea, event_tx).await }
                 }));
             }
-            Command::Deliberate { charge: c, plea, cross } => {
+            Command::Deliberate { charge: c, plea, cross, anchors } => {
                 let maint_cmd_tx = maint_cmd_tx.clone();
                 tasks.push(tokio::spawn(async move {
-                    if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx, maint_cmd_tx).await }
+                    if real { verdict::real(cfg, personas, c, plea, cross, anchors, event_tx, display_tx, maint_cmd_tx).await }
                     else    { verdict::mock(cfg, c, plea, cross, event_tx).await }
                 }));
             }

@@ -20,6 +20,9 @@ verdict_total_timeout_secs = 30
 stt_timeout_secs = 5
 tts_timeout_secs = 10
 enable_thinking = false
+# Verdict deliberation sampling temperature (charge/cross keep 0.9). Lower = the
+# same good defense wins reliably instead of by luck run-to-run.
+verdict_temperature = 0.5
 
 [hardware]
 # "mock" cycles synthetic acks. "tcp" listens for the MCU on `bind_addr`
@@ -65,6 +68,9 @@ cooldown_secs = 4
 # guilty_bias; this governs the random verdict used when inference fails and the
 # mock inference path. Kept near the "defense decides" ~0.55 baseline.
 guilty_bias = 0.55
+# History anchoring: inject the last N verdicts (verdict + key_factor only) into
+# each deliberation as a verdict-neutral bar reference. 0 = off, 3 = a good on value.
+history_anchor_count = 0
 
 [cross_examination]
 # After the defense, the judge asks one pointed follow-up question and the

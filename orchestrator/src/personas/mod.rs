@@ -112,12 +112,22 @@ impl Persona {
     /// genuinely close calls. Appended after the persona block by
     /// `PersonaRegistry::verdict_prompt`.
     pub fn bias_directive(&self) -> String {
-        let pct = (self.guilty_bias * 100.0).round() as u32;
+        // No raw percentage: the model latches onto the number and overshoots it
+        // (a 55% slider produced ~90% convictions). Verbalize the slider as a
+        // tie-break disposition that settles ONLY genuine coin-flips, never
+        // overriding a defense that clearly won or clearly failed.
+        let lean = if self.guilty_bias >= 0.60 {
+            "When a case is a genuine coin-flip, you lean toward conviction."
+        } else if self.guilty_bias >= 0.50 {
+            "When a case is a genuine coin-flip, decide it strictly on the merits."
+        } else {
+            "When a case is a genuine coin-flip, you give the defendant the benefit of the doubt."
+        };
         format!(
-            "GUILT RATE: Across many cases you return GUILTY roughly {pct}% of the \
-time. Treat this as your standing disposition toward conviction; when a plea \
-leaves the question genuinely balanced, let this rate settle it. Never state \
-this number or admit that it guides you."
+            "STANDING DISPOSITION: {lean} This settles ONLY cases that are truly \
+balanced after you have weighed the defense; it NEVER overrides a defense that \
+clearly earned acquittal or a non-defense that clearly earned a soaking. Never \
+state or allude to this disposition."
         )
     }
 

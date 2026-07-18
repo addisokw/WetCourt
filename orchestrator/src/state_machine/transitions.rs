@@ -468,7 +468,9 @@ fn begin_deliberating(
     if cfg.vision.trial_targeting {
         cmds.push(Command::Targeting(TargetingCue::Acquire));
     }
-    cmds.push(Command::Deliberate { charge, plea, cross });
+    // anchors are filled by the Runtime at dispatch (it owns trial history);
+    // transitions is pure and has none.
+    cmds.push(Command::Deliberate { charge, plea, cross, anchors: Vec::new() });
     (state, cmds)
 }
 
@@ -652,13 +654,13 @@ mod tests {
                 tts_model: "x".into(),
                 charge_timeout_secs: 10, verdict_first_token_timeout_secs: 15,
                 verdict_total_timeout_secs: 30, stt_timeout_secs: 5, tts_timeout_secs: 10,
-                enable_thinking: false, api_key: None,
+                enable_thinking: false, api_key: None, verdict_temperature: 0.5,
             },
             hardware: HardwareConfig { driver: "mock".into(), ack_timeout_ms: 1000, bind_addr: "0.0.0.0:0".into(), beacon_port: 0 },
             mock_hw: MockHwConfig { ack_latency_ms: 1, fail_rate: 0.0, simulate_estop_after_secs: 0 },
             mock_inference: MockInferenceConfig::default(),
             squirt: SquirtConfig { duration_ms: 150 },
-            trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 1, cooldown_secs: 1, guilty_bias: 1.0 },
+            trial: TrialConfig { plea_window_secs: 1, charge_display_secs: 1, cooldown_secs: 1, guilty_bias: 1.0, history_anchor_count: 0 },
             cross_examination: CrossExamConfig { enabled: true, answer_window_secs: 1, question_timeout_secs: 1 },
             display: DisplayConfig { listen_addr: "127.0.0.1:0".into() },
             logging: LoggingConfig { level: "info".into(), log_file: "x".into(), transcripts_jsonl: "x".into() },

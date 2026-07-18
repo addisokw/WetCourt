@@ -296,6 +296,16 @@ pub struct InferenceConfig {
     pub enable_thinking: bool,
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Sampling temperature for the VERDICT deliberation only (charge/cross keep
+    /// the client's 0.9). Verdicts ran at 0.9, which made the same good defense
+    /// win or lose by luck run-to-run; a lower value makes "the defense decides"
+    /// reliable. serde default keeps older config files parsing.
+    #[serde(default = "d_verdict_temperature")]
+    pub verdict_temperature: f64,
+}
+
+fn d_verdict_temperature() -> f64 {
+    0.5
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -357,6 +367,12 @@ pub struct TrialConfig {
     pub charge_display_secs: u64,
     pub cooldown_secs: u64,
     pub guilty_bias: f64,
+    /// History anchoring: inject this many of the most recent verdicts (as
+    /// verdict + key_factor only — never any defendant text) into each new
+    /// deliberation as a "tonight's bar" calibration reference. 0 = off. The
+    /// block is explicitly verdict-neutral; it steadies the bar, never a quota.
+    #[serde(default)]
+    pub history_anchor_count: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -1536,7 +1536,10 @@ async fn test_persona(
     let first_to = Duration::from_secs(s.inference_cfg.verdict_first_token_timeout_secs);
     let total_to = Duration::from_secs(s.inference_cfg.verdict_total_timeout_secs);
 
-    let stream = match client.chat_stream(&system_prompt, &user_msg, first_to, total_to).await {
+    let stream = match client
+        .chat_stream(&system_prompt, &user_msg, s.inference_cfg.verdict_temperature, first_to, total_to)
+        .await
+    {
         Ok(s) => s,
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("llm stream open failed: {e:#}")).into_response(),
     };
