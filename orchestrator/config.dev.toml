@@ -153,6 +153,9 @@ base_url = "http://127.0.0.1:8092"
 # Droop the neck to full power-down tilt during a lawyer call. Motion feature —
 # OFF until a hardware pass.
 neck_droop_on_call = false
+# F5: also play the lawyer's call audio over the booth speaker (phone-band).
+# Needs counsel's [audio] speaker_playback too. Motion/audio -- OFF until a hardware pass.
+speaker_playback = false
 
 [attract]
 enabled = false

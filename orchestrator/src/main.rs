@@ -420,6 +420,7 @@ async fn main() -> Result<()> {
         crimes,
         inference_cfg: cfg.inference.clone(),
         lawyer_neck_droop_on_call: cfg.lawyer.neck_droop_on_call,
+        lawyer_speaker_playback: cfg.lawyer.speaker_playback,
         cross_enabled: cross_enabled.clone(),
         maint_cmd_tx,
         maintenance: maintenance.clone(),

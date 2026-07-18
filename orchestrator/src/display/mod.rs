@@ -76,6 +76,9 @@ pub struct AppState {
     /// F7: when true, droop the judge's neck to full "powered down" tilt while a
     /// lawyer call is active. Off by default (motion feature, needs a hardware pass).
     pub lawyer_neck_droop_on_call: bool,
+    /// F5: when true, fan lawyer call-audio POSTs to the primary-speaker kiosk.
+    /// Off by default (needs a live-call hardware pass).
+    pub lawyer_speaker_playback: bool,
     /// Operator-toggleable cross-examination switch, shared with the state
     /// machine `Runtime`, which reads it when a plea comes in.
     pub cross_enabled: Arc<AtomicBool>,
@@ -191,6 +194,7 @@ pub fn router(state: AppState) -> Router {
         .route("/lawyer/status", get(lawyer_status))
         .route("/lawyer/call", post(lawyer_call))
         .route("/lawyer/event", post(lawyer_event))
+        .route("/lawyer/audio", post(lawyer_audio))
         .route("/operator/lawyer_integration", get(get_lawyer_integration).post(set_lawyer_integration))
         .route("/health", get(health))
         .fallback(assets::serve)
@@ -678,6 +682,26 @@ async fn drive_neck_droop(s: &AppState, droop: bool) {
             .send(MaintenanceCommand { target: Role::JudgeNeck, cmd, reply: None })
             .await;
     }
+}
+
+/// F5: counsel POSTs a burst of the lawyer's spoken audio (phone-band 8 kHz
+/// s16le PCM) here; we fan it out to the primary-speaker kiosk with a
+/// `LawyerAudio` header so the client applies a telephone filter instead of the
+/// judge's robot voice. No-op (204) unless `[lawyer] speaker_playback` is on.
+async fn lawyer_audio(
+    AxumState(s): AxumState<AppState>,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    if !s.lawyer_speaker_playback || body.is_empty() {
+        return StatusCode::NO_CONTENT;
+    }
+    let _ = s
+        .display_bcast
+        .send(DisplayMessage::Json(DisplayEvent::LawyerAudio {
+            format: "pcm_s16le_8000".into(),
+        }));
+    let _ = s.display_bcast.send(DisplayMessage::Binary(body));
+    StatusCode::NO_CONTENT
 }
 
 async fn lawyer_event(

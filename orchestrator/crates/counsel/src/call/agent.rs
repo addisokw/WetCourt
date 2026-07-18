@@ -267,6 +267,7 @@ pub(super) async fn synth_to_queue(
 
             let mut decimator = Decimator::new();
             let mut leftover: Option<u8> = None;
+            let mut tap: Vec<i16> = Vec::new();
             let total_timeout = Duration::from_secs(icfg.tts_timeout_secs * 4);
             let started = tokio::time::Instant::now();
 
@@ -278,17 +279,49 @@ pub(super) async fn synth_to_queue(
                     anyhow::bail!("tts stream exceeded total timeout");
                 }
                 let chunk = chunk?;
-                queue_pcm24(mixer, &mut decimator, &mut leftover, &chunk);
+                queue_pcm24(mixer, &mut decimator, &mut leftover, &chunk, &mut tap);
             }
+            maybe_post_speaker_audio(shared, tap);
         }
         Backend::Mock { .. } => {
             let pcm = crate::inference::mock_tts_pcm(1.2);
             let mut decimator = Decimator::new();
             let mut leftover: Option<u8> = None;
-            queue_pcm24(mixer, &mut decimator, &mut leftover, &pcm);
+            let mut tap: Vec<i16> = Vec::new();
+            queue_pcm24(mixer, &mut decimator, &mut leftover, &pcm, &mut tap);
+            maybe_post_speaker_audio(shared, tap);
         }
     }
     Ok(())
+}
+
+/// F5: fan the just-synthesized lawyer line (phone-band 8 kHz s16le) to the
+/// orchestrator's `/lawyer/audio` so it can play over the booth speaker. Gated
+/// off by default; fire-and-forget so it never delays the call. Sent as one
+/// burst per line, so the booth trails the handset by roughly the line length.
+fn maybe_post_speaker_audio(shared: &Shared, samples: Vec<i16>) {
+    if !shared.cfg.audio.speaker_playback || samples.is_empty() {
+        return;
+    }
+    let base = shared
+        .cfg
+        .trial_context
+        .orchestrator_base_url
+        .trim_end_matches('/')
+        .to_string();
+    tokio::spawn(async move {
+        let mut bytes = Vec::with_capacity(samples.len() * 2);
+        for s in &samples {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        let url = format!("{base}/lawyer/audio");
+        let _ = reqwest::Client::new()
+            .post(url)
+            .header("content-type", "application/octet-stream")
+            .body(bytes)
+            .send()
+            .await;
+    });
 }
 
 /// 24 kHz s16le bytes → 8 kHz µ-law into the mixer, carrying an odd byte
@@ -298,6 +331,7 @@ fn queue_pcm24(
     decimator: &mut Decimator,
     leftover: &mut Option<u8>,
     chunk: &[u8],
+    tap: &mut Vec<i16>,
 ) {
     let mut bytes: Vec<u8> = Vec::with_capacity(chunk.len() + 1);
     if let Some(b) = leftover.take() {
@@ -316,7 +350,11 @@ fn queue_pcm24(
     }
     let down = decimator.process(&samples);
     if !down.is_empty() {
-        mixer.queue_speech(&g711::encode(&down));
+        let ulaw = g711::encode(&down);
+        mixer.queue_speech(&ulaw);
+        // F5 tap: the exact phone-colored 8 kHz signal the handset hears
+        // (µ-law round-trip), accumulated for the booth speaker.
+        tap.extend_from_slice(&g711::decode(&ulaw));
     }
 }
 

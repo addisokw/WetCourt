@@ -79,6 +79,12 @@ pub struct LawyerConfig {
     /// clamp to reach the firmware droop position). See [[judge-neck-motion-safety]].
     #[serde(default)]
     pub neck_droop_on_call: bool,
+    /// F5: play the lawyer's call audio over the booth's primary speaker (with a
+    /// telephone-band filter), in addition to the phone. Requires counsel's own
+    /// `[audio] speaker_playback` tee to be on too. Ships OFF (needs a live-call
+    /// hardware pass).
+    #[serde(default)]
+    pub speaker_playback: bool,
 }
 
 fn d_lawyer_trial_integration() -> bool {
@@ -91,6 +97,7 @@ impl Default for LawyerConfig {
             base_url: d_lawyer_base_url(),
             trial_integration: d_lawyer_trial_integration(),
             neck_droop_on_call: false,
+            speaker_playback: false,
         }
     }
 }

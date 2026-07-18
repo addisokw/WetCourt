@@ -68,6 +68,10 @@ pub enum DisplayEvent {
     /// `on:true` when the phone starts ringing, `on:false` once they pick up, the
     /// cross window closes, or on reset. Drives the "pick up the phone" overlay.
     LawyerCalling { on: bool },
+    /// Header for a burst of lawyer call-audio PCM (F5) pushed to the primary
+    /// speaker — like `TtsAudio` but routed to a telephone-band filter instead of
+    /// the judge's robot voice. The following binary frame(s) carry the samples.
+    LawyerAudio { format: String },
     /// "The court finds the defendant…" preamble is done; pause begins. The
     /// operator console plays an ambient pad and viewers dim until TheaterEnd.
     TheaterStart,

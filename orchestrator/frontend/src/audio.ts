@@ -11,6 +11,33 @@
 import { getRobotInput, initRobotWorklet } from './robot';
 
 const TTS_SAMPLE_RATE = 24000;
+// F5: lawyer call audio arrives phone-band at 8 kHz (µ-law round-tripped in
+// counsel). Played through a telephone band-pass instead of the robot worklet.
+const PHONE_SAMPLE_RATE = 8000;
+let phoneRoute = false;
+let phoneFilter: BiquadFilterNode | null = null;
+
+/** F5: route the next audio session through the telephone filter (lawyer call)
+ * instead of the judge's robot voice. Each audio header re-sets this. */
+export function setPhoneRoute(on: boolean) {
+  phoneRoute = on;
+}
+
+/** Lazily-built ~300–3400 Hz band-pass giving lawyer audio a tinny handset
+ * timbre. Returns the chain's input node (→ destination). */
+function getPhoneInput(ctx: AudioContext): AudioNode {
+  if (!phoneFilter || phoneFilter.context !== ctx) {
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 300;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 3400;
+    hp.connect(lp).connect(ctx.destination);
+    phoneFilter = hp;
+  }
+  return phoneFilter;
+}
 // Small lead-in for the first chunk of each TTS session so the output device
 // has time to warm up; without it the leading ~100ms (often the first word)
 // is scheduled inside the audio output latency window and gets clipped.
@@ -98,13 +125,16 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
   pcmResidue = totalLen & 1 ? incoming[incoming.length - 1] : null;
   const samples = new Int16Array(aligned.buffer, aligned.byteOffset, evenLen / 2);
   if (samples.length === 0) return;
-  const audioBuf = ctx.createBuffer(1, samples.length, TTS_SAMPLE_RATE);
+  // Web Audio resamples the buffer to the device rate, so an 8 kHz phone buffer
+  // plays at the right pitch; the low rate is itself part of the phone timbre.
+  const rate = phoneRoute ? PHONE_SAMPLE_RATE : TTS_SAMPLE_RATE;
+  const audioBuf = ctx.createBuffer(1, samples.length, rate);
   const channel = audioBuf.getChannelData(0);
   for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
 
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
-  source.connect(getRobotInput(ctx));
+  source.connect(phoneRoute ? getPhoneInput(ctx) : getRobotInput(ctx));
   const earliest = sessionStartPending
     ? ctx.currentTime + TTS_LEAD_IN_SECS
     : ctx.currentTime;

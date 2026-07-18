@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resumeAudio, startRecording, startTtsSession, stopAllPlayback, stopRecording } from './audio';
+import { enqueuePcmFrame, endTtsSession, resumeAudio, setPhoneRoute, startRecording, startTtsSession, stopAllPlayback, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
 import { onButtonPressed, onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 import { applyRobotParamsToGraph } from './robotParams';
@@ -266,6 +266,14 @@ function handleEvent(ev: DisplayEvent) {
     case 'tts_audio':
       // Subsequent binary frames are PCM audio chunks until tts_end.
       nextBinaryIsAudio = true;
+      setPhoneRoute(false); // judge speech → robot voice
+      if (audioEnabled()) startTtsSession();
+      break;
+    case 'lawyer_audio':
+      // F5: the following binary is the lawyer's call audio (phone-band) — play
+      // it over the speaker through the telephone filter, not the robot voice.
+      nextBinaryIsAudio = true;
+      setPhoneRoute(true);
       if (audioEnabled()) startTtsSession();
       break;
     case 'tts_end':

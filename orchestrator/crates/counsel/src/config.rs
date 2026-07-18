@@ -154,6 +154,11 @@ pub struct AudioConfig {
     /// media-path diagnostic, kept for bring-up.
     #[serde(default)]
     pub echo_test: bool,
+    /// F5: also POST the lawyer's spoken audio (phone-band 8 kHz) to the
+    /// orchestrator so it can play over the booth's primary speaker. Requires the
+    /// orchestrator's `[lawyer] speaker_playback` too. Ships OFF.
+    #[serde(default)]
+    pub speaker_playback: bool,
 }
 
 impl Default for AudioConfig {
@@ -170,6 +175,7 @@ impl Default for AudioConfig {
             max_exchanges: d_max_exchanges(),
             debug_rms: false,
             echo_test: false,
+            speaker_playback: false,
         }
     }
 }
