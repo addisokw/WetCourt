@@ -34,6 +34,11 @@ interface RobotChain {
   input: GainNode;
   tail: GainNode;
   master: GainNode;
+  limiter: DynamicsCompressorNode;
+  /// Lawyer-call audio joins here: straight into the limiter, bypassing both
+  /// the robot effects and the per-persona master gain (the phone is not the
+  /// judge). Created on first use.
+  callInput?: GainNode;
   wet: GainNode;
   dry: GainNode;
   // Live-tunable nodes, kept so the Judge Mind robot controls can adjust the
@@ -143,13 +148,26 @@ export function getRobotInput(ctx: AudioContext): AudioNode {
   // Until the worklet loads, the native chain feeds the master stage directly.
   tail.connect(master);
 
-  chain = { ctx, input, tail, master, wet, dry, peak, shaper, carrier };
+  chain = { ctx, input, tail, master, limiter, wet, dry, peak, shaper, carrier };
   applyParams();
   maybeInsertGlitch();
   return input;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/// Input node for lawyer-call playback (see audio.ts): joins the graph at the
+/// limiter so the phone audio shares the clip protection but skips the robot
+/// colour and the per-persona master gain — Dewey already sounds like a phone.
+export function getCallAudioInput(ctx: AudioContext): AudioNode {
+  getRobotInput(ctx); // ensure the chain (and its limiter) exists
+  const c = chain!;
+  if (!c.callInput) {
+    c.callInput = ctx.createGain();
+    c.callInput.connect(c.limiter);
+  }
+  return c.callInput;
+}
 
 /// Push the current parameters onto the live AudioParams / nodes. Safe to call
 /// before the chain or worklet exist — it applies to whatever is present.

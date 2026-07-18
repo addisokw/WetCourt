@@ -1,14 +1,17 @@
-// AudioContext-based PCM playback queue and mic capture.
+// AudioContext-based PCM playback queues and mic capture.
 //
-// Playback: PCM s16le @ 24kHz mono comes in as binary WS frames. We decode
-// each chunk into an AudioBuffer and schedule a BufferSource at the tail of
-// the playback queue, so multiple sentences play back-to-back with no gaps.
+// Playback: two independent streams arrive as tagged binary WS frames (see
+// ws.ts). Judge TTS is PCM s16le @ 24 kHz framed by tts_audio/tts_end; each
+// chunk is decoded into an AudioBuffer and scheduled at the tail of the
+// queue, so sentences play back-to-back with no gaps. Lawyer-call audio is a
+// continuous 8 kHz s16le mirror of the phone earpiece, played through its
+// own queue (no session events — the stream just runs while a call is live).
 //
 // Capture: MediaRecorder produces a single webm/opus blob on stop, which we
 // upload as one binary frame followed by a `plea_audio_complete` JSON event.
 // Parakeet on the backend accepts standard formats — no client-side resampling.
 
-import { getRobotInput, initRobotWorklet } from './robot';
+import { getCallAudioInput, getRobotInput, initRobotWorklet } from './robot';
 
 const TTS_SAMPLE_RATE = 24000;
 // Small lead-in for the first chunk of each TTS session so the output device
@@ -31,10 +34,11 @@ let pcmResidue: number | null = null;
 // speech that is already queued in the AudioContext.
 const liveSources = new Set<AudioBufferSourceNode>();
 
-/** Hard-stop TTS playback (e-stop / trial reset): kill every scheduled buffer
+/** Hard-stop all playback (e-stop / trial reset): kill every scheduled buffer
  * source and reset the queue state — including any half-carried PCM byte,
  * which would misalign the next session's first samples — so the next
- * session starts clean. */
+ * session starts clean. Call audio is silenced too; if the call is still
+ * live, its stream re-buffers within a lead-in. */
 export function stopAllPlayback() {
   for (const source of liveSources) {
     source.onended = null;
@@ -47,6 +51,13 @@ export function stopAllPlayback() {
   sessionStartPending = false;
   onSessionDrained = null;
   pcmResidue = null;
+  for (const source of callLiveSources) {
+    source.onended = null;
+    try { source.stop(); } catch { /* already stopped */ }
+  }
+  callLiveSources.clear();
+  callNextStartTime = 0;
+  callResidue = null;
 }
 
 function ensureCtx(): AudioContext {
@@ -78,30 +89,47 @@ export function startTtsSession() {
   sessionStartPending = true;
 }
 
-export function enqueuePcmFrame(buf: ArrayBuffer) {
-  const ctx = ensureCtx();
+/** Join `buf` with a carried odd byte from the previous chunk, returning
+ * whole s16 samples and the new carry (chunks can split mid-sample). */
+function alignPcm(
+  buf: ArrayBuffer,
+  residue: number | null,
+): { samples: Int16Array | null; residue: number | null } {
   const incoming = new Uint8Array(buf);
-  const hasResidue = pcmResidue !== null;
+  const hasResidue = residue !== null;
   const totalLen = incoming.length + (hasResidue ? 1 : 0);
   if (totalLen < 2) {
-    if (incoming.length === 1) pcmResidue = incoming[0];
-    return;
+    return { samples: null, residue: incoming.length === 1 ? incoming[0] : residue };
   }
   const evenLen = totalLen - (totalLen & 1);
   const aligned = new Uint8Array(evenLen);
   if (hasResidue) {
-    aligned[0] = pcmResidue!;
+    aligned[0] = residue!;
     aligned.set(incoming.subarray(0, evenLen - 1), 1);
   } else {
     aligned.set(incoming.subarray(0, evenLen));
   }
-  pcmResidue = totalLen & 1 ? incoming[incoming.length - 1] : null;
-  const samples = new Int16Array(aligned.buffer, aligned.byteOffset, evenLen / 2);
-  if (samples.length === 0) return;
-  const audioBuf = ctx.createBuffer(1, samples.length, TTS_SAMPLE_RATE);
+  return {
+    samples: new Int16Array(aligned.buffer, aligned.byteOffset, evenLen / 2),
+    residue: totalLen & 1 ? incoming[incoming.length - 1] : null,
+  };
+}
+
+/** s16le samples → mono AudioBuffer at the given rate (the context resamples
+ * on playback, so 8 kHz call audio plays fine in the 24 kHz context). */
+function toAudioBuffer(ctx: AudioContext, samples: Int16Array, sampleRate: number): AudioBuffer {
+  const audioBuf = ctx.createBuffer(1, samples.length, sampleRate);
   const channel = audioBuf.getChannelData(0);
   for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
+  return audioBuf;
+}
 
+export function enqueuePcmFrame(buf: ArrayBuffer) {
+  const ctx = ensureCtx();
+  const { samples, residue } = alignPcm(buf, pcmResidue);
+  pcmResidue = residue;
+  if (!samples || samples.length === 0) return;
+  const audioBuf = toAudioBuffer(ctx, samples, TTS_SAMPLE_RATE);
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
   source.connect(getRobotInput(ctx));
@@ -122,6 +150,34 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
       onSessionDrained?.();
     }
   };
+}
+
+// ---------- Lawyer-call audio ----------
+// Real-time mirror of the phone earpiece, paced by the RTP clock on the far
+// end. A dry queue (call start, or after a network hiccup) re-arms a short
+// jitter lead-in; otherwise chunks chain gaplessly like the TTS queue.
+
+const CALL_SAMPLE_RATE = 8000;
+const CALL_LEAD_IN_SECS = 0.15;
+let callNextStartTime = 0;
+let callResidue: number | null = null;
+const callLiveSources = new Set<AudioBufferSourceNode>();
+
+export function enqueueCallFrame(buf: ArrayBuffer) {
+  const ctx = ensureCtx();
+  const { samples, residue } = alignPcm(buf, callResidue);
+  callResidue = residue;
+  if (!samples || samples.length === 0) return;
+  const audioBuf = toAudioBuffer(ctx, samples, CALL_SAMPLE_RATE);
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuf;
+  source.connect(getCallAudioInput(ctx));
+  const dry = callNextStartTime <= ctx.currentTime;
+  const startAt = dry ? ctx.currentTime + CALL_LEAD_IN_SECS : callNextStartTime;
+  source.start(startAt);
+  callNextStartTime = startAt + audioBuf.duration;
+  callLiveSources.add(source);
+  source.onended = () => callLiveSources.delete(source);
 }
 
 let onSessionDrained: (() => void) | null = null;

@@ -159,6 +159,12 @@ pub struct AudioConfig {
     /// rather than wrapped, so modest boosts stay clean.
     #[serde(default = "d_tts_gain")]
     pub tts_gain: f32,
+    /// Mirror the lawyer's side of the call (everything the caller hears) to
+    /// the orchestrator, which plays it through the booth speakers. Uses
+    /// `[trial_context] orchestrator_base_url`; best-effort — a down
+    /// orchestrator never affects the phone.
+    #[serde(default = "d_booth_mirror")]
+    pub booth_mirror: bool,
 }
 
 impl Default for AudioConfig {
@@ -176,6 +182,7 @@ impl Default for AudioConfig {
             debug_rms: false,
             echo_test: false,
             tts_gain: d_tts_gain(),
+            booth_mirror: d_booth_mirror(),
         }
     }
 }
@@ -209,6 +216,9 @@ fn d_max_exchanges() -> usize {
 }
 fn d_tts_gain() -> f32 {
     1.0
+}
+fn d_booth_mirror() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Clone)]
