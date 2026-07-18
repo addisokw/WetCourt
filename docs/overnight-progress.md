@@ -30,3 +30,10 @@ Legend: ✅ done · 🚧 partial · ⛔ blocked · 🔧 HARDWARE PASS NEEDED
 - Config: `[printer] coupon_frequency` (`#[serde(default)]` = "off"), in config.toml + config.dev.toml. Runtime-switchable via `--restart` (bind-mounted config, no rebuild). NOTE: a live operator-console dropdown was NOT added (stretch goal) — switching is config+restart.
 - Custom/operator prints don't get coupons (only the trial keepsake path sets `opts.coupon`) — intended.
 - Tests: `coupon_present_only_when_opts_carry_one` (absent by default, present with a coupon, adds bytes). Existing snapshot tests unaffected (render stays deterministic). `cargo test`: 145 passed.
+
+## F7 — Neck droop on lawyer call (gated OFF) ✅ code / 🔧 hardware
+- `display/mod.rs`: `lawyer_event` now calls `drive_neck_droop(&s, true)` on `call_started` and `(.., false)` on `call_ended`. Sends a RAW targeted `MaintenanceCommand{JudgeNeck, Aim{pan:center, tilt:2167}}` (droop) / `{tilt:home}` (restore). Center pan + home tilt come from `aim_to_raw(0.0, 0.0)` on the judge_neck calibration (no hardcoded pan). Raw tilt 2167 bypasses the degree clamp (which tops at 1967) to reach firmware `TILT_DROOP`; pan centered to satisfy the firmware droop-zone pan-lock.
+- Config: `[lawyer] neck_droop_on_call` (`#[serde(default)]` = false) in config.toml + config.dev.toml. `AppState.lawyer_neck_droop_on_call` set from it in main.rs.
+- Extracted the pure decision `neck_droop_command()` and tested it (`f7_tests`): disabled→None, droop→tilt 2167 at center pan, restore→home tilt. `cargo test`: 146 passed.
+- Open notes: does NOT call `targeting.note_aim` for the droop (the raw pose is outside the degree range); targeting only drives the neck from Deliberating, and calls occur in the plea/cross windows, so contention is unlikely — but verify the neck hands back cleanly to targeting if a call ends right before deliberation.
+- 🔧 HARDWARE PASS NEEDED: this is real motion near the range that previously snapped the tilt mount. Verify slew is gentle, pan stays centered, the mount tolerates sustained full droop, and restore returns to level. Ships OFF (`neck_droop_on_call = false`).

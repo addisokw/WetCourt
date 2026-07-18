@@ -150,3 +150,6 @@ interval_ms = 110       # frames × interval spans the burst (~0.8s)
 # `cargo run -p counsel -- --config crates/counsel/config.dev.toml`.
 [lawyer]
 base_url = "http://127.0.0.1:8092"
+# Droop the neck to full power-down tilt during a lawyer call. Motion feature —
+# OFF until a hardware pass.
+neck_droop_on_call = false

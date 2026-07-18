@@ -43,6 +43,12 @@ pub struct LawyerConfig {
     /// the phone is a standalone prop (the force-ring button still works).
     #[serde(default = "d_lawyer_trial_integration")]
     pub trial_integration: bool,
+    /// When true, the judge's neck droops to full "powered down" tilt while a
+    /// lawyer call is active, and restores when it ends. Motion feature — ships
+    /// OFF; enable only after a hardware pass (raw tilt bypasses the degree
+    /// clamp to reach the firmware droop position). See [[judge-neck-motion-safety]].
+    #[serde(default)]
+    pub neck_droop_on_call: bool,
 }
 
 fn d_lawyer_trial_integration() -> bool {
@@ -51,7 +57,11 @@ fn d_lawyer_trial_integration() -> bool {
 
 impl Default for LawyerConfig {
     fn default() -> Self {
-        Self { base_url: d_lawyer_base_url(), trial_integration: d_lawyer_trial_integration() }
+        Self {
+            base_url: d_lawyer_base_url(),
+            trial_integration: d_lawyer_trial_integration(),
+            neck_droop_on_call: false,
+        }
     }
 }
 

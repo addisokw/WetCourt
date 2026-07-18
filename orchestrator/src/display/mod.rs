@@ -73,6 +73,9 @@ pub struct AppState {
     pub personas: Arc<RwLock<PersonaRegistry>>,
     pub crimes: Arc<RwLock<CrimeStore>>,
     pub inference_cfg: InferenceConfig,
+    /// F7: when true, droop the judge's neck to full "powered down" tilt while a
+    /// lawyer call is active. Off by default (motion feature, needs a hardware pass).
+    pub lawyer_neck_droop_on_call: bool,
     /// Operator-toggleable cross-examination switch, shared with the state
     /// machine `Runtime`, which reads it when a plea comes in.
     pub cross_enabled: Arc<AtomicBool>,
@@ -625,6 +628,58 @@ struct LawyerEventReq {
     event: String,
 }
 
+/// Firmware judge-neck `TILT_DROOP` (raw µs). Above the calibrated tilt max
+/// (1967), so it's sent RAW — `aim_to_raw` would clamp it back to the working
+/// range. See [[judge-neck-motion-safety]].
+const NECK_DROOP_TILT_RAW: i32 = 2167;
+
+/// Pure decision for F7: the raw neck `Aim` to send, or `None` when disabled.
+/// `droop` = call active → full droop tilt; otherwise restore to `home_tilt`.
+/// Extracted so it's testable without building an `AppState`.
+fn neck_droop_command(
+    enabled: bool,
+    droop: bool,
+    pan_center: i32,
+    home_tilt: i32,
+) -> Option<HardwareCommand> {
+    if !enabled {
+        return None;
+    }
+    let tilt = if droop { NECK_DROOP_TILT_RAW } else { home_tilt };
+    Some(HardwareCommand::Aim { pan: pan_center, tilt })
+}
+
+/// F7: droop the neck to full power-down tilt while on a lawyer call, or restore
+/// to home when it ends. Pan is held at center (raw, from the 0°/0° mapping) to
+/// satisfy the firmware droop-zone pan-lock. No-op unless enabled, or if the
+/// neck has no calibration loaded.
+async fn drive_neck_droop(s: &AppState, droop: bool) {
+    if !s.lawyer_neck_droop_on_call {
+        return;
+    }
+    let (pan_center, home_tilt) = {
+        let reg = s.calibration.read().await;
+        match reg
+            .get(Role::JudgeNeck.as_str())
+            .and_then(|c| c.aim_to_raw(0.0, 0.0).ok())
+        {
+            Some(pair) => pair,
+            None => {
+                warn!("F7 neck droop: no judge_neck calibration; skipping");
+                return;
+            }
+        }
+    };
+    if let Some(cmd) = neck_droop_command(s.lawyer_neck_droop_on_call, droop, pan_center, home_tilt)
+    {
+        info!(droop, "F7: sending neck droop/restore");
+        let _ = s
+            .maint_cmd_tx
+            .send(MaintenanceCommand { target: Role::JudgeNeck, cmd, reply: None })
+            .await;
+    }
+}
+
 async fn lawyer_event(
     AxumState(s): AxumState<AppState>,
     Json(req): Json<LawyerEventReq>,
@@ -636,11 +691,13 @@ async fn lawyer_event(
             if s.lawyer_enabled.load(Ordering::Relaxed) {
                 let _ = s.event_tx.send(Event::LawyerCallStarted).await;
             }
+            drive_neck_droop(&s, true).await;
         }
         "call_ended" => {
             s.lawyer_call_active.store(false, Ordering::Relaxed);
             info!("lawyer call ended");
             let _ = s.event_tx.send(Event::LawyerCallEnded).await;
+            drive_neck_droop(&s, false).await;
         }
         other => {
             warn!(event = other, "unknown lawyer event");
@@ -1710,5 +1767,36 @@ pub async fn forwarder(mut display_rx: mpsc::Receiver<Command>, bcast: broadcast
             _ => continue,
         };
         let _ = bcast.send(msg);
+    }
+}
+
+#[cfg(test)]
+mod f7_tests {
+    use super::{neck_droop_command, NECK_DROOP_TILT_RAW};
+    use crate::hardware::protocol::HardwareCommand;
+
+    #[test]
+    fn neck_droop_command_gated_and_correct() {
+        // Disabled → never commands the neck.
+        assert!(neck_droop_command(false, true, 1583, 1500).is_none());
+        assert!(neck_droop_command(false, false, 1583, 1500).is_none());
+
+        // Enabled + call active → full droop tilt at center pan.
+        match neck_droop_command(true, true, 1583, 1500) {
+            Some(HardwareCommand::Aim { pan, tilt }) => {
+                assert_eq!(pan, 1583);
+                assert_eq!(tilt, NECK_DROOP_TILT_RAW);
+            }
+            other => panic!("expected droop Aim, got {other:?}"),
+        }
+
+        // Enabled + call ended → restore to home tilt.
+        match neck_droop_command(true, false, 1583, 1500) {
+            Some(HardwareCommand::Aim { pan, tilt }) => {
+                assert_eq!(pan, 1583);
+                assert_eq!(tilt, 1500);
+            }
+            other => panic!("expected home Aim, got {other:?}"),
+        }
     }
 }
