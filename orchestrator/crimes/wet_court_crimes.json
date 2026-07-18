@@ -1,6 +1,9 @@
 {
   "exhibit": "Wet Court",
   "description": "Crimes drawn randomly for the AI judge. Each charge is read via TTS and displayed on the dashboard.",
+  "disabled_categories": [
+    "creator"
+  ],
   "crimes": [
     {
       "id": 2,

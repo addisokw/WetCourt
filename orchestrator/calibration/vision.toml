@@ -5,8 +5,8 @@ gain_pan = 0.01
 gain_tilt = 0.01
 tolerance = 40
 boresight = [
-    320,
-    240,
+    317,
+    297,
 ]
-target_part = "head"
+target_part = "chest"
 autofire_dwell_ms = 2000
