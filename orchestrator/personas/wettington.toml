@@ -18,7 +18,7 @@ tts_voice = "bm_george"
 face_persona = "honorable"
 
 [robot]
-intensity = 0.6299999952316284
+intensity = 0.0
 glitch_rate = 1.2999999523162842
 ring_hz = 52.0
 saturation = 0.5

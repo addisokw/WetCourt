@@ -1,6 +1,9 @@
 {
   "exhibit": "Wet Court",
   "description": "Crimes drawn randomly for the AI judge. Each charge is read via TTS and displayed on the dashboard.",
+  "disabled_categories": [
+    "creator"
+  ],
   "crimes": [
     {
       "id": 2,
@@ -1466,6 +1469,378 @@
       "category": "creator",
       "charge": "The defendant stands accused of tuning a car well past the point its manufacturer intended it to survive.",
       "subject": "Zip Tie Tuning",
+      "enabled": true
+    },
+    {
+      "id": 220,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of naming a critical variable 'x2' in a codebase shared by forty-seven engineers, none of whom have been able to determine its purpose since 2019.",
+      "enabled": true
+    },
+    {
+      "id": 221,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of executing a force push to the main branch at 4:58 PM, overwriting three engineers' work and triggering an automated rollback.",
+      "enabled": true
+    },
+    {
+      "id": 222,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of writing a 400-line regular expression to parse HTML email templates and leaving no comments or documentation for future maintainers.",
+      "enabled": true
+    },
+    {
+      "id": 223,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of embedding the number 86,400 in fourteen separate files without explanation, expecting all future developers to know it represents the number of seconds in a day.",
+      "enabled": true
+    },
+    {
+      "id": 224,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of writing a TODO comment dated March 12, 2017 that reads 'fix this later — temporary workaround,' which remains in production to this day and now processes $2.3 million in transactions annually.",
+      "enabled": true
+    },
+    {
+      "id": 225,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of mixing tabs and spaces within the same file, and upon being confronted, claiming it 'adds character to the codebase.'",
+      "enabled": true
+    },
+    {
+      "id": 226,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of writing a try-catch block that catches all exceptions and silently discards them, resulting in three weeks of undetected data loss.",
+      "enabled": true
+    },
+    {
+      "id": 227,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of responding to a detailed, carefully formatted bug report with the words 'works on my machine' and closing the ticket.",
+      "enabled": true
+    },
+    {
+      "id": 228,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of deploying untested code to production on a Friday afternoon, mass-paging the on-call team and causing roughly $14,000 in collective therapy bills.",
+      "enabled": true
+    },
+    {
+      "id": 229,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of scheduling a one-hour meeting to convey information that could have been communicated in a single sentence, that sentence being 'the deadline moved to Thursday.'",
+      "enabled": true
+    },
+    {
+      "id": 230,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of speaking for approximately six minutes on a video call while muted, then upon being informed, summarizing the entire speech as 'yeah basically I agree.'",
+      "enabled": true
+    },
+    {
+      "id": 231,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of setting the production database password to 'password123' and, when questioned by the security team, arguing that the '123' made it sufficiently complex.",
+      "enabled": true
+    },
+    {
+      "id": 232,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of declaring a two-year-old codebase 'legacy' and proposing a complete rewrite in a framework that had been released nine days prior.",
+      "enabled": true
+    },
+    {
+      "id": 233,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of referring to Frankenstein's monster as 'Frankenstein,' despite Mary Shelley having clearly established the distinction in her 1818 novel.",
+      "enabled": true
+    },
+    {
+      "id": 234,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of quoting 'Luke, I am your father' in conversation, when the actual line spoken by Darth Vader in The Empire Strikes Back is 'No, I am your father.'",
+      "enabled": true
+    },
+    {
+      "id": 235,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of pronouncing 'GIF' with a hard G, in direct defiance of creator Steve Wilhite's stated preference, and doing so loudly and repeatedly at a company lunch.",
+      "enabled": true
+    },
+    {
+      "id": 236,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of using light mode on their IDE at 2 AM in a darkened open-plan office, temporarily blinding two coworkers and one emotional support dog.",
+      "enabled": true
+    },
+    {
+      "id": 237,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of referring to a single six-sided die as 'a dice,' an offense against both Latin grammar and the tabletop gaming community at large.",
+      "enabled": true
+    },
+    {
+      "id": 238,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of calling Linux 'just a hobby operating system' within earshot of three sysadmins, despite it running approximately 96% of the world's top one million web servers.",
+      "enabled": true
+    },
+    {
+      "id": 239,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of microwaving leftover fish in a shared office kitchen at 11:47 AM on a Tuesday, rendering the entire second floor uninhabitable for the remainder of the workday.",
+      "enabled": true
+    },
+    {
+      "id": 240,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of pressing the elevator close-door button repeatedly while making direct eye contact with a coworker running toward the doors from fifteen feet away.",
+      "enabled": true
+    },
+    {
+      "id": 241,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of driving in the left lane at exactly the speed limit for eleven consecutive miles, refusing to yield to faster traffic and gesturing at the speed limit sign.",
+      "enabled": true
+    },
+    {
+      "id": 242,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of unplugging a stranger's phone from the only available outlet at an airport gate, plugging in their own device, which was at 73% battery, and walking away.",
+      "enabled": true
+    },
+    {
+      "id": 243,
+      "category": "food-crimes",
+      "charge": "The defendant stands accused of applying ketchup to a hot dog at a cookout in the city of Chicago, where such an act has been considered a municipal disgrace since 1893.",
+      "enabled": true
+    },
+    {
+      "id": 244,
+      "category": "food-crimes",
+      "charge": "The defendant stands accused of pouring the milk into the bowl before the cereal, a violation of breakfast protocol so severe that three witnesses left the kitchen in protest.",
+      "enabled": true
+    },
+    {
+      "id": 245,
+      "category": "food-crimes",
+      "charge": "The defendant stands accused of drowning a dry-aged, 28-day prime cut in A1 steak sauce before tasting it, denying the chef any opportunity for the meat to speak for itself.",
+      "enabled": true
+    },
+    {
+      "id": 246,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of replying-all to a company-wide email thread to say 'thanks,' generating 4,200 unnecessary notifications across three time zones.",
+      "enabled": true
+    },
+    {
+      "id": 247,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of conducting a personal phone call on speakerphone in a quiet coffee shop for twenty-two minutes.",
+      "enabled": true
+    },
+    {
+      "id": 248,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of reading a text message, waiting four days to respond, and then replying 'sorry just saw this,' despite the message having shown read receipts at 9:02 AM on the day it was sent.",
+      "enabled": true
+    },
+    {
+      "id": 249,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of cutting in line at a grocery store by pretending not to see the queue, a performance so unconvincing that a seven-year-old in line openly narrated the deception to their parent.",
+      "enabled": true
+    },
+    {
+      "id": 250,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of saying 'we should definitely hang out soon' on fourteen separate occasions over a two-year period without once proposing a specific date, time, or activity.",
+      "enabled": true
+    },
+    {
+      "id": 251,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of playing a video on their phone at full volume on public transit without headphones, subjecting an entire subway car to a three-minute product review of a portable blender.",
+      "enabled": true
+    },
+    {
+      "id": 252,
+      "category": "social-engineering",
+      "charge": "The defendant stands accused of beginning a conversation with 'I have a quick question' and proceeding to ask a question that required forty-five minutes and a whiteboard to answer.",
+      "enabled": true
+    },
+    {
+      "id": 253,
+      "category": "social-engineering",
+      "charge": "The defendant stands accused of saying 'let me share my screen' during a video call and then spending four minutes closing browser tabs that revealed increasingly questionable online shopping habits.",
+      "enabled": true
+    },
+    {
+      "id": 254,
+      "category": "social-engineering",
+      "charge": "The defendant stands accused of sending a 'just following up' email eleven minutes after sending the original message, to a colleague who was on a lunch break clearly marked on the shared calendar.",
+      "enabled": true
+    },
+    {
+      "id": 255,
+      "category": "retro-crimes",
+      "charge": "The defendant stands accused of discarding a functioning IBM Model M keyboard, manufactured in 1989 with individual buckling spring switches, in favor of a membrane keyboard from a gas station.",
+      "enabled": true
+    },
+    {
+      "id": 256,
+      "category": "retro-crimes",
+      "charge": "The defendant stands accused of disabling Clippy, the Microsoft Office Assistant, without first hearing him out, despite the animated paperclip's sincere offer to help write a letter.",
+      "enabled": true
+    },
+    {
+      "id": 257,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of copying and pasting the same 38-line function into nine separate files rather than creating a shared utility, then modifying each copy slightly so that no two behave the same way.",
+      "enabled": true
+    },
+    {
+      "id": 258,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of nesting if-statements eleven levels deep in a single function, creating a structure so indented that horizontal scrolling became a cardiovascular activity.",
+      "enabled": true
+    },
+    {
+      "id": 259,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of approving their own pull request by creating a second GitHub account under the name 'Senior Reviewer,' a deception uncovered when both accounts shared the same profile photo.",
+      "enabled": true
+    },
+    {
+      "id": 260,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of adding a 14-megabyte npm package to the project to perform a task achievable with three lines of native JavaScript, specifically left-padding a string.",
+      "enabled": true
+    },
+    {
+      "id": 261,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of debugging production code exclusively with print statements, leaving behind 247 instances of 'HERE' and 'WHY IS THIS HAPPENING' that shipped to end users.",
+      "enabled": true
+    },
+    {
+      "id": 262,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of hardcoding their home IP address into a configuration file, causing the application to route all traffic to their apartment when they left the company.",
+      "enabled": true
+    },
+    {
+      "id": 263,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of writing an entire class with single-letter method names — a(), b(), c() through q() — and defending the practice as 'self-documenting if you read them in order.'",
+      "enabled": true
+    },
+    {
+      "id": 264,
+      "category": "coding-sins",
+      "charge": "The defendant stands accused of leaving 900 lines of commented-out code in a production file 'just in case,' despite the code being fully preserved in version control where it belongs.",
+      "enabled": true
+    },
+    {
+      "id": 265,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of turning a fifteen-minute daily standup into a forty-five-minute strategy session by beginning their update with the words 'so I've been thinking.'",
+      "enabled": true
+    },
+    {
+      "id": 266,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of naming the office guest Wi-Fi network 'yell PASSWORD for password,' causing confusion at a board meeting attended by twelve external stakeholders.",
+      "enabled": true
+    },
+    {
+      "id": 267,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of insisting 'it's not a DNS issue' for three consecutive hours of troubleshooting, after which the problem was determined to be, in fact, a DNS issue.",
+      "enabled": true
+    },
+    {
+      "id": 268,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of naming a git branch 'hotfix-final-v2-FINAL-actually-final' and then creating a subsequent branch named 'hotfix-final-v2-FINAL-actually-final-2.'",
+      "enabled": true
+    },
+    {
+      "id": 269,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of designing a cookie consent dialog where the 'Accept All' button is bright green and prominent while the 'Manage Preferences' option requires 14-point vision and a magnifying glass.",
+      "enabled": true
+    },
+    {
+      "id": 270,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of submitting a professional presentation in Comic Sans, a typeface designed by Vincent Connare in 1994 for cartoon speech bubbles, not quarterly earnings reports.",
+      "enabled": true
+    },
+    {
+      "id": 271,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of maintaining 347 open browser tabs simultaneously, causing their laptop fan to achieve a decibel level measurable by nearby seismographic equipment.",
+      "enabled": true
+    },
+    {
+      "id": 272,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of entering the '10 items or fewer' express checkout lane with twenty-three items, counting a bunch of bananas as 'one thing' to justify the transgression.",
+      "enabled": true
+    },
+    {
+      "id": 273,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of holding a door open for someone who was still forty feet away, creating a social obligation to jog that the approaching person did not consent to.",
+      "enabled": true
+    },
+    {
+      "id": 274,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of borrowing a pen, clicking it rhythmically for twenty minutes during a meeting, and then placing it in their own pocket upon adjournment without apology or acknowledgment.",
+      "enabled": true
+    },
+    {
+      "id": 275,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of abandoning a shopping cart in the middle of a parking space rather than returning it to the corral located eight feet away, a distance shorter than the walk from their car to the store entrance.",
+      "enabled": true
+    },
+    {
+      "id": 276,
+      "category": "food-crimes",
+      "charge": "The defendant stands accused of scraping burnt toast over a kitchen sink and serving it to guests, claiming it was 'artisanal charring' and that the carbon adds nutritional value.",
+      "enabled": true
+    },
+    {
+      "id": 277,
+      "category": "etiquette-violations",
+      "charge": "The defendant stands accused of leaving a voicemail that consisted entirely of 'hey, call me back' with no indication of the subject, urgency, or whether the matter was personal, professional, or legal in nature.",
+      "enabled": true
+    },
+    {
+      "id": 278,
+      "category": "tech-culture",
+      "charge": "The defendant stands accused of creating a Jira ticket to track the creation of another Jira ticket, establishing an administrative recursion that consumed two hours of project management time.",
+      "enabled": true
+    },
+    {
+      "id": 279,
+      "category": "nerd-law",
+      "charge": "The defendant stands accused of watching a film adaptation and declaring 'the book was better' without having read the book, relying entirely on a summary they encountered on social media.",
+      "enabled": true
+    },
+    {
+      "id": 280,
+      "category": "everyday-offenses",
+      "charge": "The defendant stands accused of emptying an ice cube tray and returning it to the freezer without refilling it.",
+      "enabled": true
+    },
+    {
+      "id": 281,
+      "category": "retro-crimes",
+      "charge": "The defendant stands accused of maintaining an active AOL email address as their primary means of professional correspondence in the year 2026, causing recipients to verify the message was not sent ironically.",
       "enabled": true
     }
   ]
