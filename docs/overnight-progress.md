@@ -5,6 +5,22 @@ Implements `docs/overnight-plan.md`. Order: 1→2→3→4→7→6→5.
 
 Legend: ✅ done · 🚧 partial · ⛔ blocked · 🔧 HARDWARE PASS NEEDED
 
+## SUMMARY — all 7 features implemented, tests green, nothing deployed
+
+| # | Feature | Commit | Config flag (default) | Needs HW pass |
+|---|---------|--------|-----------------------|---------------|
+| F1 | Cross countdown reset on call-end | `834ce5b` | — | no |
+| F2 | Idle "press button" big text | `9d7b9b6` | — | eyeball only |
+| F3 | "Lawyer calling" overlay | `21b811c` | — | live-call check |
+| F4 | Receipt coupons | `24336e7` | `printer.coupon_frequency="off"` | no |
+| F7 | Neck droop on call | `e5adbc6` | `lawyer.neck_droop_on_call=false` | **yes (motion)** |
+| F6 | Idle attract mode | `83f5c05` | `attract.enabled=false` | **yes (motion+audio)** |
+| F5 | Lawyer audio on speaker | `5a35ee1` | `lawyer.speaker_playback=false` + counsel `audio.speaker_playback=false` | **yes (live call)** |
+
+Final state: `cargo build` 0 errors, `cargo test` 147 passed, `npm run build` green, all 4 edited TOMLs parse. All motion/audio features ship OFF. **Deploy is a human step** (`deploy_spark.sh --build`, Rust changed) followed by the hardware passes noted per-feature below.
+
+Detail per feature:
+
 ---
 
 ## F1 — Cross-exam countdown resets after lawyer call ends ✅
