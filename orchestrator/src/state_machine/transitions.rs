@@ -35,6 +35,17 @@ fn pronounce_watchdog(deliberation: &str) -> Duration {
     Duration::from_secs(30 + deliberation.len() as u64 / 12)
 }
 
+/// Escape hatch for `CrossSpeaking`, sized like `pronounce_watchdog`: the
+/// configured base (synthesis latency + lost-ack grace) plus the question at a
+/// conservative TTS pace. A fixed timeout here used to fire mid-speech on long
+/// questions, opening the answer window — and ringing the lawyer phone — over
+/// the judge's own voice.
+fn question_watchdog(question: &str, cfg: &Config) -> Duration {
+    Duration::from_secs(
+        cfg.cross_examination.question_timeout_secs + question.len() as u64 / 12,
+    )
+}
+
 pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (State, Vec<Command>) {
     use Event::*;
     use State::*;
@@ -220,7 +231,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             begin_cross_answer(charge, plea, question, cfg)
         }
         (CrossSpeaking { charge, plea, question, started_at }, Tick) => {
-            if started_at.elapsed() > Duration::from_secs(cfg.cross_examination.question_timeout_secs) {
+            if started_at.elapsed() > question_watchdog(&question, cfg) {
                 begin_cross_answer(charge, plea, question, cfg)
             } else {
                 (CrossSpeaking { charge, plea, question, started_at }, vec![])
@@ -749,6 +760,49 @@ mod tests {
         assert!(cmds
             .iter()
             .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Off)))));
+    }
+
+    #[test]
+    fn cross_speaking_watchdog_scales_with_question_length() {
+        let cfg = test_cfg(); // question_timeout_secs = 1
+        let long_question = "Do you seriously expect this court to believe ".repeat(5);
+        let past_base = Instant::now() - Duration::from_secs(2);
+
+        // Past the base timeout but well inside the spoken-length allowance:
+        // the watchdog must NOT open the answer window (and ring the lawyer
+        // phone) while the judge is still talking.
+        let s = State::CrossSpeaking {
+            charge: "c".into(),
+            plea: "p".into(),
+            question: long_question.clone(),
+            started_at: past_base,
+        };
+        let (s, cmds) = step(s, Event::Tick, &cfg, true);
+        assert!(matches!(s, State::CrossSpeaking { .. }), "watchdog fired mid-question");
+        assert!(cmds.is_empty());
+
+        // A short question past base + allowance still escapes (lost-ack path).
+        let s = State::CrossSpeaking {
+            charge: "c".into(),
+            plea: "p".into(),
+            question: "Why?".into(),
+            started_at: past_base,
+        };
+        let (s, _) = step(s, Event::Tick, &cfg, true);
+        assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
+    }
+
+    #[test]
+    fn cross_speaking_advances_on_tts_finished() {
+        let cfg = test_cfg();
+        let s = State::CrossSpeaking {
+            charge: "c".into(),
+            plea: "p".into(),
+            question: "Well?".into(),
+            started_at: Instant::now(),
+        };
+        let (s, _) = step(s, Event::TtsFinished, &cfg, true);
+        assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
     }
 
     #[test]
