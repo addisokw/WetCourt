@@ -309,6 +309,13 @@ impl TargetingController {
         }
     }
 
+    /// F6 attract mode: a small, gentle neck move in degrees (kept within the
+    /// working range by the caller). Public wrapper over the internal aim path;
+    /// mirrors to the face like any other neck aim.
+    pub async fn nudge_neck(&self, pan_deg: f32, tilt_deg: f32) {
+        self.send_aim_deg(Role::JudgeNeck, pan_deg, tilt_deg).await;
+    }
+
     /// Push the saved vision tuning to the vision process whenever it
     /// (re)appears. The vision process holds gains/tolerance/boresight only in
     /// memory (seeded from its CLI defaults), so every vision — or orchestrator —

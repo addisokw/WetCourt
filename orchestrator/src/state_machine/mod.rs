@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::MissedTickBehavior;
@@ -56,6 +56,11 @@ pub struct Runtime {
     /// history-anchoring calibration reference. Verdict + key_factor only — never
     /// any defendant text — so a prior plea can't inject into a later trial.
     recent_anchors: VecDeque<String>,
+    /// F6 attract mode: when the next idle enticement beat is due. `None` while
+    /// not idle or before the first beat is armed.
+    next_attract: Option<Instant>,
+    /// Rotates through the attract line pool + alternates the neck sweep side.
+    attract_idx: usize,
     /// Drives the turret aiming sequence during trials (arm on deliberation,
     /// freeze-then-fire on guilty, idle between trials). `None` disables it (and
     /// in tests, which don't wire up vision/hardware).
@@ -85,6 +90,25 @@ struct TrialDraft {
     cross: Option<states::CrossExam>,
     verdict: Option<states::Verdict>,
 }
+
+/// F6 attract-mode enticements, spoken in the active judge's TTS voice while the
+/// booth sits idle. Pompous-Wettington flavor (edit freely).
+const ATTRACT_LINES: &[&str] = &[
+    "The court grows BORED. Someone -- approach, and be judged.",
+    "An empty docket is an insult to justice. Step forward.",
+    "I did not power on this morning to watch you loiter. A defendant. Now.",
+    "You there -- yes, you, pretending not to see me. The bench is waiting.",
+    "Justice is thirsty and the docket is dry. Rectify this.",
+    "I have all the time in the world and none of the patience. Approach.",
+    "Somewhere in this crowd stands a criminal. Have the decency to confess in person.",
+    "The Wet Court of Appeals is now accepting the guilty, the petty, and the merely unlucky.",
+    "Step up, state your crime, and let the water decide.",
+    "A courtroom without a defendant is merely a very expensive fountain. Fix that.",
+];
+
+/// Amplitude of the idle attract neck sweep, in degrees off center. Kept small
+/// and well within the working range.
+const ATTRACT_PAN_DEG: f32 = 8.0;
 
 impl Runtime {
     #[allow(clippy::too_many_arguments)]
@@ -125,6 +149,8 @@ impl Runtime {
             print_tx,
             draft: None,
             recent_anchors: VecDeque::new(),
+            next_attract: None,
+            attract_idx: 0,
             targeting,
             capture,
             lawyer_enabled,
@@ -250,6 +276,39 @@ impl Runtime {
                     self.dispatch(cmd).await;
                 }
             }
+        }
+
+        // F6 attract mode: while idle (and enabled), periodically entice
+        // passers-by. Re-armed each time we're idle; cleared the moment a trial
+        // (or any non-idle state) begins. Gated off by default.
+        if self.cfg.attract.enabled && matches!(self.state, State::Idle) {
+            let now = Instant::now();
+            let due = *self
+                .next_attract
+                .get_or_insert(now + Duration::from_secs(self.cfg.attract.idle_secs_before));
+            if now >= due {
+                self.fire_attract_beat().await;
+                self.next_attract =
+                    Some(now + Duration::from_secs(self.cfg.attract.interval_secs.max(1)));
+            }
+        } else {
+            self.next_attract = None;
+        }
+    }
+
+    /// F6: one attract beat — a spoken enticement, a small alternating neck
+    /// sweep, and (implicitly, via the neck's face mirror) a lively face.
+    async fn fire_attract_beat(&mut self) {
+        let idx = self.attract_idx;
+        self.attract_idx = self.attract_idx.wrapping_add(1);
+        let line = ATTRACT_LINES[idx % ATTRACT_LINES.len()];
+        info!(line, "F6: attract beat");
+        self.dispatch(Command::Speak(line.to_string())).await;
+        // Small gentle sweep, alternating side to side. Best-effort: needs the
+        // targeting controller for the calibrated neck path (absent in tests).
+        if let Some(t) = &self.targeting {
+            let pan = if idx % 2 == 0 { ATTRACT_PAN_DEG } else { -ATTRACT_PAN_DEG };
+            t.nudge_neck(pan, 0.0).await;
         }
     }
 
@@ -433,6 +492,7 @@ mod tests {
             vision: VisionConfig::default(),
             capture: CaptureConfig::default(),
             lawyer: LawyerConfig::default(),
+            attract: AttractConfig::default(),
         }
     }
 
@@ -599,5 +659,77 @@ mod tests {
 
         let _ = std::fs::remove_file(&book);
         let _ = std::fs::remove_dir_all(&pdir);
+    }
+
+    // F6: build a Runtime with a given attract config; returns it + the
+    // inference receiver (where Command::Speak lands).
+    async fn build_attract_rt(
+        attract: AttractConfig,
+        tag: &str,
+    ) -> (Runtime, mpsc::Receiver<Command>, std::path::PathBuf) {
+        let pdir = std::env::temp_dir().join(format!("wc_sm_personas_{}_{tag}", std::process::id()));
+        std::fs::create_dir_all(&pdir).unwrap();
+        write_persona(&pdir);
+        let book = std::env::temp_dir().join(format!("wc_sm_cb_{}_{tag}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&book);
+        let personas = Arc::new(RwLock::new(PersonaRegistry::load_from_dir(&pdir, "judge").unwrap()));
+        let casebook = Arc::new(Casebook::open(&book));
+        let mut cfg = mk_cfg();
+        cfg.attract = attract;
+        let (_ev_tx, ev_rx) = mpsc::channel::<Event>(16);
+        let (inf_tx, inf_rx) = mpsc::channel::<Command>(64);
+        let (hw_tx, _hw_rx) = mpsc::channel::<Command>(64);
+        let (disp_tx, _disp_rx) = mpsc::channel::<Command>(64);
+        let (print_tx, _print_rx) = mpsc::channel::<PrintJob>(8);
+        let rt = Runtime::new(
+            Arc::new(cfg),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(std::sync::RwLock::new(states::TrialSnapshot::default())),
+            ev_rx, inf_tx, hw_tx, disp_tx, personas, casebook, print_tx,
+            None, None,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            None,
+        );
+        (rt, inf_rx, pdir)
+    }
+
+    fn drain_speaks(rx: &mut mpsc::Receiver<Command>) -> Vec<String> {
+        let mut v = vec![];
+        while let Ok(cmd) = rx.try_recv() {
+            if let Command::Speak(s) = cmd {
+                v.push(s);
+            }
+        }
+        v
+    }
+
+    #[tokio::test]
+    async fn attract_beats_only_when_enabled_and_idle() {
+        // Enabled, fire immediately (0s arm, 0s interval → first idle Tick fires).
+        let on = AttractConfig { enabled: true, idle_secs_before: 0, interval_secs: 0 };
+        let (mut rt, mut inf_rx, pdir) = build_attract_rt(on, "on").await;
+
+        // Idle at rest: a Tick fires exactly one attract line.
+        rt.handle(Event::Tick).await;
+        let spoken = drain_speaks(&mut inf_rx);
+        assert_eq!(spoken.len(), 1, "one attract beat expected while idle");
+        assert!(ATTRACT_LINES.contains(&spoken[0].as_str()), "spoke an off-pool line: {:?}", spoken[0]);
+
+        // A trial starts → no attract beats while non-idle.
+        rt.handle(Event::OperatorStart).await;
+        let _ = drain_speaks(&mut inf_rx); // ignore anything from the start edge
+        rt.handle(Event::Tick).await;
+        assert!(drain_speaks(&mut inf_rx).is_empty(), "no attract beats during a trial");
+        let _ = std::fs::remove_dir_all(&pdir);
+
+        // Disabled: never fires, even idle.
+        let off = AttractConfig { enabled: false, idle_secs_before: 0, interval_secs: 0 };
+        let (mut rt2, mut inf_rx2, pdir2) = build_attract_rt(off, "off").await;
+        rt2.handle(Event::Tick).await;
+        assert!(drain_speaks(&mut inf_rx2).is_empty(), "disabled attract must never speak");
+        let _ = std::fs::remove_dir_all(&pdir2);
     }
 }

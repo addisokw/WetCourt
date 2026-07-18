@@ -675,6 +675,7 @@ mod tests {
             vision: VisionConfig::default(),
             capture: CaptureConfig::default(),
             lawyer: LawyerConfig::default(),
+            attract: crate::config::AttractConfig::default(),
         }
     }
 

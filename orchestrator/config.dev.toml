@@ -153,3 +153,8 @@ base_url = "http://127.0.0.1:8092"
 # Droop the neck to full power-down tilt during a lawyer call. Motion feature —
 # OFF until a hardware pass.
 neck_droop_on_call = false
+
+[attract]
+enabled = false
+idle_secs_before = 20
+interval_secs = 45

@@ -145,3 +145,11 @@ base_url = "http://127.0.0.1:8092"
 # active (restores on hangup). Motion feature — leave OFF until a hardware pass
 # confirms the droop/slew is safe (raw tilt reaches the firmware droop position).
 neck_droop_on_call = false
+
+# Idle "attract mode": while the booth sits idle, the judge periodically speaks
+# an enticement, sweeps its head a little, and cues the face. Motion + audio —
+# leave OFF until a hardware pass confirms the neck sweep and TTS cadence.
+[attract]
+enabled = false
+idle_secs_before = 20
+interval_secs = 45

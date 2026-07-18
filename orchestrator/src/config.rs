@@ -28,7 +28,37 @@ pub struct Config {
     pub capture: CaptureConfig,
     #[serde(default)]
     pub lawyer: LawyerConfig,
+    #[serde(default)]
+    pub attract: AttractConfig,
 }
+
+/// Idle "attract mode": the judge periodically entices passers-by with a spoken
+/// line, a small neck move, and a face cue while the booth sits idle. Motion +
+/// audio feature — ships OFF; enable only after a hardware pass.
+#[derive(Debug, Deserialize, Clone)]
+pub struct AttractConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Seconds the booth must sit idle before the first attract beat.
+    #[serde(default = "d_attract_idle_before")]
+    pub idle_secs_before: u64,
+    /// Seconds between attract beats thereafter.
+    #[serde(default = "d_attract_interval")]
+    pub interval_secs: u64,
+}
+
+impl Default for AttractConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            idle_secs_before: d_attract_idle_before(),
+            interval_secs: d_attract_interval(),
+        }
+    }
+}
+
+fn d_attract_idle_before() -> u64 { 20 }
+fn d_attract_interval() -> u64 { 45 }
 
 /// The call-your-lawyer phone service (`counsel`). The orchestrator
 /// reverse-proxies its status/ring-out at `/lawyer/*` (console stays
