@@ -49,6 +49,13 @@ pub enum DisplayEvent {
         /// prompts "answer the judge" instead of "begin your defense").
         #[serde(default)]
         cross: bool,
+        /// False = the plea window just OPENED (show "press to begin", do NOT
+        /// record yet). True = the defendant pressed the button to START
+        /// recording — the mic client should begin capturing now. This makes the
+        /// first press start the plea and the second press end it, so people who
+        /// press to "start" no longer end their plea before speaking.
+        #[serde(default)]
+        record: bool,
     },
     StopPleaRecording,
     /// Broadcast when the operator's microphone actually starts/stops capturing

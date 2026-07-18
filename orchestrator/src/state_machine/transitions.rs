@@ -126,7 +126,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         (s @ DisplayingCharge { .. }, _) => (s, vec![]),
 
         (AwaitingPlea { charge, .. }, PleaAudioReceived(audio)) => begin_transcribing(charge, audio, cfg),
-        // The accused pressed the button: reset the plea-window deadline so
+        // The mic actually started capturing: reset the plea-window deadline so
         // they get the full talking time from the moment they start speaking.
         // (While paused on the lawyer phone the reset applies to the frozen
         // remaining time instead — the clock stays stopped.)
@@ -136,36 +136,49 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             let paused_remaining = paused_remaining.map(|_| window);
             let mut cmds = vec![Command::Display(DisplayEvent::PleaRecording { active: true })];
             cmds.push(clock_event("awaiting_plea", window, paused_remaining.is_some()));
-            (AwaitingPlea { charge, deadline, paused_remaining }, cmds)
+            (AwaitingPlea { charge, deadline, paused_remaining, recording: true }, cmds)
+        }
+        // FIRST press: start recording. Tell the mic client to begin capturing
+        // and flip the on-screen prompt to "press again to end"; the window
+        // stays open (the deadline resets when the mic confirms it's live, via
+        // PleaRecordingStarted above).
+        (AwaitingPlea { charge, deadline, paused_remaining: None, recording: false }, DefendantButton) => (
+            AwaitingPlea { charge, deadline, paused_remaining: None, recording: true },
+            vec![
+                Command::Display(DisplayEvent::StartPleaRecording {
+                    deadline_ms: cfg.trial.plea_window_secs * 1000,
+                    cross: false,
+                    record: true,
+                }),
+                Command::Display(DisplayEvent::PleaRecording { active: true }),
+            ],
+        ),
+        // SECOND press: "I'm done talking" — close the plea window early, down
+        // the same path as the deadline expiring.
+        (AwaitingPlea { charge, paused_remaining: None, recording: true, .. }, DefendantButton) => {
+            begin_flushing_plea(charge, cfg)
         }
         // Lawyer phone: picking up pauses the window; hanging up resumes it
         // with the frozen remaining time.
-        (AwaitingPlea { charge, deadline, paused_remaining: None }, LawyerCallStarted) => {
+        (AwaitingPlea { charge, deadline, paused_remaining: None, recording }, LawyerCallStarted) => {
             let remaining = deadline.saturating_duration_since(Instant::now());
             (
-                AwaitingPlea { charge, deadline, paused_remaining: Some(remaining) },
+                AwaitingPlea { charge, deadline, paused_remaining: Some(remaining), recording },
                 vec![Command::Display(DisplayEvent::ClockPaused {
                     remaining_ms: remaining.as_millis() as u64,
                 })],
             )
         }
-        (AwaitingPlea { charge, paused_remaining: Some(rem), .. }, LawyerCallEnded) => (
-            AwaitingPlea { charge, deadline: Instant::now() + rem, paused_remaining: None },
+        (AwaitingPlea { charge, paused_remaining: Some(rem), recording, .. }, LawyerCallEnded) => (
+            AwaitingPlea { charge, deadline: Instant::now() + rem, paused_remaining: None, recording },
             vec![Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "awaiting_plea".into(),
                 deadline_ms: rem.as_millis() as u64,
             })],
         ),
-        (AwaitingPlea { charge, deadline, paused_remaining: None }, Tick)
+        (AwaitingPlea { charge, deadline, paused_remaining: None, .. }, Tick)
             if Instant::now() >= deadline =>
         {
-            begin_flushing_plea(charge, cfg)
-        }
-        // "I'm done talking" — the defendant's button closes the plea window
-        // early, down the same path as the deadline expiring. Ignored while
-        // the clock is paused on the lawyer phone (they're consulting, and
-        // the frozen countdown must not be skipped out from under them).
-        (AwaitingPlea { charge, paused_remaining: None, .. }, DefendantButton) => {
             begin_flushing_plea(charge, cfg)
         }
         (s @ AwaitingPlea { .. }, _) => (s, vec![]),
@@ -238,10 +251,31 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             let paused_remaining = paused_remaining.map(|_| window);
             let mut cmds = vec![Command::Display(DisplayEvent::PleaRecording { active: true })];
             cmds.push(clock_event("cross_answer", window, paused_remaining.is_some()));
-            (CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining }, cmds)
+            (CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining, recording: true }, cmds)
         }
+        // FIRST press: start recording the answer (same press-to-start flow as
+        // the plea window).
         (
-            CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None },
+            CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None, recording: false },
+            DefendantButton,
+        ) => (
+            CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None, recording: true },
+            vec![
+                Command::Display(DisplayEvent::StartPleaRecording {
+                    deadline_ms: cfg.cross_examination.answer_window_secs * 1000,
+                    cross: true,
+                    record: true,
+                }),
+                Command::Display(DisplayEvent::PleaRecording { active: true }),
+            ],
+        ),
+        // SECOND press: done answering — close the window early.
+        (
+            CrossAwaitingAnswer { charge, plea, question, paused_remaining: None, recording: true, .. },
+            DefendantButton,
+        ) => begin_cross_flushing(charge, plea, question),
+        (
+            CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None, recording },
             LawyerCallStarted,
         ) => {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -252,6 +286,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                     question,
                     deadline,
                     paused_remaining: Some(remaining),
+                    recording,
                 },
                 vec![Command::Display(DisplayEvent::ClockPaused {
                     remaining_ms: remaining.as_millis() as u64,
@@ -259,7 +294,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             )
         }
         (
-            CrossAwaitingAnswer { charge, plea, question, paused_remaining: Some(_), .. },
+            CrossAwaitingAnswer { charge, plea, question, paused_remaining: Some(_), recording, .. },
             LawyerCallEnded,
         ) => {
             // Reset to the FULL answer window (not the frozen remainder): after
@@ -272,6 +307,7 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
                     question,
                     deadline: Instant::now() + window,
                     paused_remaining: None,
+                    recording,
                 },
                 vec![Command::Display(DisplayEvent::PhaseDeadline {
                     phase: "cross_answer".into(),
@@ -280,16 +316,11 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
             )
         }
         (
-            CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None },
+            CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None, .. },
             Tick,
         ) if Instant::now() >= deadline => {
             begin_cross_flushing(charge, plea, question)
         }
-        // Same "done talking" early close as the plea window.
-        (
-            CrossAwaitingAnswer { charge, plea, question, paused_remaining: None, .. },
-            DefendantButton,
-        ) => begin_cross_flushing(charge, plea, question),
         (s @ CrossAwaitingAnswer { .. }, _) => (s, vec![]),
 
         (CrossFlushingAnswer { charge, plea, question, .. }, PleaAudioReceived(audio)) => {
@@ -402,11 +433,14 @@ fn begin_displaying_charge(text: String, cfg: &Config) -> (State, Vec<Command>) 
 fn begin_awaiting_plea(charge: String, cfg: &Config) -> (State, Vec<Command>) {
     let deadline = Instant::now() + Duration::from_secs(cfg.trial.plea_window_secs);
     (
-        State::AwaitingPlea { charge, deadline, paused_remaining: None },
+        State::AwaitingPlea { charge, deadline, paused_remaining: None, recording: false },
         vec![
+            // record:false — the window is OPEN, but recording doesn't start until
+            // the defendant presses the button (the first press starts it).
             Command::Display(DisplayEvent::StartPleaRecording {
                 deadline_ms: cfg.trial.plea_window_secs * 1000,
                 cross: false,
+                record: false,
             }),
             Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "awaiting_plea".into(),
@@ -540,11 +574,13 @@ fn begin_cross_answer(charge: String, plea: String, question: String, cfg: &Conf
     let window = cfg.cross_examination.answer_window_secs;
     let deadline = Instant::now() + Duration::from_secs(window);
     (
-        State::CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None },
+        State::CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining: None, recording: false },
         vec![
+            // record:false — window open; recording starts on the first press.
             Command::Display(DisplayEvent::StartPleaRecording {
                 deadline_ms: window * 1000,
                 cross: true,
+                record: false,
             }),
             Command::Display(DisplayEvent::PhaseDeadline {
                 phase: "cross_answer".into(),
@@ -760,13 +796,27 @@ mod tests {
     }
 
     #[test]
-    fn defendant_button_closes_the_plea_window_early() {
+    fn first_press_starts_recording_second_press_closes_the_plea_window() {
         let cfg = test_cfg();
+        // Window just opened: not recording yet.
         let s = State::AwaitingPlea {
             charge: "c".into(),
             deadline: Instant::now() + Duration::from_secs(60), // nowhere near expiry
             paused_remaining: None,
+            recording: false,
         };
+        // First press → START recording (tell the mic to begin; flip the prompt).
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::AwaitingPlea { recording: true, .. }));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::StartPleaRecording { record: true, cross: false, .. })
+        )));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::PleaRecording { active: true })
+        )));
+        // Second press → close the window early (flush).
         let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
         assert!(matches!(s, State::FlushingPlea { .. }));
         assert!(cmds
@@ -784,6 +834,7 @@ mod tests {
             charge: "c".into(),
             deadline: Instant::now() + Duration::from_secs(60),
             paused_remaining: Some(Duration::from_secs(30)),
+            recording: true,
         };
         let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
         assert!(matches!(s, State::AwaitingPlea { paused_remaining: Some(_), .. }));
@@ -791,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn defendant_button_closes_the_cross_answer_window_early() {
+    fn first_press_starts_second_press_closes_the_cross_answer_window() {
         let cfg = test_cfg();
         let s = State::CrossAwaitingAnswer {
             charge: "c".into(),
@@ -799,7 +850,16 @@ mod tests {
             question: "q?".into(),
             deadline: Instant::now() + Duration::from_secs(60),
             paused_remaining: None,
+            recording: false,
         };
+        // First press → START recording the answer.
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        assert!(matches!(s, State::CrossAwaitingAnswer { recording: true, .. }));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Command::Display(DisplayEvent::StartPleaRecording { record: true, cross: true, .. })
+        )));
+        // Second press → close the answer window early.
         let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
         assert!(matches!(s, State::CrossFlushingAnswer { .. }));
         assert!(cmds
@@ -996,6 +1056,7 @@ mod tests {
             charge: "c".into(),
             deadline: Instant::now() + Duration::from_secs(10),
             paused_remaining: None,
+            recording: true,
         };
         let (s, cmds) = step(s, Event::LawyerCallStarted, &cfg, false);
         assert!(cmds
@@ -1008,6 +1069,7 @@ mod tests {
             charge: "c".into(),
             deadline: Instant::now() - Duration::from_secs(5),
             paused_remaining: Some(Duration::from_secs(7)),
+            recording: true,
         };
         let (s, _) = step(s, Event::Tick, &cfg, false);
         assert!(matches!(s, State::AwaitingPlea { paused_remaining: Some(_), .. }));
@@ -1036,6 +1098,7 @@ mod tests {
             question: "q?".into(),
             deadline: Instant::now() - Duration::from_secs(1), // already expired
             paused_remaining: Some(Duration::from_secs(4)),
+            recording: true,
         };
         // Paused: expired deadline doesn't flush the answer window.
         let (s, _) = step(s, Event::Tick, &cfg, true);
@@ -1056,6 +1119,7 @@ mod tests {
             question: "q?".into(),
             deadline: Instant::now(),
             paused_remaining: Some(Duration::from_secs(4)),
+            recording: true,
         };
         let (s, cmds) = step(s, Event::LawyerCallEnded, &cfg, true);
         match &s {

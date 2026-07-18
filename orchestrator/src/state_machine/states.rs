@@ -47,8 +47,16 @@ pub enum State {
     DisplayingCharge { charge: String, until: Instant, tts_done: bool, watchdog_at: Instant },
     /// Plea window. `paused_remaining` is set while the defendant is on the
     /// lawyer phone: the countdown freezes with that much time left and the
-    /// deadline is restored when the call ends.
-    AwaitingPlea { charge: String, deadline: Instant, paused_remaining: Option<Duration> },
+    /// deadline is restored when the call ends. `recording` is false until the
+    /// defendant presses the button to START speaking — so the first press
+    /// starts the plea and the second press ends it (people press the button to
+    /// begin, and used to accidentally end an auto-started plea before speaking).
+    AwaitingPlea {
+        charge: String,
+        deadline: Instant,
+        paused_remaining: Option<Duration>,
+        recording: bool,
+    },
     /// Plea window elapsed; we've told the frontend to stop recording but are
     /// waiting briefly for its in-flight audio upload to arrive before
     /// committing to transcription with whatever bytes (if any) we have.
@@ -68,6 +76,9 @@ pub enum State {
         question: String,
         deadline: Instant,
         paused_remaining: Option<Duration>,
+        /// False until the defendant presses to START answering (first press
+        /// starts, second press ends) — same press-to-record flow as the plea.
+        recording: bool,
     },
     /// Answer window elapsed; brief grace for the in-flight audio upload.
     CrossFlushingAnswer { charge: String, plea: String, question: String, hard_deadline: Instant },
@@ -149,7 +160,7 @@ impl From<&State> for TrialSnapshot {
                 snap.charge = Some(charge.clone());
                 snap.deadline = Some(*until);
             }
-            State::AwaitingPlea { charge, deadline, paused_remaining } => {
+            State::AwaitingPlea { charge, deadline, paused_remaining, .. } => {
                 snap.charge = Some(charge.clone());
                 snap.deadline = Some(*deadline);
                 snap.paused_remaining = *paused_remaining;
@@ -166,7 +177,7 @@ impl From<&State> for TrialSnapshot {
                 snap.plea = Some(plea.clone());
                 snap.cross_question = Some(question.clone());
             }
-            State::CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining } => {
+            State::CrossAwaitingAnswer { charge, plea, question, deadline, paused_remaining, .. } => {
                 snap.charge = Some(charge.clone());
                 snap.plea = Some(plea.clone());
                 snap.cross_question = Some(question.clone());

@@ -296,13 +296,17 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'start_plea_recording':
       setPleaWindowOpen(true);
-      setPleaRecordingActive(false);
       setCrossAnswerWindow(Boolean(ev.cross));
-      // The mic opens the moment the window does — no "Plead" press needed.
-      // The booth-mic client owns it (a ?mic=1 kiosk when live, else the
-      // operator console); P still toggles (early stop / restart) and the
-      // defendant's button still closes the window early.
-      if (micEnabled()) void beginPlea({ auto: true });
+      // Press-to-record: record:false means the window just OPENED — show
+      // "press to begin", do NOT capture yet. record:true means the defendant
+      // pressed the button to START (the first press); begin capturing now. The
+      // second press closes the window (server StopPleaRecording). This stops
+      // people from accidentally ending an auto-started plea before speaking.
+      if (ev.record) {
+        if (micEnabled()) void beginPlea({ auto: true });
+      } else {
+        setPleaRecordingActive(false);
+      }
       break;
     case 'mic_owner':
       setMicOwnerPresent(Boolean(ev.present));

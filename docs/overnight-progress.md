@@ -28,6 +28,13 @@ Added after the batch, same branch. Config seeds the startup value; the console 
 - F7 neck droop deliberately left config-only (motion safety — enable via config after its hardware pass).
 - `cargo build` 0 errors, `cargo test` 147 passed, `npm run build` green.
 
+## POST-BATCH — press-to-record plea/answer button
+
+Fix for a real-world confusion: the mic auto-opened when the plea window opened, so people who pressed the button to "start" actually *ended* their plea before speaking. Now the **first press starts recording, the second press ends it** — matching the on-screen "Press the button to begin… / Press again to end" prompts (which were already written for this).
+- Added a `recording: bool` to `AwaitingPlea` and `CrossAwaitingAnswer`; the window opens with `recording:false` (no capture), first `DefendantButton` emits `StartPleaRecording{record:true}` + flips the prompt, second press flushes. `StartPleaRecording` gained a `record` flag; the frontend only starts the mic when `record:true`.
+- Applies to **both** the plea window and the cross-examination answer window (same mic mechanic).
+- Tests: `first_press_starts_recording_second_press_closes_the_plea_window` and the cross equivalent. `cargo test` 147, `npm run build` green. No config gate (behavior change; revert = git).
+
 Detail per feature:
 
 ---
