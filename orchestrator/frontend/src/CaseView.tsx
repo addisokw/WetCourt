@@ -25,7 +25,7 @@ function StateInstruction() {
   return (
     <Switch>
       <Match when={currentState() === 'idle' || currentState() === 'connected'}>
-        <p class="instruction">Step up. The court will hear your case.</p>
+        <p class="instruction big">PRESS THE BUTTON TO STAND TRIAL</p>
       </Match>
       <Match when={currentState() === 'displaying_charge'}>
         <p class="instruction">Listen carefully to the charge against you.</p>
