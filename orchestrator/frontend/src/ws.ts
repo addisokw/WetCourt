@@ -58,6 +58,11 @@ export const [crossAnswerWindow, setCrossAnswerWindow] = createSignal<boolean>(f
 // consultation (0 = not paused). Set by clock_paused, cleared by the next
 // phase_deadline (resume) or reset.
 export const [clockPausedMs, setClockPausedMs] = createSignal<number>(0);
+
+// True while the judge is ringing the defendant's counsel during cross-exam
+// (server `lawyer_calling` event). Drives the "pick up the phone" overlay;
+// cleared on pickup, cross-window close, or reset/idle.
+export const [lawyerCalling, setLawyerCalling] = createSignal<boolean>(false);
 // Server-side problem report (printer not ready, print failed, …) — operator
 // banner; cleared when the next trial starts.
 export const [serverError, setServerError] = createSignal<string>('');
@@ -195,6 +200,7 @@ function handleEvent(ev: DisplayEvent) {
       setFireHeldReason('');
       setPleaFallbackReason('');
       setCrossAnswerWindow(false);
+      setLawyerCalling(false);
       setClockPausedMs(0);
       setServerError('');
       // E-stop (or any reset) silences speech immediately — already-scheduled
@@ -313,6 +319,9 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'clock_paused':
       setClockPausedMs(Math.max(1, Number(ev.remaining_ms ?? 0)));
+      break;
+    case 'lawyer_calling':
+      setLawyerCalling(Boolean(ev.on));
       break;
     case 'theater_start':
       setTheaterActive(true);

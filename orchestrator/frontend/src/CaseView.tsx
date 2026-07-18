@@ -9,6 +9,7 @@ import {
   currentState,
   deliberation,
   lastVerdictGuilty,
+  lawyerCalling,
   phaseDeadlineAt,
   pleaRecordingActive,
   pleaTranscript,
@@ -195,6 +196,14 @@ export function CaseContent() {
         <StateInstruction />
         <PleaCountdown />
       </main>
+
+      <Show when={lawyerCalling()}>
+        <div class="lawyer-calling-overlay">
+          <div class="lawyer-calling-ring">☎</div>
+          <div class="lawyer-calling-title">YOUR LAWYER IS CALLING</div>
+          <div class="lawyer-calling-sub">Pick up the phone.</div>
+        </div>
+      </Show>
     </>
   );
 }

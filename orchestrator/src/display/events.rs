@@ -64,6 +64,10 @@ pub enum DisplayEvent {
     /// lawyer phone; `remaining_ms` is the time left on the clock. Cleared by
     /// the next `PhaseDeadline` (resume) or `Reset`.
     ClockPaused { remaining_ms: u64 },
+    /// The judge is ringing the defendant's counsel during cross-examination.
+    /// `on:true` when the phone starts ringing, `on:false` once they pick up, the
+    /// cross window closes, or on reset. Drives the "pick up the phone" overlay.
+    LawyerCalling { on: bool },
     /// "The court finds the defendant…" preamble is done; pause begins. The
     /// operator console plays an ambient pad and viewers dim until TheaterEnd.
     TheaterStart,

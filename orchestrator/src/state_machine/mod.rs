@@ -8,6 +8,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::info;
 
 use crate::config::Config;
+use crate::display::events::DisplayEvent;
 use crate::personas::PersonaRegistry;
 use crate::printer::service::PrintJob;
 use crate::printer::{Casebook, TrialRecord};
@@ -149,6 +150,9 @@ impl Runtime {
         let interesting = !matches!(ev, Event::Tick);
         let prev = std::mem::replace(&mut self.state, State::Idle);
         let cross_enabled = self.cross_enabled.load(Ordering::Relaxed);
+        // Captured before `step` consumes the event: a real call pickup clears
+        // the "lawyer calling" overlay (F3).
+        let is_lawyer_pickup = matches!(ev, Event::LawyerCallStarted);
         let (next, cmds) = transitions::step(prev, ev, &self.cfg, cross_enabled);
         if next.name() != prev_name {
             info!(from = prev_name, to = next.name(), "state_transition");
@@ -222,6 +226,17 @@ impl Runtime {
                          your finest advice before they answer"
                     ));
                 }
+                // Tell the case monitor the phone is ringing (F3).
+                self.dispatch(Command::Display(DisplayEvent::LawyerCalling { on: true }))
+                    .await;
+            }
+            // Clear the "lawyer calling" overlay once they pick up, or when the
+            // cross window closes without a call (flush/timeout/early-close).
+            if is_lawyer_pickup
+                || (prev_name == "cross_answer" && self.state.name() != "cross_answer")
+            {
+                self.dispatch(Command::Display(DisplayEvent::LawyerCalling { on: false }))
+                    .await;
             }
             if (entered_plea || entered_cross) && call_active {
                 let prev = std::mem::replace(&mut self.state, State::Idle);
@@ -508,6 +523,79 @@ mod tests {
         let txt = std::fs::read_to_string(&book).unwrap();
         assert_eq!(txt.lines().count(), 1);
         assert_eq!(casebook.next_case_no(), 2);
+
+        let _ = std::fs::remove_file(&book);
+        let _ = std::fs::remove_dir_all(&pdir);
+    }
+
+    /// F3: the case monitor is told the phone is ringing when the judge rings
+    /// counsel entering cross, and told to stop when the defendant picks up.
+    #[tokio::test]
+    async fn lawyer_calling_overlay_emitted_on_ring_and_cleared_on_pickup() {
+        let tag = format!("{}_lc", std::process::id());
+        let pdir = std::env::temp_dir().join(format!("wc_sm_personas_{tag}"));
+        std::fs::create_dir_all(&pdir).unwrap();
+        write_persona(&pdir);
+        let book = std::env::temp_dir().join(format!("wc_sm_casebook_{tag}.jsonl"));
+        let _ = std::fs::remove_file(&book);
+
+        let personas = Arc::new(RwLock::new(
+            PersonaRegistry::load_from_dir(&pdir, "judge").unwrap(),
+        ));
+        let casebook = Arc::new(Casebook::open(&book));
+
+        let (_event_tx, event_rx) = mpsc::channel::<Event>(16);
+        let (inf_tx, _inf_rx) = mpsc::channel::<Command>(64);
+        let (hw_tx, _hw_rx) = mpsc::channel::<Command>(64);
+        let (disp_tx, mut disp_rx) = mpsc::channel::<Command>(128);
+        let (print_tx, _print_rx) = mpsc::channel::<PrintJob>(8);
+
+        let mut rt = Runtime::new(
+            Arc::new(mk_cfg()),
+            Arc::new(AtomicBool::new(true)),  // cross-exam ON
+            Arc::new(AtomicBool::new(false)), // maintenance
+            Arc::new(AtomicBool::new(true)),  // is_idle
+            Arc::new(std::sync::RwLock::new(states::TrialSnapshot::default())),
+            event_rx,
+            inf_tx,
+            hw_tx,
+            disp_tx,
+            personas,
+            casebook,
+            print_tx,
+            None, // targeting
+            None, // capture
+            Arc::new(AtomicBool::new(true)),  // lawyer integration ON
+            Arc::new(AtomicBool::new(false)), // lawyer_call_active
+            None, // no bridge — the LawyerCalling display event fires regardless
+        );
+
+        // helper: collect the `on` values of any LawyerCalling display events
+        fn drain(rx: &mut mpsc::Receiver<Command>) -> Vec<bool> {
+            let mut v = vec![];
+            while let Ok(cmd) = rx.try_recv() {
+                if let Command::Display(DisplayEvent::LawyerCalling { on }) = cmd {
+                    v.push(on);
+                }
+            }
+            v
+        }
+
+        rt.handle(Event::OperatorStart).await;
+        rt.handle(Event::ChargeReady("the CHARGE".into())).await;
+        rt.handle(Event::TtsFinished).await; // → AwaitingPlea
+        rt.handle(Event::PleaAudioReceived(vec![1, 2, 3])).await; // → Transcribing
+        rt.handle(Event::TranscriptReady("the PLEA".into())).await; // cross ON → CrossGeneratingQuestion
+        rt.handle(Event::CrossQuestionReady("q?".into())).await; // → CrossSpeaking (question spoken)
+        let _ = drain(&mut disp_rx); // discard everything up to the answer window opening
+        rt.handle(Event::TtsFinished).await; // question TTS drained → CrossAwaitingAnswer (rings)
+
+        // Entering cross rang counsel → overlay ON.
+        assert_eq!(drain(&mut disp_rx), vec![true], "ring should emit LawyerCalling{{on:true}}");
+
+        // Defendant picks up → overlay OFF.
+        rt.handle(Event::LawyerCallStarted).await;
+        assert!(drain(&mut disp_rx).contains(&false), "pickup should emit LawyerCalling{{on:false}}");
 
         let _ = std::fs::remove_file(&book);
         let _ = std::fs::remove_dir_all(&pdir);
