@@ -39,6 +39,43 @@ pub struct ReportOpts<'a> {
     pub image_dither: raster::Dither,
     /// Rotate the whole record 180° for an upside-down-mounted printer.
     pub upside_down: bool,
+    /// Optional advertisement for the booth's (terrible) counsel, printed at the
+    /// very bottom. `None` = no coupon. The live caller decides inclusion via a
+    /// random roll against `[printer] coupon_frequency`, so `render` stays
+    /// deterministic for tests.
+    pub coupon: Option<CouponCopy>,
+}
+
+/// A "bad lawyer" coupon: a fixed headline/footer plus a rotating tagline drawn
+/// from the counsel personas' flavor. All `&'static str` so it's cheap to copy.
+#[derive(Debug, Clone, Copy)]
+pub struct CouponCopy {
+    pub headline: &'static str,
+    pub tagline: &'static str,
+    pub footer: &'static str,
+}
+
+const COUPON_HEADLINE: &str = "DEWEY, SOAKEM & HOWE -- ATTORNEYS AT LAW(ish)";
+const COUPON_FOOTER: &str = "CALL DEWEY. ADMIT NOTHING.";
+const COUPON_TAGLINES: &[&str] = &[
+    "My law degree is from a cereal box. The box was very prestigious.",
+    "We've never won a case. We've also never given up. (We have given up.)",
+    "Our strategy: cite Puddle v. Splash, 1974. It means nothing. It sounds great.",
+    "Were you framed by the weather? We can't help, but we'll listen.",
+    "First consultation free. Second consultation also free. Billing is a mystery to us.",
+    "When all else fails, cry. We will cry with you.",
+];
+
+/// Pick a coupon with a random tagline. Called by the live print path when the
+/// frequency roll says to include one — kept out of `render` so tests stay
+/// deterministic.
+pub fn random_coupon() -> CouponCopy {
+    use rand::seq::SliceRandom;
+    let tagline = COUPON_TAGLINES
+        .choose(&mut rand::thread_rng())
+        .copied()
+        .unwrap_or(COUPON_TAGLINES[0]);
+    CouponCopy { headline: COUPON_HEADLINE, tagline, footer: COUPON_FOOTER }
 }
 
 impl Default for ReportOpts<'_> {
@@ -52,6 +89,7 @@ impl Default for ReportOpts<'_> {
             image_contrast: 1.0,
             image_dither: raster::Dither::FloydSteinberg,
             upside_down: false,
+            coupon: None,
         }
     }
 }
@@ -96,8 +134,32 @@ pub fn render(rec: &TrialRecord, opts: &ReportOpts) -> Builder {
 
     //footer(&mut b, rec, opts);
 
+    if let Some(c) = &opts.coupon {
+        coupon(&mut b, cols, c);
+    }
+
     b.align(Align::Left).feed(2).cut();
     b
+}
+
+/// Bottom-of-receipt advertisement for the booth's dreadful counsel.
+fn coupon(b: &mut Builder, cols: usize, c: &CouponCopy) {
+    heavy_rule(b, cols);
+    b.align(Align::Center)
+        .inverse(true)
+        .bold(true)
+        .line(&format!("  {}  ", asciify(c.headline)))
+        .bold(false)
+        .inverse(false)
+        .feed(1);
+    for l in wrap(&asciify(c.tagline), cols.saturating_sub(2).max(1)) {
+        b.line(&l);
+    }
+    b.feed(1)
+        .bold(true)
+        .line(&asciify(c.footer))
+        .bold(false)
+        .align(Align::Left);
 }
 
 // ---- sections ---------------------------------------------------------------
@@ -400,6 +462,27 @@ mod tests {
         assert!(verdict < masthead, "verdict must print before the masthead");
         // The cut is still the physically-last command.
         assert_eq!(&bytes[bytes.len() - 4..bytes.len() - 1], &[0x1D, b'V', 66]);
+    }
+
+    #[test]
+    fn coupon_present_only_when_opts_carry_one() {
+        fn has(hay: &[u8], needle: &str) -> bool {
+            hay.windows(needle.len()).any(|w| w == needle.as_bytes())
+        }
+        // Default opts carry no coupon → receipt is unchanged (no lawyer ad).
+        let plain = render(&TrialRecord::sample_acquitted(), &ReportOpts::default()).build();
+        assert!(!has(&plain, "DEWEY"), "coupon leaked into a no-coupon render");
+        assert!(!has(&plain, "ADMIT NOTHING"));
+
+        // With a coupon in opts, the headline + footer print.
+        let with = render(
+            &TrialRecord::sample_acquitted(),
+            &ReportOpts { coupon: Some(random_coupon()), ..ReportOpts::default() },
+        )
+        .build();
+        assert!(has(&with, "DEWEY"), "coupon headline missing");
+        assert!(has(&with, "ADMIT NOTHING"), "coupon footer missing");
+        assert!(with.len() > plain.len(), "coupon should add bytes");
     }
 
     #[test]

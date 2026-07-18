@@ -132,6 +132,10 @@ image_dither = "atkinson"
 # Print two keepsakes per trial: one to hang on the backdrop, one for the
 # defendant. Each is a separate cut strip.
 keepsake_copies = 2
+# How often to append a "bad lawyer" coupon at the bottom of the receipt:
+# "off" | "rare" (~1/6) | "sometimes" (~1/3) | "always". Runtime-switchable —
+# edit and `deploy_spark.sh --restart` (no rebuild).
+coupon_frequency = "off"
 
 # Call-your-lawyer phone service (counsel). On the Spark both run with host
 # networking, so localhost reaches it; the console proxies /lawyer/* there.

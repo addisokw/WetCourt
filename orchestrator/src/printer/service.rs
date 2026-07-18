@@ -93,6 +93,20 @@ pub fn spawn(
     tx
 }
 
+/// Decide whether this receipt gets a coupon, per the runtime-switchable
+/// `[printer] coupon_frequency` ("off" | "rare" ~1/6 | "sometimes" ~1/3 |
+/// "always"). Unknown values are treated as "off".
+fn roll_coupon(frequency: &str) -> Option<super::report::CouponCopy> {
+    use rand::Rng;
+    let p = match frequency {
+        "always" => 1.0,
+        "sometimes" => 1.0 / 3.0,
+        "rare" => 1.0 / 6.0,
+        _ => 0.0, // "off" and anything unrecognized
+    };
+    (p > 0.0 && rand::thread_rng().gen_bool(p)).then(super::report::random_coupon)
+}
+
 fn print_trial(
     cfg: &PrinterConfig,
     rec: &TrialRecord,
@@ -113,6 +127,9 @@ fn print_trial(
             thermal_printer::raster::Dither::FloydSteinberg
         }),
         upside_down: cfg.upside_down,
+        // Roll once per trial (so both keepsake copies match) whether to append a
+        // "bad lawyer" coupon, per the runtime-switchable [printer] frequency.
+        coupon: roll_coupon(&cfg.coupon_frequency),
     };
     let bytes = render(rec, &opts).build();
     // The booth prints two copies — one to hang on the backdrop, one for the

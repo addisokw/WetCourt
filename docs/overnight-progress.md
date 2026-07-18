@@ -23,3 +23,10 @@ Legend: ✅ done · 🚧 partial · ⛔ blocked · 🔧 HARDWARE PASS NEEDED
 - Frontend: new `lawyerCalling` signal + `lawyer_calling` handler in `ws.ts` (cleared on reset/idle); full-screen overlay in `CaseView.tsx` (ringing ☎, "YOUR LAWYER IS CALLING / Pick up the phone"); CSS in `app.css`.
 - Tests: added `lawyer_calling_overlay_emitted_on_ring_and_cleared_on_pickup` (drives a trial into the cross answer window with lawyer enabled, asserts on:true at ring and on:false at pickup). `cargo test`: 144 passed. `npm run build` green.
 - 🔧 HARDWARE PASS NEEDED: confirm the overlay actually shows on a live ring and clears on pickup / window close (no stuck overlay).
+
+## F4 — Runtime-configurable receipt coupons ✅
+- `report.rs`: new `CouponCopy` struct + hardcoded "Dewey, Soakem & Howe" copy (headline, 6 rotating taglines, footer) + `random_coupon()`. `render()` stays deterministic — it only renders `opts.coupon: Option<CouponCopy>` (default `None`). New `coupon()` helper (inverse headline bar, wrapped tagline, bold footer) prints at the bottom, where the disabled footer was.
+- `service.rs`: `roll_coupon(frequency)` does the random roll ONCE per trial (both keepsake copies match) — "off" | "rare"(1/6) | "sometimes"(1/3) | "always"; unknown → off.
+- Config: `[printer] coupon_frequency` (`#[serde(default)]` = "off"), in config.toml + config.dev.toml. Runtime-switchable via `--restart` (bind-mounted config, no rebuild). NOTE: a live operator-console dropdown was NOT added (stretch goal) — switching is config+restart.
+- Custom/operator prints don't get coupons (only the trial keepsake path sets `opts.coupon`) — intended.
+- Tests: `coupon_present_only_when_opts_carry_one` (absent by default, present with a coupon, adds bytes). Existing snapshot tests unaffected (render stays deterministic). `cargo test`: 145 passed.

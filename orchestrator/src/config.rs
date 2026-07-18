@@ -237,6 +237,11 @@ pub struct PrinterConfig {
     /// keepsake, not operator custom prints (those print exactly what's asked).
     #[serde(default = "d_keepsake_copies")]
     pub keepsake_copies: u32,
+    /// How often to append a "bad lawyer" coupon to the keepsake:
+    /// "off" | "rare" (~1/6) | "sometimes" (~1/3) | "always". Runtime-switchable
+    /// (edit + `--restart`); unknown values are treated as "off".
+    #[serde(default = "d_coupon_frequency")]
+    pub coupon_frequency: String,
 }
 
 impl Default for PrinterConfig {
@@ -257,10 +262,12 @@ impl Default for PrinterConfig {
             image_dither: d_image_dither(),
             upside_down: false,
             keepsake_copies: d_keepsake_copies(),
+            coupon_frequency: d_coupon_frequency(),
         }
     }
 }
 
+fn d_coupon_frequency() -> String { "off".into() }
 fn d_printer_mode() -> String { "mock".into() }
 fn d_printer_transport() -> String { "usb".into() }
 fn d_printer_width() -> u32 { 576 }
