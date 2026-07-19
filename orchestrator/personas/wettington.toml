@@ -23,3 +23,4 @@ glitch_rate = 1.2999999523162842
 ring_hz = 52.0
 saturation = 0.5
 peak_hz = 2200.0
+gain = 1.25
