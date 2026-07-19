@@ -34,6 +34,10 @@ pub enum DisplayEvent {
         /// A dedicated booth-mic client (`/ws/view?mic=1` kiosk) is live, so
         /// the operator console must keep its own microphone shut.
         mic_owner: bool,
+        /// A dedicated booth-speaker client (`/ws/view?audio=1` kiosk) is live,
+        /// so the operator console must mute its own TTS playback.
+        #[serde(default)]
+        audio_owner: bool,
         /// Secret operator macro codes armed for the next trial / latched into
         /// this one (resync for the case monitor's discreet indicator).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -139,6 +143,11 @@ pub enum DisplayEvent {
     /// `present: false` mid-window the console takes the mic back so the plea
     /// isn't lost to a kiosk crash.
     MicOwner { present: bool },
+    /// A dedicated booth-speaker client (`/ws/view?audio=1`) connected or
+    /// dropped. While present, the operator console mutes its own TTS
+    /// playback; on `present: false` the console resumes rendering so the show
+    /// stays audible if the kiosk dies.
+    AudioOwner { present: bool },
     /// Secret operator macro state: `armed` applies to the next trial,
     /// `active` is latched into the current one. The case monitor renders
     /// these as a discreet bare-number indicator for operator verification.

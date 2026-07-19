@@ -108,8 +108,13 @@ let audioView = false;
 // Set when this read-only view opted in as the booth's microphone (?mic=1 on
 // /ws/view): it records the plea and uploads it over its own socket.
 let micView = false;
-// Whether THIS client should produce sound (operator console, or audio view).
-const audioEnabled = () => !readOnly || audioView;
+// True while a dedicated ?audio=1 kiosk (booth speakers) is live somewhere
+// (from audio_owner events / the snapshot); the operator console defers to it.
+export const [audioOwnerPresent, setAudioOwnerPresent] = createSignal<boolean>(false);
+// Whether THIS client should produce sound: an audio view always does; the
+// operator console does only when no dedicated speaker kiosk is live (else
+// both render the TTS and echo).
+const audioEnabled = () => (readOnly ? audioView : !audioOwnerPresent());
 // True while a dedicated ?mic=1 kiosk is live somewhere (from mic_owner
 // events / the snapshot); the operator console defers to it.
 export const [micOwnerPresent, setMicOwnerPresent] = createSignal<boolean>(false);
@@ -161,9 +166,12 @@ export function connect(opts: { readOnly?: boolean; audio?: boolean; mic?: boole
       }
     } else {
       const buf = msg.data as ArrayBuffer;
-      if (nextBinaryIsAudio) {
+      if (nextBinaryIsAudio && audioEnabled()) {
+        // audioEnabled() is false on the operator console while a dedicated
+        // ?audio=1 speaker kiosk is live — otherwise both render the PCM and
+        // echo. The kiosk (audioView) always renders.
         enqueuePcmFrame(buf);
-      } else {
+      } else if (!nextBinaryIsAudio) {
         pushLog({ ts: Date.now(), ev: { type: 'binary_frame', binary_bytes: buf.byteLength } });
       }
     }
@@ -252,6 +260,7 @@ function handleEvent(ev: DisplayEvent) {
       setPleaWindowOpen(phase === 'awaiting_plea' || crossAnswer);
       setPleaRecordingActive(false);
       setMicOwnerPresent(Boolean(ev.mic_owner));
+      setAudioOwnerPresent(Boolean(ev.audio_owner));
       setOperatorArmed(((ev.operator_armed ?? []) as unknown[]).map(Number));
       setOperatorActive(((ev.operator_active ?? []) as unknown[]).map(Number));
       // Reconnected into an open window: restart the mic (recording is
@@ -332,6 +341,14 @@ function handleEvent(ev: DisplayEvent) {
         // window isn't silently lost.
         void beginPlea({ auto: true });
       }
+      break;
+    case 'audio_owner':
+      setAudioOwnerPresent(Boolean(ev.present));
+      // A speaker kiosk just claimed audio: silence any TTS this console has
+      // in flight so it stops echoing immediately (audioEnabled() is now false,
+      // so no further PCM is enqueued). When the kiosk drops, the console
+      // resumes on the next utterance.
+      if (!readOnly && ev.present) stopAllPlayback();
       break;
     case 'plea_recording':
       setPleaRecordingActive(Boolean(ev.active));

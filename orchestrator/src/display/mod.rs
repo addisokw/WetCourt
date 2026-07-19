@@ -67,6 +67,11 @@ pub struct AppState {
     /// snapshot and broadcast as `MicOwner` so the operator console knows to
     /// keep its own microphone shut (and to take over if the kiosk dies).
     pub mic_present: Arc<AtomicBool>,
+    /// True while a live `?audio=1` viewer (booth-speaker kiosk) is connected.
+    /// Broadcast as `AudioOwner` so the operator console mutes its own TTS
+    /// playback (and resumes it if the kiosk dies) — otherwise both render the
+    /// audio and echo.
+    pub audio_present: Arc<AtomicBool>,
     /// Buffer for binary plea audio uploaded by the frontend across multiple
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
@@ -1305,6 +1310,14 @@ async fn view_ws_session(
             .display_bcast
             .send(DisplayMessage::Json(DisplayEvent::MicOwner { present: true }));
     }
+    // An audio viewer (booth-speaker kiosk) announces itself so the operator
+    // console mutes its own TTS playback — otherwise both render it and echo.
+    if audio_gen.is_some() {
+        state.audio_present.store(true, Ordering::SeqCst);
+        let _ = state
+            .display_bcast
+            .send(DisplayMessage::Json(DisplayEvent::AudioOwner { present: true }));
+    }
     let _ = socket
         .send(Message::Text(
             serde_json::to_string(&snapshot_event(&state)).unwrap().into(),
@@ -1369,6 +1382,14 @@ async fn view_ws_session(
             .display_bcast
             .send(DisplayMessage::Json(DisplayEvent::MicOwner { present: false }));
     }
+    // Same for the audio viewer: when the live speaker kiosk drops, let the
+    // operator console take TTS playback back so the show stays audible.
+    if audio_gen.is_some_and(|g| state.audio_generation.load(Ordering::SeqCst) == g) {
+        state.audio_present.store(false, Ordering::SeqCst);
+        let _ = state
+            .display_bcast
+            .send(DisplayMessage::Json(DisplayEvent::AudioOwner { present: false }));
+    }
     info!("view ws client disconnected");
 }
 
@@ -1409,6 +1430,7 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
         clock_paused: snap.paused_remaining.is_some(),
         maintenance: s.maintenance.load(Ordering::Relaxed),
         mic_owner: s.mic_present.load(Ordering::SeqCst),
+        audio_owner: s.audio_present.load(Ordering::SeqCst),
         operator_armed,
         operator_active,
     }
