@@ -240,6 +240,7 @@ pub async fn console(
             }
         };
 
+        tracing::debug!(?key, pending = collector.has_pending(), "operator console key");
         match key {
             KeyResult::Pending => {}
             KeyResult::Commit(code) => match arm_code(base, code).await {

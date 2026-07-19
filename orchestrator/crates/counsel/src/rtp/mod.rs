@@ -295,7 +295,17 @@ async fn recv_task(
         let pt = reader.payload_type();
         if Some(pt) == dtmf_pt {
             if let Some(digit) = dtmf.push(reader.timestamp(), reader.payload()) {
-                let _ = events.try_send(RtpEvent::Dtmf(digit));
+                tracing::debug!(%digit, "rtp: dtmf decoded");
+                // DTMF must not be dropped for backpressure the way audio is
+                // (the operator console keys codes through here). Audio can
+                // flood the shared 64-slot channel; a `try_send` for a keypress
+                // that lands on a full channel would vanish silently. DTMF is
+                // rare, so block until there's room — the consumer drains audio
+                // fast, so this waits at most a few ms (or until an in-flight
+                // arm HTTP call returns).
+                if events.send(RtpEvent::Dtmf(digit)).await.is_err() {
+                    return; // consumer gone
+                }
             }
         } else if pt == PT_PCMU {
             let samples = g711::decode(reader.payload());
