@@ -96,6 +96,10 @@ pub enum DisplayEvent {
     /// speaker — like `TtsAudio` but routed to a telephone-band filter instead of
     /// the judge's robot voice. The following binary frame(s) carry the samples.
     LawyerAudio { format: String },
+    /// The lawyer call ended (hangup at either end): kill any still-scheduled
+    /// lawyer speaker audio immediately so a mid-line hangup can't keep
+    /// talking over the resuming judge.
+    LawyerAudioStop,
     /// "The court finds the defendant…" preamble is done; pause begins. The
     /// operator console plays an ambient pad and viewers dim until TheaterEnd.
     TheaterStart,

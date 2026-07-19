@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { enqueuePcmFrame, endTtsSession, resumeAudio, setPhoneRoute, startRecording, startTtsSession, stopAllPlayback, stopRecording } from './audio';
+import { enqueuePcmFrame, endTtsSession, resumeAudio, setPhoneRoute, startRecording, startTtsSession, stopAllPlayback, stopPhonePlayback, stopRecording } from './audio';
 import { startTheater, stopTheater } from './theater';
 import { onButtonPressed, onDeviceConnected, onDeviceDisconnected, setMaintenanceActive } from './maintenance';
 import { applyRobotParamsToGraph } from './robotParams';
@@ -299,6 +299,11 @@ function handleEvent(ev: DisplayEvent) {
       nextBinaryIsAudio = true;
       setPhoneRoute(true);
       if (audioEnabled()) startTtsSession();
+      break;
+    case 'lawyer_audio_stop':
+      // Call ended (possibly a hangup mid-line): kill any still-scheduled
+      // lawyer speaker audio so it can't talk over the resuming judge.
+      stopPhonePlayback();
       break;
     case 'tts_end':
       nextBinaryIsAudio = false;

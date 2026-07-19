@@ -57,12 +57,29 @@ let pcmResidue: number | null = null;
 // Every scheduled-but-not-finished BufferSource, so an e-stop can silence
 // speech that is already queued in the AudioContext.
 const liveSources = new Set<AudioBufferSourceNode>();
+// Lawyer call audio schedules on its own queue tail and is tracked apart
+// from the judge's: it must never delay judge speech behind a whole phone
+// line, and a hangup mid-line has to be able to kill it selectively.
+let phoneNextStartTime = 0;
+const phoneSources = new Set<AudioBufferSourceNode>();
+
+/** Kill lawyer speaker audio only (call ended / hangup mid-line). Judge
+ * playback and its session-drain accounting are untouched. */
+export function stopPhonePlayback() {
+  for (const source of phoneSources) {
+    source.onended = null;
+    try { source.stop(); } catch { /* already stopped */ }
+  }
+  phoneSources.clear();
+  phoneNextStartTime = 0;
+}
 
 /** Hard-stop TTS playback (e-stop / trial reset): kill every scheduled buffer
  * source and reset the queue state — including any half-carried PCM byte,
  * which would misalign the next session's first samples — so the next
  * session starts clean. */
 export function stopAllPlayback() {
+  stopPhonePlayback();
   for (const source of liveSources) {
     source.onended = null;
     try { source.stop(); } catch { /* already stopped */ }
@@ -134,14 +151,28 @@ export function enqueuePcmFrame(buf: ArrayBuffer) {
 
   const source = ctx.createBufferSource();
   source.buffer = audioBuf;
-  source.connect(phoneRoute ? getPhoneInput(ctx) : getRobotInput(ctx));
   const earliest = sessionStartPending
     ? ctx.currentTime + TTS_LEAD_IN_SECS
     : ctx.currentTime;
+  sessionStartPending = false;
+  if (phoneRoute) {
+    // Lawyer call audio: own queue tail, own source set, and no part in
+    // queueDepth — a judge `tts_end` drain must not wait on phone lines
+    // (they have no end event of their own).
+    source.connect(getPhoneInput(ctx));
+    const startAt = Math.max(earliest, phoneNextStartTime);
+    source.start(startAt);
+    phoneNextStartTime = startAt + audioBuf.duration;
+    phoneSources.add(source);
+    source.onended = () => {
+      phoneSources.delete(source);
+    };
+    return;
+  }
+  source.connect(getRobotInput(ctx));
   const startAt = Math.max(earliest, nextStartTime);
   source.start(startAt);
   nextStartTime = startAt + audioBuf.duration;
-  sessionStartPending = false;
   queueDepth++;
   liveSources.add(source);
   source.onended = () => {

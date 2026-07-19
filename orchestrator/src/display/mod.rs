@@ -949,6 +949,12 @@ async fn lawyer_event(
         "call_ended" => {
             s.lawyer_call_active.store(false, Ordering::Relaxed);
             info!("lawyer call ended");
+            // A mid-line hangup leaves whole lawyer lines scheduled in the
+            // kiosk's audio queue; kill them so they can't talk over the
+            // resuming judge.
+            let _ = s
+                .display_bcast
+                .send(DisplayMessage::Json(DisplayEvent::LawyerAudioStop));
             let _ = s.event_tx.send(Event::LawyerCallEnded).await;
             drive_neck_droop(&s, false).await;
         }
