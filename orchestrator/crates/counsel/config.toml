@@ -36,6 +36,13 @@ assets_dir = "assets"
 enabled = true
 orchestrator_base_url = "http://127.0.0.1:8080"
 
+# Secret phone-keypad operator console: with the court idle, '#' + code on the
+# handset arms an orchestrator mode (e.g. #42 = force acquittal) for the next
+# trial. Codes commit on '#' or after inter_digit_ms of silence.
+[operator]
+enabled = true
+inter_digit_ms = 3000
+
 [control]
 bind = "0.0.0.0:8092"
 

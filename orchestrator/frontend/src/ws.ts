@@ -30,6 +30,11 @@ export const [verdictRemarks, setVerdictRemarks] = createSignal<string>('');
 // Shown on the case view at the reveal so the crowd learns what wins and loses.
 export const [verdictKeyFactor, setVerdictKeyFactor] = createSignal<string>('');
 export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolean>(false);
+// Secret operator macro codes (armed = next trial, active = latched into this
+// one). Server-driven only — never cleared by the reset handler; the backend
+// broadcasts every change, ordered after the trial-start reset.
+export const [operatorArmed, setOperatorArmed] = createSignal<number[]>([]);
+export const [operatorActive, setOperatorActive] = createSignal<number[]>([]);
 // The judge's cross-examination follow-up question (empty when no cross-exam
 // this trial). Set on the `cross_question` event, cleared at idle/reset.
 export const [crossQuestion, setCrossQuestion] = createSignal<string>('');
@@ -241,6 +246,8 @@ function handleEvent(ev: DisplayEvent) {
       setPleaWindowOpen(phase === 'awaiting_plea' || crossAnswer);
       setPleaRecordingActive(false);
       setMicOwnerPresent(Boolean(ev.mic_owner));
+      setOperatorArmed(((ev.operator_armed ?? []) as unknown[]).map(Number));
+      setOperatorActive(((ev.operator_active ?? []) as unknown[]).map(Number));
       // Reconnected into an open window: restart the mic (recording is
       // browser-local, so whatever was captured died with the old socket).
       if (micEnabled() && (phase === 'awaiting_plea' || crossAnswer)) void beginPlea({ auto: true });
@@ -289,6 +296,11 @@ function handleEvent(ev: DisplayEvent) {
       // operator console); P still toggles (early stop / restart) and the
       // defendant's button still closes the window early.
       if (micEnabled()) void beginPlea({ auto: true });
+      break;
+    case 'operator_modes':
+      // Discreet macro-mode indicator (case-view header). Server-driven.
+      setOperatorArmed(((ev.armed ?? []) as unknown[]).map(Number));
+      setOperatorActive(((ev.active ?? []) as unknown[]).map(Number));
       break;
     case 'mic_owner':
       setMicOwnerPresent(Boolean(ev.present));

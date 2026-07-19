@@ -19,6 +19,7 @@ mod personas;
 // the printer service. Driven from the state machine at each completed verdict.
 mod printer;
 mod lawyer;
+mod operator_modes;
 mod state_machine;
 mod targeting;
 
@@ -149,6 +150,11 @@ async fn main() -> Result<()> {
         mpsc::channel::<hardware::maintenance::MaintenanceCommand>(64);
     let devices = Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
+    // Secret operator macro modes (armed from the booth phone / REST), shared
+    // by the HTTP surface (arm/clear), the Runtime (latch/reset lifecycle),
+    // and the inference task (mode effects like the #42 verdict override).
+    let operator_modes = Arc::new(operator_modes::OperatorModes::default());
+
     // Inference: real LiteLLM client (charge + verdict) for Phase 2; STT/TTS
     // still mocked. Set [inference] mode = "mock" for offline dev.
     {
@@ -158,9 +164,19 @@ async fn main() -> Result<()> {
         let event_tx = event_tx.clone();
         let display_tx = display_tx.clone();
         let maint_cmd_tx = maint_cmd_tx.clone();
+        let operator_modes = operator_modes.clone();
         tokio::spawn(async move {
-            inference::run(cfg, personas, crimes, inference_rx, event_tx, display_tx, maint_cmd_tx)
-                .await;
+            inference::run(
+                cfg,
+                personas,
+                crimes,
+                inference_rx,
+                event_tx,
+                display_tx,
+                maint_cmd_tx,
+                operator_modes,
+            )
+            .await;
         });
     }
 
@@ -438,6 +454,7 @@ async fn main() -> Result<()> {
         print_job_tx: print_tx.clone(),
         print_templates,
         printer_cfg: cfg.printer.clone(),
+        operator_modes: operator_modes.clone(),
     };
     let app = display::router(app_state);
     let listener = tokio::net::TcpListener::bind(&cfg.display.listen_addr).await?;
@@ -467,6 +484,7 @@ async fn main() -> Result<()> {
         lawyer_enabled,
         lawyer_call_active,
         Some(lawyer_bridge),
+        operator_modes,
     );
     let sm = tokio::spawn(async move { runtime.run().await });
 

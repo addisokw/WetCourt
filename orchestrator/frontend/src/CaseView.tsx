@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createMemo, createSignal, For, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { resumeAudio } from './audio';
 import {
   charge,
@@ -9,6 +9,8 @@ import {
   currentState,
   deliberation,
   lastVerdictGuilty,
+  operatorActive,
+  operatorArmed,
   phaseDeadlineAt,
   pleaRecordingActive,
   pleaTranscript,
@@ -159,6 +161,16 @@ export function CaseContent() {
     <>
       <header class="case-header">
         <span class="case-mark">WET COURT OF APPEALS</span>
+        {/* Discreet operator macro-mode confirmation: bare code numbers only,
+            dim, in the menu bar — verifiable up close, invisible from the
+            crowd. Armed codes are dimmest; the latched (active) code lifts
+            slightly. Absent entirely when no mode is set. */}
+        <Show when={operatorArmed().length + operatorActive().length > 0}>
+          <span class="op-modes">
+            <For each={operatorActive()}>{(c) => <span class="op-mode active">{c}</span>}</For>
+            <For each={operatorArmed()}>{(c) => <span class="op-mode">{c}</span>}</For>
+          </span>
+        </Show>
         <span class={`case-state state-${currentState()}`}>{currentState().replace(/_/g, ' ')}</span>
       </header>
 

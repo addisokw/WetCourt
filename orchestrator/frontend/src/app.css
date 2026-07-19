@@ -313,6 +313,19 @@ button.plea.recording:hover { background: #8b2326; }
   cursor: none;
   padding: clamp(1rem, 3vw, 3rem);
 }
+/* Discreet operator macro-mode indicator in the case-header menu bar: bare
+   code numbers, barely brighter than the background. Armed codes are dimmest;
+   the active (latched) code lifts slightly for up-close verification. */
+.op-modes {
+  display: flex;
+  gap: 0.6em;
+  font-size: 0.72em;
+  color: #343b44;
+}
+.op-modes .op-mode.active {
+  color: #6e7681;
+}
+
 .case-header {
   display: flex;
   justify-content: space-between;

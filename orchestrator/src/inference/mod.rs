@@ -27,6 +27,9 @@ pub async fn run(
     // beat as the Verdict display event) — bypasses the FSM like its other
     // reveal choreography.
     maint_cmd_tx: mpsc::Sender<MaintenanceCommand>,
+    // Secret operator macro modes; the verdict service consults the active set
+    // (e.g. #42 forces acquittal) since it owns the pre-announced reveal.
+    operator_modes: Arc<crate::operator_modes::OperatorModes>,
 ) {
     let mode = cfg.inference.mode.as_str();
     if mode != "real" && mode != "mock" {
@@ -66,9 +69,10 @@ pub async fn run(
             }
             Command::Deliberate { charge: c, plea, cross } => {
                 let maint_cmd_tx = maint_cmd_tx.clone();
+                let modes = operator_modes.clone();
                 tasks.push(tokio::spawn(async move {
-                    if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx, maint_cmd_tx).await }
-                    else    { verdict::mock(cfg, c, plea, cross, event_tx).await }
+                    if real { verdict::real(cfg, personas, c, plea, cross, event_tx, display_tx, maint_cmd_tx, modes).await }
+                    else    { verdict::mock(cfg, c, plea, cross, event_tx, modes).await }
                 }));
             }
             Command::Speak(text) => {

@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::audio::vad::{EnergyVad, Vad};
 use crate::audio::wav;
-use crate::call::{context, ivr};
+use crate::call::{context, ivr, operator};
 use crate::http::Shared;
 use crate::inference::{Backend, ChatMessage, MOCK_REPLIES};
 use crate::rtp::{g711, resample::Decimator, MixerHandle, RtpEvent, RtpSession};
@@ -37,16 +37,26 @@ pub async fn run(
     // trial context is fetched), then a brief hold — music broken by the
     // office voice announcing their absurd queue position. Ring-out calls
     // skip straight to the opener.
-    let (snapshot, ivr_outcome) = if opening_note.is_none() {
-        let r = tokio::join!(
+    let (snapshot, mut ivr_outcome) = if opening_note.is_none() {
+        tokio::join!(
             context::fetch(&shared.cfg.trial_context),
             ivr::menu(shared, &mixer, &mut events, &token)
-        );
-        ivr::hold_gag(shared, &mixer, &token).await;
-        r
+        )
     } else {
         (context::fetch(&shared.cfg.trial_context).await, ivr::IvrOutcome::Skipped)
     };
+    // '#' as the first press is the secret operator console, not a menu
+    // choice: the line silences and keyed codes arm modes on the orchestrator
+    // until hangup. If the console bows out (mid-trial, or the orchestrator
+    // is down), the call falls through to the normal lawyer flow.
+    if shared.cfg.operator.enabled && matches!(ivr_outcome, ivr::IvrOutcome::Digit('#')) {
+        match operator::console(shared, &mixer, &mut events, &token).await {
+            operator::ConsoleOutcome::Ended => return Ok(()),
+            operator::ConsoleOutcome::Resume => ivr_outcome = ivr::IvrOutcome::Skipped,
+        }
+    } else if opening_note.is_none() {
+        ivr::hold_gag(shared, &mixer, &token).await;
+    }
 
     note(
         "case_file",
@@ -108,6 +118,17 @@ pub async fn run(
             }
             ev = events.recv() => match ev {
                 None => break,
+                // Mid-call '#': the operator console. During a live trial the
+                // orchestrator refuses to arm (409) and the console resumes
+                // the consult, so a defendant pressing '#' loses nothing.
+                Some(RtpEvent::Dtmf('#')) if shared.cfg.operator.enabled => {
+                    match operator::console(shared, &mixer, &mut events, &token).await {
+                        operator::ConsoleOutcome::Ended => break,
+                        operator::ConsoleOutcome::Resume => {
+                            flush_stale(&mut events, &mut vad);
+                        }
+                    }
+                }
                 Some(RtpEvent::Dtmf(digit)) => {
                     tracing::info!(%digit, "mid-call DTMF");
                 }

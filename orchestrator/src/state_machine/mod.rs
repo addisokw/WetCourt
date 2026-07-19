@@ -7,6 +7,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::info;
 
 use crate::config::Config;
+use crate::display::events::DisplayEvent;
 use crate::personas::PersonaRegistry;
 use crate::printer::service::PrintJob;
 use crate::printer::{Casebook, TrialRecord};
@@ -65,6 +66,10 @@ pub struct Runtime {
     lawyer_call_active: Arc<AtomicBool>,
     /// Rings the phone as a cross-answer window opens. `None` disables (tests).
     lawyer: Option<Arc<crate::lawyer::LawyerBridge>>,
+    /// Secret operator macro modes: latched armed→active on the trial-start
+    /// edge, spent on return to Idle, cleared entirely by an e-stop. The
+    /// active set gates mode effects (e.g. #42 forces acquittal).
+    operator_modes: Arc<crate::operator_modes::OperatorModes>,
 }
 
 /// Mutable scratchpad that gathers one trial's pieces as they flow past the
@@ -100,6 +105,7 @@ impl Runtime {
         lawyer_enabled: Arc<AtomicBool>,
         lawyer_call_active: Arc<AtomicBool>,
         lawyer: Option<Arc<crate::lawyer::LawyerBridge>>,
+        operator_modes: Arc<crate::operator_modes::OperatorModes>,
     ) -> Self {
         let next_case_no = AtomicU64::new(casebook.next_case_no());
         Self {
@@ -123,6 +129,7 @@ impl Runtime {
             lawyer_enabled,
             lawyer_call_active,
             lawyer,
+            operator_modes,
         }
     }
 
@@ -141,9 +148,12 @@ impl Runtime {
     async fn handle(&mut self, ev: Event) {
         let prev_name = self.state.name();
         let interesting = !matches!(ev, Event::Tick);
+        let is_estop = matches!(ev, Event::OperatorEmergencyStop);
         let prev = std::mem::replace(&mut self.state, State::Idle);
         let cross_enabled = self.cross_enabled.load(Ordering::Relaxed);
-        let (next, cmds) = transitions::step(prev, ev, &self.cfg, cross_enabled);
+        let forced_innocent =
+            self.operator_modes.active_contains(crate::operator_modes::CODE_INNOCENT);
+        let (next, cmds) = transitions::step(prev, ev, &self.cfg, cross_enabled, forced_innocent);
         if next.name() != prev_name {
             info!(from = prev_name, to = next.name(), "state_transition");
         } else if interesting && !cmds.is_empty() {
@@ -196,6 +206,27 @@ impl Runtime {
             self.dispatch(cmd).await;
         }
 
+        // Operator macro modes lifecycle. Runs after the dispatch loop so the
+        // broadcast lands AFTER the trial-start Display(Reset) — the case
+        // monitor's discreet indicator is server-driven and must not be wiped
+        // by the frontend's reset handling.
+        let modes_changed = if is_estop {
+            self.operator_modes.clear_all()
+        } else if is_start {
+            // Armed → active: the arm-set governs exactly this one session.
+            self.operator_modes.latch()
+        } else if entering_idle {
+            // Trial over (normal finish or abort): the applied set is spent.
+            self.operator_modes.clear_active()
+        } else {
+            false
+        };
+        if modes_changed {
+            let (armed, active) = self.operator_modes.snapshot();
+            self.dispatch(Command::Display(DisplayEvent::OperatorModes { armed, active }))
+                .await;
+        }
+
         // Lawyer-phone trial integration (when enabled): ring the phone as a
         // cross-answer window opens, and pause any freshly opened window if
         // the defendant is *already* on the phone (they picked up during the
@@ -220,7 +251,13 @@ impl Runtime {
             if (entered_plea || entered_cross) && call_active {
                 let prev = std::mem::replace(&mut self.state, State::Idle);
                 let (next, cmds) =
-                    transitions::step(prev, Event::LawyerCallStarted, &self.cfg, cross_enabled);
+                    transitions::step(
+                        prev,
+                        Event::LawyerCallStarted,
+                        &self.cfg,
+                        cross_enabled,
+                        forced_innocent,
+                    );
                 self.state = next;
                 if let Ok(mut snap) = self.trial_snapshot.write() {
                     *snap = states::TrialSnapshot::from(&self.state);
@@ -443,6 +480,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)), // lawyer integration off
             Arc::new(AtomicBool::new(false)),
             None, // no lawyer bridge in the unit test
+            Arc::new(crate::operator_modes::OperatorModes::default()),
         );
 
         rt.handle(Event::OperatorStart).await;
@@ -479,6 +517,99 @@ mod tests {
         let txt = std::fs::read_to_string(&book).unwrap();
         assert_eq!(txt.lines().count(), 1);
         assert_eq!(casebook.next_case_no(), 2);
+
+        let _ = std::fs::remove_file(&book);
+        let _ = std::fs::remove_dir_all(&pdir);
+    }
+
+    /// Operator mode #42 end-to-end at the Runtime level: armed → latched on
+    /// the button press → a guilty (non-pre-announced) verdict is recorded as
+    /// not guilty → the mode is spent when the trial returns to Idle, so a
+    /// second trial's guilty verdict passes through untouched.
+    #[tokio::test]
+    async fn mode_42_forces_acquittal_for_exactly_one_trial() {
+        let tag = format!("{}_42", std::process::id());
+        let pdir = std::env::temp_dir().join(format!("wc_sm_personas_{tag}"));
+        std::fs::create_dir_all(&pdir).unwrap();
+        write_persona(&pdir);
+        let book = std::env::temp_dir().join(format!("wc_sm_casebook_{tag}.jsonl"));
+        let _ = std::fs::remove_file(&book);
+
+        let personas = Arc::new(RwLock::new(
+            PersonaRegistry::load_from_dir(&pdir, "judge").unwrap(),
+        ));
+        let casebook = Arc::new(Casebook::open(&book));
+
+        let (_event_tx, event_rx) = mpsc::channel::<Event>(16);
+        let (inf_tx, _inf_rx) = mpsc::channel::<Command>(16);
+        let (hw_tx, _hw_rx) = mpsc::channel::<Command>(16);
+        let (disp_tx, _disp_rx) = mpsc::channel::<Command>(64);
+        let (print_tx, mut print_rx) = mpsc::channel::<PrintJob>(8);
+
+        let modes = Arc::new(crate::operator_modes::OperatorModes::default());
+        modes.arm(crate::operator_modes::CODE_INNOCENT).unwrap();
+
+        let mut rt = Runtime::new(
+            Arc::new(mk_cfg()),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(std::sync::RwLock::new(states::TrialSnapshot::default())),
+            event_rx,
+            inf_tx,
+            hw_tx,
+            disp_tx,
+            personas,
+            casebook.clone(),
+            print_tx,
+            None,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            None,
+            modes.clone(),
+        );
+
+        let guilty_verdict = || Verdict {
+            guilty: true,
+            deliberation: "open and shut".into(),
+            remarks: "wet".into(),
+            key_factor: None,
+            pre_announced: false,
+        };
+        // Trial 1: the armed mode latches on start and forces the acquittal.
+        rt.handle(Event::OperatorStart).await;
+        assert_eq!(modes.snapshot(), (vec![], vec![crate::operator_modes::CODE_INNOCENT]));
+        rt.handle(Event::ChargeReady("c".into())).await;
+        rt.handle(Event::TtsFinished).await;
+        rt.handle(Event::PleaAudioReceived(vec![1])).await;
+        rt.handle(Event::TranscriptReady("p".into())).await;
+        rt.handle(Event::VerdictReady(guilty_verdict())).await;
+        rt.handle(Event::TtsFinished).await; // → ExecutingSentence → finalize
+        let PrintJob::Trial(rec) = print_rx.try_recv().expect("trial 1 printed") else {
+            panic!("non-trial print job");
+        };
+        assert!(!rec.guilty, "mode 42 must force the record to not guilty");
+
+        // Hardware acks the sentence → cooldown (1s) → Idle; the applied set
+        // is spent on the idle edge.
+        rt.handle(Event::HardwareAck("ok".into())).await;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        rt.handle(Event::Tick).await;
+        assert_eq!(modes.snapshot(), (vec![], vec![]));
+
+        // Trial 2, no re-arm: the guilty verdict passes through untouched.
+        rt.handle(Event::OperatorStart).await;
+        rt.handle(Event::ChargeReady("c".into())).await;
+        rt.handle(Event::TtsFinished).await;
+        rt.handle(Event::PleaAudioReceived(vec![1])).await;
+        rt.handle(Event::TranscriptReady("p".into())).await;
+        rt.handle(Event::VerdictReady(guilty_verdict())).await;
+        rt.handle(Event::TtsFinished).await;
+        let PrintJob::Trial(rec) = print_rx.try_recv().expect("trial 2 printed") else {
+            panic!("non-trial print job");
+        };
+        assert!(rec.guilty, "spent mode must not leak into the next trial");
 
         let _ = std::fs::remove_file(&book);
         let _ = std::fs::remove_dir_all(&pdir);

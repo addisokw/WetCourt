@@ -133,6 +133,10 @@ pub struct AppState {
     /// Printer tunables the print handlers need directly (dot width for
     /// previews; the service holds its own copy for rendering).
     pub printer_cfg: crate::config::PrinterConfig,
+    /// Secret operator macro modes (armed from the booth phone keypad or
+    /// `/operator/modes/*`). Shared with the Runtime (latch/reset lifecycle)
+    /// and the inference task (mode effects like the #42 verdict override).
+    pub operator_modes: Arc<crate::operator_modes::OperatorModes>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -156,6 +160,10 @@ pub fn router(state: AppState) -> Router {
         .route("/operator/crimes/queue/{index}", delete(unqueue_charge))
         .route("/operator/crimes/{id}", put(update_crime).delete(delete_crime))
         .route("/operator/cross_exam", get(get_cross_exam).post(set_cross_exam))
+        // ---- Secret operator macro modes (phone keypad / console) ----
+        .route("/operator/modes", get(get_operator_modes))
+        .route("/operator/modes/arm", post(arm_operator_mode))
+        .route("/operator/modes/clear", post(clear_operator_modes))
         // ---- Audio check (console Audio tab): end-to-end source verification ----
         .route("/operator/audio/tts_test", post(audio_tts_test))
         .route("/operator/audio/stt_test", post(audio_stt_test))
@@ -322,6 +330,71 @@ async fn set_cross_exam(
     s.cross_enabled.store(body.enabled, Ordering::Relaxed);
     info!(enabled = body.enabled, "operator: cross-examination toggled");
     (StatusCode::OK, Json(CrossExamState { enabled: body.enabled }))
+}
+
+// ---- Secret operator macro modes ----
+
+#[derive(Deserialize)]
+struct ArmModeReq {
+    code: u16,
+}
+
+fn modes_state_json(s: &AppState) -> serde_json::Value {
+    let (armed, active) = s.operator_modes.snapshot();
+    serde_json::json!({ "armed": armed, "active": active })
+}
+
+/// Broadcast the current armed/active sets to every display client (the case
+/// monitor renders them as the discreet bare-number indicator).
+fn broadcast_modes(s: &AppState) {
+    let (armed, active) = s.operator_modes.snapshot();
+    let _ = s
+        .display_bcast
+        .send(DisplayMessage::Json(DisplayEvent::OperatorModes { armed, active }));
+}
+
+async fn get_operator_modes(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    let (armed, active) = s.operator_modes.snapshot();
+    let registry: Vec<_> = crate::operator_modes::REGISTRY
+        .iter()
+        .map(|m| serde_json::json!({ "code": m.code, "slug": m.slug, "description": m.description }))
+        .collect();
+    Json(serde_json::json!({ "armed": armed, "active": active, "registry": registry }))
+}
+
+/// Arm a mode for the next trial. Idle-only: modes latch on the trial-start
+/// edge, so arming mid-trial would be dead until the following case anyway —
+/// rejecting keeps the phone console's feedback truthful.
+async fn arm_operator_mode(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<ArmModeReq>,
+) -> Response {
+    if !s.is_idle.load(Ordering::Relaxed) {
+        return (StatusCode::CONFLICT, "modes can only be armed while the court is idle")
+            .into_response();
+    }
+    match s.operator_modes.arm(body.code) {
+        Ok(()) => {
+            let slug = crate::operator_modes::lookup(body.code).map(|m| m.slug).unwrap_or("?");
+            info!(code = body.code, slug, "operator mode armed");
+            broadcast_modes(&s);
+            (StatusCode::OK, Json(modes_state_json(&s))).into_response()
+        }
+        Err(()) => {
+            warn!(code = body.code, "unknown operator mode code");
+            (StatusCode::NOT_FOUND, "unknown mode code").into_response()
+        }
+    }
+}
+
+/// Clear the armed set (operator changed their mind). Never touches the
+/// active set — un-forcing a mode latched into a running trial is a footgun.
+async fn clear_operator_modes(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
+    if s.operator_modes.clear_armed() {
+        info!("operator modes: armed set cleared");
+        broadcast_modes(&s);
+    }
+    (StatusCode::OK, Json(modes_state_json(&s)))
 }
 
 // ---- Maintenance / hardware test plane ----
@@ -1161,6 +1234,7 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
         .map(|g| g.clone())
         .unwrap_or_default();
     let revealed = snap.phase == "executing_sentence";
+    let (operator_armed, operator_active) = s.operator_modes.snapshot();
     DisplayEvent::Snapshot {
         phase: snap.phase.to_string(),
         charge: snap.charge,
@@ -1184,6 +1258,8 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
         clock_paused: snap.paused_remaining.is_some(),
         maintenance: s.maintenance.load(Ordering::Relaxed),
         mic_owner: s.mic_present.load(Ordering::SeqCst),
+        operator_armed,
+        operator_active,
     }
 }
 
