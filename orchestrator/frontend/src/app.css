@@ -443,13 +443,13 @@ button.plea.recording:hover { background: #8b2326; }
 .charge-block { max-width: 95%; }
 .charge-label {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(0.7rem, min(1.4vw, 1.6vh), 1.2rem);
+  font-size: clamp(0.9rem, min(1.8vw, 2.1vh), 1.5rem);
   letter-spacing: 0.25em;
   color: #d29922;
   margin-bottom: clamp(0.3rem, 1vh, 1rem);
 }
 .charge-text {
-  font-size: clamp(1.4rem, min(5vw, 7vh), 4.5rem);
+  font-size: clamp(1.8rem, min(6.5vw, 9vh), 6rem);
   line-height: 1.15;
   font-style: italic;
   color: #f0f6fc;
@@ -458,13 +458,13 @@ button.plea.recording:hover { background: #8b2326; }
 .plea-block { max-width: 90%; opacity: 0.85; }
 .plea-label {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(0.65rem, min(1.1vw, 1.3vh), 1rem);
+  font-size: clamp(0.85rem, min(1.4vw, 1.7vh), 1.3rem);
   letter-spacing: 0.25em;
   color: #79c0ff;
   margin-bottom: clamp(0.3rem, 0.8vh, 0.6rem);
 }
 .plea-text {
-  font-size: clamp(0.95rem, min(2vw, 2.5vh), 1.8rem);
+  font-size: clamp(1.2rem, min(2.6vw, 3.2vh), 2.3rem);
   font-style: italic;
   color: #c9d1d9;
   line-height: 1.3;
@@ -473,13 +473,13 @@ button.plea.recording:hover { background: #8b2326; }
 .cross-block { max-width: 90%; }
 .cross-label {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(0.65rem, min(1.1vw, 1.3vh), 1rem);
+  font-size: clamp(0.85rem, min(1.4vw, 1.7vh), 1.3rem);
   letter-spacing: 0.25em;
   color: #d29922;
   margin-bottom: clamp(0.3rem, 0.8vh, 0.6rem);
 }
 .cross-text {
-  font-size: clamp(0.95rem, min(2vw, 2.5vh), 1.8rem);
+  font-size: clamp(1.2rem, min(2.6vw, 3.2vh), 2.3rem);
   font-style: italic;
   color: #f0d8a8;
   line-height: 1.3;
@@ -487,7 +487,7 @@ button.plea.recording:hover { background: #8b2326; }
 
 .deliberation-block {
   max-width: 90%;
-  font-size: clamp(0.95rem, min(2.2vw, 2.4vh), 2rem);
+  font-size: clamp(1.2rem, min(2.9vw, 3.1vh), 2.6rem);
   line-height: 1.4;
   font-style: italic;
   color: #d2a8ff;
@@ -495,13 +495,13 @@ button.plea.recording:hover { background: #8b2326; }
 
 .instruction {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(0.85rem, min(1.6vw, 1.8vh), 1.4rem);
+  font-size: clamp(1.1rem, min(2.1vw, 2.3vh), 1.8rem);
   letter-spacing: 0.08em;
   color: #8b949e;
   margin: 0;
 }
 .instruction.big {
-  font-size: clamp(1.3rem, min(3.4vw, 4.4vh), 3.1rem);
+  font-size: clamp(1.7rem, min(4.4vw, 5.7vh), 4rem);
   color: #f0883e;
   animation: instruction-pulse 1.4s ease-in-out infinite;
 }
@@ -593,7 +593,7 @@ button.plea.recording:hover { background: #8b2326; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .countdown-num {
-  font-size: clamp(2rem, min(5vw, 6vh), 5rem);
+  font-size: clamp(2.6rem, min(6.5vw, 7.8vh), 6.5rem);
   font-variant-numeric: tabular-nums;
   color: #d29922;
   line-height: 1;
@@ -603,7 +603,7 @@ button.plea.recording:hover { background: #8b2326; }
   animation: instruction-pulse 1s ease-in-out infinite;
 }
 .countdown-label {
-  font-size: clamp(0.7rem, 1vw, 0.9rem);
+  font-size: clamp(0.9rem, 1.3vw, 1.2rem);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: #8b949e;
@@ -623,13 +623,13 @@ button.plea.recording:hover { background: #8b2326; }
 .verdict-panel.not-guilty { color: #7ee787; box-shadow: 0 0 60px rgba(126, 231, 135, 0.25); }
 .verdict-word {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(2.5rem, min(9vw, 14vh), 8rem);
+  font-size: clamp(3rem, min(10.5vw, 16vh), 9.5rem);
   font-weight: bold;
   letter-spacing: 0.1em;
   line-height: 1;
 }
 .verdict-remarks {
-  font-size: clamp(0.95rem, min(2vw, 2.4vh), 1.6rem);
+  font-size: clamp(1.2rem, min(2.6vw, 3.1vh), 2.1rem);
   font-style: italic;
   color: #e6edf3;
   max-width: 80%;
@@ -645,12 +645,12 @@ button.plea.recording:hover { background: #8b2326; }
 }
 .key-factor-label {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(0.6rem, min(1.1vw, 1.4vh), 0.9rem);
+  font-size: clamp(0.8rem, min(1.4vw, 1.8vh), 1.2rem);
   letter-spacing: 0.28em;
   opacity: 0.75;
 }
 .key-factor-value {
-  font-size: clamp(1.2rem, min(3.2vw, 4vh), 2.6rem);
+  font-size: clamp(1.5rem, min(4.2vw, 5.2vh), 3.4rem);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
