@@ -247,10 +247,14 @@ async fn chat_reply(shared: &Shared, history: &[ChatMessage]) -> Result<String> 
 }
 
 /// Synthesize `text` and play it out, blocking until the line drains.
-/// Clears any cover loop first so speech starts clean.
+/// Clears any cover loop first so speech starts clean. When the booth
+/// speaker is mirroring the line (F5), also waits out the trailing booth
+/// playback — the handset mic hears the speaker, and returning early lets
+/// that bleed start a VAD collection that never endpoints (the 15 s
+/// max_utterance force-close).
 pub async fn speak(shared: &Shared, mixer: &MixerHandle, text: &str) -> Result<()> {
     mixer.set_cover(None);
-    synth_to_queue(
+    let booth_busy_until = synth_to_queue(
         shared,
         mixer,
         text,
@@ -259,19 +263,31 @@ pub async fn speak(shared: &Shared, mixer: &MixerHandle, text: &str) -> Result<(
     )
     .await?;
     mixer.wait_drained().await;
+    if let Some(deadline) = booth_busy_until {
+        let now = tokio::time::Instant::now();
+        if deadline > now {
+            tracing::debug!(
+                wait_ms = (deadline - now).as_millis() as u64,
+                "waiting out booth speaker tail before listening"
+            );
+            tokio::time::sleep_until(deadline).await;
+        }
+    }
     Ok(())
 }
 
 /// Synthesize into the speech queue without touching the cover loop or
 /// waiting for drain — speech preempts any cover the moment bytes land, so
 /// callers can keep hold music running while synthesis is in flight.
+/// Returns the instant the booth-speaker mirror of this line should be done
+/// playing (None when F5 playback is off).
 pub(super) async fn synth_to_queue(
     shared: &Shared,
     mixer: &MixerHandle,
     text: &str,
     voice: &str,
     speed: Option<f32>,
-) -> Result<()> {
+) -> Result<Option<tokio::time::Instant>> {
     let icfg = &shared.cfg.inference;
     let gain = shared.cfg.audio.tts_gain.clamp(0.0, 8.0);
     match &shared.backend {
@@ -303,7 +319,7 @@ pub(super) async fn synth_to_queue(
                 let chunk = chunk?;
                 queue_pcm24(mixer, &mut decimator, &mut leftover, &chunk, gain, &mut tap);
             }
-            maybe_post_speaker_audio(shared, tap);
+            Ok(maybe_post_speaker_audio(shared, tap))
         }
         Backend::Mock { .. } => {
             let pcm = crate::inference::mock_tts_pcm(1.2);
@@ -311,20 +327,31 @@ pub(super) async fn synth_to_queue(
             let mut leftover: Option<u8> = None;
             let mut tap: Vec<i16> = Vec::new();
             queue_pcm24(mixer, &mut decimator, &mut leftover, &pcm, gain, &mut tap);
-            maybe_post_speaker_audio(shared, tap);
+            Ok(maybe_post_speaker_audio(shared, tap))
         }
     }
-    Ok(())
 }
+
+/// Slack on top of the booth burst's nominal duration: HTTP POST to the
+/// orchestrator, websocket fan-out to the kiosk, and Web Audio start-up all
+/// happen before the first sample leaves the speaker.
+const BOOTH_PLAYBACK_MARGIN: Duration = Duration::from_millis(400);
 
 /// F5: fan the just-synthesized lawyer line (phone-band 8 kHz s16le) to the
 /// orchestrator's `/lawyer/audio` so it can play over the booth speaker. Gated
 /// off by default; fire-and-forget so it never delays the call. Sent as one
 /// burst per line, so the booth trails the handset by roughly the line length.
-fn maybe_post_speaker_audio(shared: &Shared, samples: Vec<i16>) {
+/// Returns when that trailing playback should be finished, so callers can
+/// hold the VAD off until the speaker goes quiet.
+fn maybe_post_speaker_audio(
+    shared: &Shared,
+    samples: Vec<i16>,
+) -> Option<tokio::time::Instant> {
     if !shared.cfg.audio.speaker_playback || samples.is_empty() {
-        return;
+        return None;
     }
+    let burst = Duration::from_millis(samples.len() as u64 * 1000 / 8000);
+    let done_by = tokio::time::Instant::now() + burst + BOOTH_PLAYBACK_MARGIN;
     let base = shared
         .cfg
         .trial_context
@@ -344,6 +371,7 @@ fn maybe_post_speaker_audio(shared: &Shared, samples: Vec<i16>) {
             .send()
             .await;
     });
+    Some(done_by)
 }
 
 /// 24 kHz s16le bytes → gain → 8 kHz µ-law into the mixer, carrying an odd
