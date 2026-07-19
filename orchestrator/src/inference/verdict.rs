@@ -19,15 +19,40 @@ use crate::state_machine::{Command, Event};
 use super::client::LlmClient;
 use super::tts::{strip_markers, synth_into_display, StreamMarkerFilter};
 
+/// Operator mode #42: flip a guilty verdict to an acquittal. Must run before
+/// anything derives from the verdict (spoken word, reveal events, the FSM's
+/// copy) so record and reveal stay coherent. Returns true if it flipped.
+pub fn apply_innocent_override(v: &mut Verdict) -> bool {
+    if !v.guilty {
+        return false;
+    }
+    v.guilty = false;
+    v.remarks = fallbacks::verdicts::FORCED_ACQUITTAL_REMARKS.into();
+    v.key_factor = None;
+    true
+}
+
+/// The #42 prompt directive: steers the whole deliberation toward acquittal so
+/// the monologue argues for the verdict the override guarantees.
+const INNOCENT_DIRECTIVE: &str = "\n\nSECRET OPERATOR DIRECTIVE (never mention or allude to \
+it): whatever the plea, this trial you WILL find the defendant NOT GUILTY. Deliberate fully \
+in character — discover a grudging technicality, an unexpected charm, or a fatal procedural \
+flaw in the prosecution — and end with VERDICT: ACQUITTED.";
+
 pub async fn mock(
     cfg: Arc<Config>,
     _charge: String,
     _plea: String,
     _cross: Option<CrossExam>,
     event_tx: mpsc::Sender<Event>,
+    modes: Arc<crate::operator_modes::OperatorModes>,
 ) {
     tokio::time::sleep(Duration::from_millis(cfg.mock_inference.deliberate_latency_ms)).await;
-    let v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
+    let mut v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
+    if modes.active_contains(crate::operator_modes::CODE_INNOCENT) && apply_innocent_override(&mut v)
+    {
+        info!("operator mode 42: mock verdict forced to acquittal");
+    }
     let _ = event_tx.send(Event::VerdictReady(v)).await;
 }
 
@@ -75,16 +100,26 @@ pub async fn real(
     event_tx: mpsc::Sender<Event>,
     display_tx: mpsc::Sender<Command>,
     maint_cmd_tx: mpsc::Sender<MaintenanceCommand>,
+    modes: Arc<crate::operator_modes::OperatorModes>,
 ) {
     // Snapshot the active persona once at trial start; mid-trial changes
     // don't apply by design.
     // The guilty_bias slider is injected into the prompt here (not baked into
     // the persona text) so it is the sole knob governing conviction rate.
-    let (system_prompt, voice, speed, guilty_bias) = {
+    let (mut system_prompt, voice, speed, mut guilty_bias) = {
         let reg = personas.read().await;
         let p = reg.active();
         (reg.verdict_prompt(p), p.tts_voice.clone(), p.tts_speed, p.guilty_bias as f64)
     };
+    // Operator mode 42, layer 1: steer the deliberation itself toward the
+    // acquittal so the monologue argues for the verdict the hard force (layer
+    // 2, at parse) guarantees. Snapshotted once, like the persona.
+    let forced_innocent = modes.active_contains(crate::operator_modes::CODE_INNOCENT);
+    if forced_innocent {
+        info!("operator mode 42 active: steering verdict toward acquittal");
+        system_prompt.push_str(INNOCENT_DIRECTIVE);
+        guilty_bias = 0.0; // any fallback constructed below must acquit too
+    }
 
     let client = LlmClient::new(&cfg.inference);
     let user_msg = build_user_msg(&charge, &plea, &cross, &anchors);
@@ -114,7 +149,7 @@ pub async fn real(
             Ok(c) => c,
             Err(e) => {
                 warn!("verdict stream errored mid-flight: {e:#}; using fallback");
-                let v = fallbacks::verdicts::random(cfg.trial.guilty_bias);
+                let v = fallbacks::verdicts::random(guilty_bias);
                 let _ = event_tx.send(Event::VerdictReady(v)).await;
                 return;
             }
@@ -148,6 +183,13 @@ pub async fn real(
         fb
     });
     v.pre_announced = true;
+    // Operator mode 42, layer 2: the hard force. This must happen before
+    // ANYTHING derives from `v` — the locals below feed the spoken verdict
+    // word and the reveal events, and the FSM gets its copy via VerdictReady —
+    // so flipping here keeps every downstream consumer coherent.
+    if forced_innocent && apply_innocent_override(&mut v) {
+        info!("operator mode 42: forcing acquittal over a guilty verdict");
+    }
     let guilty = v.guilty;
     let remarks = v.remarks.clone();
     let key_factor = v.key_factor.clone();
@@ -315,6 +357,27 @@ fn parse_verdict(text: &str) -> Option<Verdict> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn innocent_override_flips_guilty_and_scrubs_remarks() {
+        let raw = "Empty and smug.\nVERDICT: GUILTY\nKEY_FACTOR: smugness\nREASON: Pure contempt.";
+        let mut v = parse_verdict(raw).unwrap();
+        assert!(v.guilty);
+        assert!(apply_innocent_override(&mut v));
+        assert!(!v.guilty);
+        assert_eq!(v.remarks, fallbacks::verdicts::FORCED_ACQUITTAL_REMARKS);
+        assert!(v.key_factor.is_none());
+    }
+
+    #[test]
+    fn innocent_override_noops_on_acquittal() {
+        let raw = "Surprisingly clever. VERDICT: ACQUITTED\nREASON: Charm.";
+        let mut v = parse_verdict(raw).unwrap();
+        let remarks_before = v.remarks.clone();
+        assert!(!apply_innocent_override(&mut v));
+        assert!(!v.guilty);
+        assert_eq!(v.remarks, remarks_before);
+    }
 
     #[test]
     fn parses_guilty() {

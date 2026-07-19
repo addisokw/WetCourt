@@ -46,7 +46,26 @@ fn question_watchdog(question: &str, cfg: &Config) -> Duration {
     )
 }
 
-pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (State, Vec<Command>) {
+/// Operator mode #42: force a not-guilty verdict. Only touches verdicts the
+/// FSM will speak itself — `pre_announced` verdicts already had the reveal
+/// performed (and the same force applied) by the inference task, and flipping
+/// the FSM's copy after the judge spoke would desynchronize record and reveal.
+pub fn force_innocent(mut v: Verdict, forced: bool) -> Verdict {
+    if forced && v.guilty && !v.pre_announced {
+        v.guilty = false;
+        v.remarks = fallbacks::verdicts::FORCED_ACQUITTAL_REMARKS.into();
+        v.key_factor = None;
+    }
+    v
+}
+
+pub fn step(
+    state: State,
+    event: Event,
+    cfg: &Config,
+    cross_enabled: bool,
+    forced_innocent: bool,
+) -> (State, Vec<Command>) {
     use Event::*;
     use State::*;
 
@@ -361,11 +380,16 @@ pub fn step(state: State, event: Event, cfg: &Config, cross_enabled: bool) -> (S
         ),
         (s @ CrossTranscribing { .. }, _) => (s, vec![]),
 
-        (Deliberating { .. }, VerdictReady(v)) => begin_pronouncing(v),
+        (Deliberating { .. }, VerdictReady(v)) => {
+            begin_pronouncing(force_innocent(v, forced_innocent))
+        }
         (Deliberating { started_at, charge, plea }, Tick) => {
             let escape = cfg.inference.verdict_total_timeout_secs + VERDICT_FALLBACK_GRACE_SECS;
             if started_at.elapsed() > Duration::from_secs(escape) {
-                begin_pronouncing(fallbacks::verdicts::random(cfg.trial.guilty_bias))
+                begin_pronouncing(force_innocent(
+                    fallbacks::verdicts::random(cfg.trial.guilty_bias),
+                    forced_innocent,
+                ))
             } else {
                 (Deliberating { started_at, charge, plea }, vec![])
             }
@@ -788,9 +812,63 @@ mod tests {
     }
 
     #[test]
+    fn forced_innocent_flips_fallback_and_verdict_ready() {
+        let cfg = test_cfg(); // guilty_bias = 1.0 → fallback is always guilty
+        // Deliberating timeout fallback, forced: not guilty, and the sentence
+        // squirts nothing.
+        let s = State::Deliberating {
+            charge: "c".into(),
+            plea: "p".into(),
+            started_at: Instant::now() - Duration::from_secs(3600),
+        };
+        let (s, _) = step(s, Event::Tick, &cfg, false, true);
+        let State::PronouncingVerdict { verdict, .. } = &s else {
+            panic!("expected PronouncingVerdict, got {}", s.name());
+        };
+        assert!(!verdict.guilty);
+        let cmds = sentence_commands(verdict, &cfg);
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Hardware(HardwareCommand::Fire(_)))));
+
+        // A guilty VerdictReady (non-pre-announced) is flipped too.
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
+        let (s, _) = step(s, Event::VerdictReady(guilty_verdict(true)), &cfg, false, true);
+        let State::PronouncingVerdict { verdict, .. } = &s else {
+            panic!("expected PronouncingVerdict, got {}", s.name());
+        };
+        assert!(!verdict.guilty);
+    }
+
+    #[test]
+    fn forced_innocent_never_touches_pre_announced_verdicts() {
+        // The inference task already spoke the reveal for pre_announced
+        // verdicts (and applied its own force). Flipping the FSM's copy after
+        // the fact would desynchronize record and reveal.
+        let cfg = test_cfg();
+        let mut v = guilty_verdict(true);
+        v.pre_announced = true;
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
+        let (s, _) = step(s, Event::VerdictReady(v), &cfg, false, true);
+        let State::PronouncingVerdict { verdict, .. } = &s else {
+            panic!("expected PronouncingVerdict, got {}", s.name());
+        };
+        assert!(verdict.guilty, "pre_announced verdicts are the inference task's to force");
+    }
+
+    #[test]
+    fn unforced_verdicts_pass_through() {
+        let cfg = test_cfg();
+        let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
+        let (s, _) = step(s, Event::VerdictReady(guilty_verdict(true)), &cfg, false, false);
+        let State::PronouncingVerdict { verdict, .. } = &s else {
+            panic!("expected PronouncingVerdict, got {}", s.name());
+        };
+        assert!(verdict.guilty);
+    }
+
+    #[test]
     fn idle_to_generating_charge_on_start() {
         let cfg = test_cfg();
-        let (s, cmds) = step(State::Idle, Event::OperatorStart, &cfg, false);
+        let (s, cmds) = step(State::Idle, Event::OperatorStart, &cfg, false, false);
         assert!(matches!(s, State::GeneratingCharge { .. }));
         assert!(matches!(cmds[0], Command::GenerateCharge));
     }
@@ -798,7 +876,7 @@ mod tests {
     #[test]
     fn defendant_button_starts_trial_from_idle_and_darkens_the_lamp() {
         let cfg = test_cfg();
-        let (s, cmds) = step(State::Idle, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(State::Idle, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::GeneratingCharge { .. }));
         assert!(matches!(cmds[0], Command::GenerateCharge));
         assert!(cmds
@@ -821,7 +899,7 @@ mod tests {
             question: long_question.clone(),
             started_at: past_base,
         };
-        let (s, cmds) = step(s, Event::Tick, &cfg, true);
+        let (s, cmds) = step(s, Event::Tick, &cfg, true, false,);
         assert!(matches!(s, State::CrossSpeaking { .. }), "watchdog fired mid-question");
         assert!(cmds.is_empty());
 
@@ -832,7 +910,7 @@ mod tests {
             question: "Why?".into(),
             started_at: past_base,
         };
-        let (s, _) = step(s, Event::Tick, &cfg, true);
+        let (s, _) = step(s, Event::Tick, &cfg, true, false,);
         assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
     }
 
@@ -845,7 +923,7 @@ mod tests {
             question: "Well?".into(),
             started_at: Instant::now(),
         };
-        let (s, _) = step(s, Event::TtsFinished, &cfg, true);
+        let (s, _) = step(s, Event::TtsFinished, &cfg, true, false,);
         assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
     }
 
@@ -860,7 +938,7 @@ mod tests {
             recording: false,
         };
         // First press → START recording (tell the mic to begin; flip the prompt).
-        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::AwaitingPlea { recording: true, .. }));
         assert!(cmds.iter().any(|c| matches!(
             c,
@@ -871,7 +949,7 @@ mod tests {
             Command::Display(DisplayEvent::PleaRecording { active: true })
         )));
         // Second press → close the window early (flush).
-        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::FlushingPlea { .. }));
         assert!(cmds
             .iter()
@@ -890,7 +968,7 @@ mod tests {
             paused_remaining: Some(Duration::from_secs(30)),
             recording: true,
         };
-        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::AwaitingPlea { paused_remaining: Some(_), .. }));
         assert!(cmds.is_empty());
     }
@@ -907,14 +985,14 @@ mod tests {
             recording: false,
         };
         // First press → START recording the answer.
-        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::CrossAwaitingAnswer { recording: true, .. }));
         assert!(cmds.iter().any(|c| matches!(
             c,
             Command::Display(DisplayEvent::StartPleaRecording { record: true, cross: true, .. })
         )));
         // Second press → close the answer window early.
-        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::CrossFlushingAnswer { .. }));
         assert!(cmds
             .iter()
@@ -925,11 +1003,11 @@ mod tests {
     fn defendant_button_ignored_outside_its_states() {
         let cfg = test_cfg();
         let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
-        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(s, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::Deliberating { .. }));
         assert!(cmds.is_empty());
 
-        let (s, cmds) = step(State::Maintenance, Event::DefendantButton, &cfg, false);
+        let (s, cmds) = step(State::Maintenance, Event::DefendantButton, &cfg, false, false);
         assert!(matches!(s, State::Maintenance));
         assert!(cmds.is_empty());
     }
@@ -948,16 +1026,16 @@ mod tests {
             .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Pulse)))));
         // E-stop and maintenance exit land in Idle with the attract blink.
         let mid = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
-        let (_s, cmds) = step(mid, Event::OperatorEmergencyStop, &cfg, false);
+        let (_s, cmds) = step(mid, Event::OperatorEmergencyStop, &cfg, false, false);
         assert!(cmds
             .iter()
             .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Blink)))));
-        let (_s, cmds) = step(State::Maintenance, Event::ExitMaintenance, &cfg, false);
+        let (_s, cmds) = step(State::Maintenance, Event::ExitMaintenance, &cfg, false, false);
         assert!(cmds
             .iter()
             .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Blink)))));
         // Entering maintenance darkens the lamp (trials are blocked).
-        let (_s, cmds) = step(State::Idle, Event::EnterMaintenance, &cfg, false);
+        let (_s, cmds) = step(State::Idle, Event::EnterMaintenance, &cfg, false, false);
         assert!(cmds
             .iter()
             .any(|c| matches!(c, Command::Hardware(HardwareCommand::Led(LedMode::Off)))));
@@ -967,7 +1045,7 @@ mod tests {
     fn estop_anywhere_returns_to_idle() {
         let cfg = test_cfg();
         let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
-        let (s2, _) = step(s, Event::OperatorEmergencyStop, &cfg, false);
+        let (s2, _) = step(s, Event::OperatorEmergencyStop, &cfg, false, false);
         assert!(matches!(s2, State::Idle));
     }
 
@@ -975,7 +1053,7 @@ mod tests {
     fn charge_ready_transitions_to_displaying() {
         let cfg = test_cfg();
         let (s, _) = step(State::GeneratingCharge { started_at: Instant::now() },
-                          Event::ChargeReady("you stand accused".into()), &cfg, false);
+                          Event::ChargeReady("you stand accused".into()), &cfg, false, false,);
         assert!(matches!(s, State::DisplayingCharge { .. }));
     }
 
@@ -990,10 +1068,10 @@ mod tests {
             tts_done: false,
             watchdog_at: far,
         };
-        let (s, _) = step(s, Event::Tick, &cfg, false);
+        let (s, _) = step(s, Event::Tick, &cfg, false, false);
         assert!(matches!(s, State::DisplayingCharge { .. }));
         // TTS drains → plea window opens (cross=false on the event).
-        let (s, cmds) = step(s, Event::TtsFinished, &cfg, false);
+        let (s, cmds) = step(s, Event::TtsFinished, &cfg, false, false);
         assert!(matches!(s, State::AwaitingPlea { .. }));
         assert!(cmds.iter().any(|c| matches!(
             c,
@@ -1012,12 +1090,12 @@ mod tests {
             watchdog_at: far,
         };
         // TTS drained early → latch tts_done, keep displaying until `until`.
-        let (s, _) = step(s, Event::TtsFinished, &cfg, false);
+        let (s, _) = step(s, Event::TtsFinished, &cfg, false, false);
         match &s {
             State::DisplayingCharge { tts_done, .. } => assert!(tts_done),
             other => panic!("expected DisplayingCharge, got {}", other.name()),
         }
-        let (s, _) = step(s, Event::Tick, &cfg, false);
+        let (s, _) = step(s, Event::Tick, &cfg, false, false);
         assert!(matches!(s, State::DisplayingCharge { .. }));
     }
 
@@ -1030,7 +1108,7 @@ mod tests {
             tts_done: false,
             watchdog_at: Instant::now(),
         };
-        let (s, _) = step(s, Event::Tick, &cfg, false);
+        let (s, _) = step(s, Event::Tick, &cfg, false, false);
         assert!(matches!(s, State::AwaitingPlea { .. }));
     }
 
@@ -1041,6 +1119,7 @@ mod tests {
             State::Transcribing { charge: "c".into(), audio: vec![1], started_at: Instant::now() },
             Event::TranscriptFailed("kokoro exploded".into()),
             &cfg,
+            false,
             false,
         );
         assert!(matches!(s, State::Deliberating { .. }));
@@ -1067,7 +1146,7 @@ mod tests {
         // cross-exam off → straight to deliberation.
         let (s, _) = step(
             State::Transcribing { charge: charge.clone(), audio: vec![], started_at: Instant::now() },
-            Event::TranscriptReady("i did not".into()), &cfg, false);
+            Event::TranscriptReady("i did not".into()), &cfg, false, false,);
         if let State::Deliberating { charge: c, plea, .. } = s {
             assert_eq!(c, charge);
             assert_eq!(plea, "i did not");
@@ -1083,6 +1162,7 @@ mod tests {
             Event::VerdictReady(guilty_verdict(true)),
             &cfg,
             false,
+            false,
         );
         assert!(cmds.iter().any(|c| matches!(
             c,
@@ -1096,6 +1176,7 @@ mod tests {
             State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() },
             Event::VerdictReady(v),
             &cfg,
+            false,
             false,
         );
         assert!(!cmds
@@ -1112,7 +1193,7 @@ mod tests {
             paused_remaining: None,
             recording: true,
         };
-        let (s, cmds) = step(s, Event::LawyerCallStarted, &cfg, false);
+        let (s, cmds) = step(s, Event::LawyerCallStarted, &cfg, false, false);
         assert!(cmds
             .iter()
             .any(|c| matches!(c, Command::Display(DisplayEvent::ClockPaused { .. }))));
@@ -1125,11 +1206,11 @@ mod tests {
             paused_remaining: Some(Duration::from_secs(7)),
             recording: true,
         };
-        let (s, _) = step(s, Event::Tick, &cfg, false);
+        let (s, _) = step(s, Event::Tick, &cfg, false, false);
         assert!(matches!(s, State::AwaitingPlea { paused_remaining: Some(_), .. }));
 
         // Hanging up restores the frozen remaining time.
-        let (s, cmds) = step(s, Event::LawyerCallEnded, &cfg, false);
+        let (s, cmds) = step(s, Event::LawyerCallEnded, &cfg, false, false);
         match &s {
             State::AwaitingPlea { deadline, paused_remaining, .. } => {
                 assert!(paused_remaining.is_none());
@@ -1155,9 +1236,9 @@ mod tests {
             recording: true,
         };
         // Paused: expired deadline doesn't flush the answer window.
-        let (s, _) = step(s, Event::Tick, &cfg, true);
+        let (s, _) = step(s, Event::Tick, &cfg, true, false);
         assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
-        let (s, _) = step(s, Event::LawyerCallEnded, &cfg, true);
+        let (s, _) = step(s, Event::LawyerCallEnded, &cfg, true, false);
         assert!(matches!(s, State::CrossAwaitingAnswer { paused_remaining: None, .. }));
     }
 
@@ -1175,7 +1256,7 @@ mod tests {
             paused_remaining: Some(Duration::from_secs(4)),
             recording: true,
         };
-        let (s, cmds) = step(s, Event::LawyerCallEnded, &cfg, true);
+        let (s, cmds) = step(s, Event::LawyerCallEnded, &cfg, true, false,);
         match &s {
             State::CrossAwaitingAnswer { deadline, paused_remaining, .. } => {
                 assert!(paused_remaining.is_none());
@@ -1202,7 +1283,7 @@ mod tests {
             plea: "p".into(),
             started_at: Instant::now(),
         };
-        let (s, cmds) = step(s, Event::LawyerCallStarted, &cfg, false);
+        let (s, cmds) = step(s, Event::LawyerCallStarted, &cfg, false, false);
         assert!(matches!(s, State::Deliberating { .. }));
         assert!(cmds.is_empty());
     }
@@ -1217,6 +1298,7 @@ mod tests {
             },
             Event::Tick,
             &cfg,
+            false,
             false,
         );
         assert!(matches!(s, State::ExecutingSentence { .. }));
@@ -1236,7 +1318,7 @@ mod tests {
         let (s, cmds) = begin_pronouncing(v);
         assert!(cmds.is_empty());
         // The gavel lands at the service's reveal beat.
-        let (s, cmds) = step(s, Event::VerdictRevealed, &cfg, false);
+        let (s, cmds) = step(s, Event::VerdictRevealed, &cfg, false, false);
         assert!(matches!(s, State::PronouncingVerdict { .. }));
         assert!(cmds
             .iter()
@@ -1263,6 +1345,7 @@ mod tests {
             Event::Tick,
             &cfg,
             false,
+            false,
         );
         assert!(matches!(s, State::PronouncingVerdict { .. }));
     }
@@ -1275,12 +1358,12 @@ mod tests {
         // speak a fallback yet — the service is still resolving (possibly mid-TTS).
         let started_at = Instant::now() - Duration::from_secs(total + 1);
         let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at };
-        let (s, _) = step(s, Event::Tick, &cfg, false);
+        let (s, _) = step(s, Event::Tick, &cfg, false, false);
         assert!(matches!(s, State::Deliberating { .. }));
         // Past the grace too → fallback verdict.
         let started_at = Instant::now() - Duration::from_secs(total + VERDICT_FALLBACK_GRACE_SECS + 1);
         let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at };
-        let (s, _) = step(s, Event::Tick, &cfg, false);
+        let (s, _) = step(s, Event::Tick, &cfg, false, false);
         assert!(matches!(s, State::PronouncingVerdict { .. }));
     }
 
@@ -1293,6 +1376,7 @@ mod tests {
             Event::Tick,
             &cfg,
             false,
+            false,
         );
         assert!(matches!(s, State::Idle));
     }
@@ -1302,7 +1386,7 @@ mod tests {
         let cfg = test_cfg();
         let (s, cmds) = step(
             State::Transcribing { charge: "c".into(), audio: vec![], started_at: Instant::now() },
-            Event::TranscriptReady("a real defense".into()), &cfg, true);
+            Event::TranscriptReady("a real defense".into()), &cfg, true, false,);
         assert!(matches!(s, State::CrossGeneratingQuestion { .. }));
         assert!(cmds.iter().any(|c| matches!(c, Command::CrossExamine { .. })));
     }
@@ -1312,7 +1396,7 @@ mod tests {
         let cfg = test_cfg();
         let (s, _) = step(
             State::Transcribing { charge: "c".into(), audio: vec![], started_at: Instant::now() },
-            Event::TranscriptReady(NO_DEFENSE.into()), &cfg, true);
+            Event::TranscriptReady(NO_DEFENSE.into()), &cfg, true, false,);
         assert!(matches!(s, State::Deliberating { .. }));
     }
 
@@ -1322,16 +1406,16 @@ mod tests {
         // question ready → speaking
         let (s, _) = step(
             State::CrossGeneratingQuestion { charge: "c".into(), plea: "p".into(), started_at: Instant::now() },
-            Event::CrossQuestionReady("really?".into()), &cfg, true);
+            Event::CrossQuestionReady("really?".into()), &cfg, true, false,);
         assert!(matches!(s, State::CrossSpeaking { .. }));
         // tts done → open answer window
-        let (s, _) = step(s, Event::TtsFinished, &cfg, true);
+        let (s, _) = step(s, Event::TtsFinished, &cfg, true, false);
         assert!(matches!(s, State::CrossAwaitingAnswer { .. }));
         // answer audio → transcribing
-        let (s, _) = step(s, Event::PleaAudioReceived(vec![1, 2, 3]), &cfg, true);
+        let (s, _) = step(s, Event::PleaAudioReceived(vec![1, 2, 3]), &cfg, true, false);
         assert!(matches!(s, State::CrossTranscribing { .. }));
         // answer transcript → deliberate carrying the full exchange
-        let (s, cmds) = step(s, Event::TranscriptReady("yes".into()), &cfg, true);
+        let (s, cmds) = step(s, Event::TranscriptReady("yes".into()), &cfg, true, false,);
         assert!(matches!(s, State::Deliberating { .. }));
         let cross = cmds.iter().find_map(|c| match c {
             Command::Deliberate { cross, .. } => Some(cross.clone()),
@@ -1345,7 +1429,7 @@ mod tests {
     #[test]
     fn idle_enters_maintenance() {
         let cfg = test_cfg();
-        let (s, cmds) = step(State::Idle, Event::EnterMaintenance, &cfg, false);
+        let (s, cmds) = step(State::Idle, Event::EnterMaintenance, &cfg, false, false);
         assert!(matches!(s, State::Maintenance));
         assert!(cmds.iter().any(|c| matches!(
             c,
@@ -1356,7 +1440,7 @@ mod tests {
     #[test]
     fn maintenance_blocks_operator_start() {
         let cfg = test_cfg();
-        let (s, cmds) = step(State::Maintenance, Event::OperatorStart, &cfg, false);
+        let (s, cmds) = step(State::Maintenance, Event::OperatorStart, &cfg, false, false);
         assert!(matches!(s, State::Maintenance));
         assert!(cmds.is_empty());
     }
@@ -1364,7 +1448,7 @@ mod tests {
     #[test]
     fn maintenance_exits_to_idle() {
         let cfg = test_cfg();
-        let (s, _) = step(State::Maintenance, Event::ExitMaintenance, &cfg, false);
+        let (s, _) = step(State::Maintenance, Event::ExitMaintenance, &cfg, false, false);
         assert!(matches!(s, State::Idle));
     }
 
@@ -1372,14 +1456,14 @@ mod tests {
     fn non_idle_ignores_enter_maintenance() {
         let cfg = test_cfg();
         let s = State::Deliberating { charge: "c".into(), plea: "p".into(), started_at: Instant::now() };
-        let (s2, _) = step(s, Event::EnterMaintenance, &cfg, false);
+        let (s2, _) = step(s, Event::EnterMaintenance, &cfg, false, false);
         assert!(matches!(s2, State::Deliberating { .. }));
     }
 
     #[test]
     fn estop_exits_maintenance() {
         let cfg = test_cfg();
-        let (s, _) = step(State::Maintenance, Event::OperatorEmergencyStop, &cfg, false);
+        let (s, _) = step(State::Maintenance, Event::OperatorEmergencyStop, &cfg, false, false);
         assert!(matches!(s, State::Idle));
     }
 
@@ -1389,7 +1473,7 @@ mod tests {
         let started = Instant::now() - Duration::from_secs(cfg.cross_examination.question_timeout_secs + 1);
         let (s, _) = step(
             State::CrossGeneratingQuestion { charge: "c".into(), plea: "p".into(), started_at: started },
-            Event::Tick, &cfg, true);
+            Event::Tick, &cfg, true, false);
         assert!(matches!(s, State::Deliberating { .. }));
     }
 }

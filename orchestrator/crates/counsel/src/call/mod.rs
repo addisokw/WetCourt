@@ -4,6 +4,7 @@
 pub mod agent;
 pub mod context;
 pub mod ivr;
+pub mod operator;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

@@ -34,6 +34,12 @@ pub enum DisplayEvent {
         /// A dedicated booth-mic client (`/ws/view?mic=1` kiosk) is live, so
         /// the operator console must keep its own microphone shut.
         mic_owner: bool,
+        /// Secret operator macro codes armed for the next trial / latched into
+        /// this one (resync for the case monitor's discreet indicator).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        operator_armed: Vec<u16>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        operator_active: Vec<u16>,
     },
     ShowCharge { text: String },
     /// "next binary frame is audio in this format" — emitted before each chunk
@@ -132,6 +138,10 @@ pub enum DisplayEvent {
     /// `present: false` mid-window the console takes the mic back so the plea
     /// isn't lost to a kiosk crash.
     MicOwner { present: bool },
+    /// Secret operator macro state: `armed` applies to the next trial,
+    /// `active` is latched into the current one. The case monitor renders
+    /// these as a discreet bare-number indicator for operator verification.
+    OperatorModes { armed: Vec<u16>, active: Vec<u16> },
 }
 
 #[derive(Debug, Clone, Deserialize)]

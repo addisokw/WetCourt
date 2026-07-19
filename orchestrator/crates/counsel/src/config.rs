@@ -21,6 +21,8 @@ pub struct Config {
     #[serde(default)]
     pub trial_context: TrialContextConfig,
     #[serde(default)]
+    pub operator: OperatorConfig,
+    #[serde(default)]
     pub control: ControlConfig,
     #[serde(default)]
     pub recording: RecordingConfig,
@@ -328,6 +330,43 @@ fn d_orchestrator_base_url() -> String {
 }
 fn d_trial_ctx_timeout_ms() -> u64 {
     2000
+}
+
+/// The phone-keypad operator console: with the court idle, a `#`-prefixed
+/// code keyed on the booth phone arms a secret operator mode on the
+/// orchestrator (see `call/operator.rs`).
+#[derive(Debug, Deserialize, Clone)]
+pub struct OperatorConfig {
+    /// Master switch; off restores the old behavior (`#` is just a logged
+    /// digit and the IVR treats it as a menu press).
+    #[serde(default = "d_op_enabled")]
+    pub enabled: bool,
+    /// Silence between keypresses that commits a pending code (ms).
+    #[serde(default = "d_op_inter_digit_ms")]
+    pub inter_digit_ms: u64,
+    /// Longest accepted code, in digits.
+    #[serde(default = "d_op_max_code_len")]
+    pub max_code_len: usize,
+}
+
+impl Default for OperatorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: d_op_enabled(),
+            inter_digit_ms: d_op_inter_digit_ms(),
+            max_code_len: d_op_max_code_len(),
+        }
+    }
+}
+
+fn d_op_enabled() -> bool {
+    true
+}
+fn d_op_inter_digit_ms() -> u64 {
+    3000
+}
+fn d_op_max_code_len() -> usize {
+    4
 }
 
 #[derive(Debug, Deserialize, Clone)]
