@@ -187,12 +187,6 @@ export function CaseContent() {
     (currentState() === 'cross_examining' ||
       currentState() === 'awaiting_plea' ||
       currentState() === 'transcribing');
-  // From cross-examination onward the charge is old news: render it compact
-  // so the judge's question / deliberation own the screen. `crossQuestion`
-  // stays set once cross begins, so this holds through the answer window and
-  // transcription too.
-  const chargeCompact = () =>
-    crossQuestion().length > 0 || currentState() === 'deliberating';
   // Marker lines are filtered server-side now (StreamMarkerFilter), so the
   // deliberation buffer is display-ready as-is.
   const cleanedDeliberation = () => deliberation();
@@ -234,7 +228,7 @@ export function CaseContent() {
         </Show>
 
         <Show when={showCharge()}>
-          <section class={`charge-block ${chargeCompact() ? 'compact' : ''}`}>
+          <section class="charge-block">
             <div class="charge-label">YOU ARE CHARGED WITH</div>
             <div class="charge-text">{charge()}</div>
           </section>
