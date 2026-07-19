@@ -38,6 +38,9 @@ export const [operatorActive, setOperatorActive] = createSignal<number[]>([]);
 // Cross-exam lawyer-call integration on/off (case-header indicator). Default
 // true to match the usual config; the snapshot corrects it on connect.
 export const [lawyerCallEnabled, setLawyerCallEnabled] = createSignal<boolean>(true);
+// Operator squirt-duration override in ms (0 = off, use calibrated default).
+// Toggled by the #69 phone macro; drives a case-header indicator.
+export const [squirtOverrideMs, setSquirtOverrideMs] = createSignal<number>(0);
 // The judge's cross-examination follow-up question (empty when no cross-exam
 // this trial). Set on the `cross_question` event, cleared at idle/reset.
 export const [crossQuestion, setCrossQuestion] = createSignal<string>('');
@@ -267,6 +270,7 @@ function handleEvent(ev: DisplayEvent) {
       setOperatorArmed(((ev.operator_armed ?? []) as unknown[]).map(Number));
       setOperatorActive(((ev.operator_active ?? []) as unknown[]).map(Number));
       setLawyerCallEnabled(Boolean(ev.lawyer_enabled));
+      setSquirtOverrideMs(Number(ev.squirt_override_ms ?? 0));
       // Reconnected into an open window: restart the mic (recording is
       // browser-local, so whatever was captured died with the old socket).
       if (micEnabled() && (phase === 'awaiting_plea' || crossAnswer)) void beginPlea({ auto: true });
@@ -335,6 +339,9 @@ function handleEvent(ev: DisplayEvent) {
       break;
     case 'lawyer_integration':
       setLawyerCallEnabled(Boolean(ev.enabled));
+      break;
+    case 'squirt_override':
+      setSquirtOverrideMs(Number(ev.ms ?? 0));
       break;
     case 'mic_owner':
       setMicOwnerPresent(Boolean(ev.present));

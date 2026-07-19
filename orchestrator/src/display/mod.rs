@@ -72,6 +72,9 @@ pub struct AppState {
     /// playback (and resumes it if the kiosk dies) — otherwise both render the
     /// audio and echo.
     pub audio_present: Arc<AtomicBool>,
+    /// Operator squirt-duration override in ms (0 = off). Toggled by the
+    /// `#69` phone macro; the hardware adapter consults it over calibration.
+    pub squirt_override_ms: Arc<std::sync::atomic::AtomicU32>,
     /// Buffer for binary plea audio uploaded by the frontend across multiple
     /// frames. Cleared when `plea_audio_complete` is received.
     pub plea_buffer: Arc<Mutex<Vec<u8>>>,
@@ -457,6 +460,14 @@ fn broadcast_lawyer_integration(s: &AppState) {
         .send(DisplayMessage::Json(DisplayEvent::LawyerIntegration { enabled }));
 }
 
+/// Broadcast the squirt-duration override so the case-header indicator updates.
+fn broadcast_squirt_override(s: &AppState) {
+    let ms = s.squirt_override_ms.load(Ordering::Relaxed);
+    let _ = s
+        .display_bcast
+        .send(DisplayMessage::Json(DisplayEvent::SquirtOverride { ms }));
+}
+
 async fn get_operator_modes(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     let (armed, active) = s.operator_modes.snapshot();
     let registry: Vec<_> = crate::operator_modes::REGISTRY
@@ -506,6 +517,19 @@ async fn arm_operator_mode(
         broadcast_lawyer_integration(&s);
         let mut body = modes_state_json(&s);
         body["lawyer_enabled"] = serde_json::json!(now);
+        return (StatusCode::OK, Json(body)).into_response();
+    }
+    // Reserved squirt-boost toggle (`#69#` on the phone): flip the fire
+    // duration between the calibrated default and SQUIRT_BOOST_MS. Not
+    // idle-gated; response + a broadcast carry the new value.
+    if body.code == crate::operator_modes::CODE_SQUIRT_BOOST {
+        let on = s.squirt_override_ms.load(Ordering::Relaxed) == 0;
+        let ms = if on { crate::operator_modes::SQUIRT_BOOST_MS } else { 0 };
+        s.squirt_override_ms.store(ms, Ordering::Relaxed);
+        info!(squirt_override_ms = ms, "operator modes: squirt duration override toggled via #69");
+        broadcast_squirt_override(&s);
+        let mut body = modes_state_json(&s);
+        body["squirt_override_ms"] = serde_json::json!(ms);
         return (StatusCode::OK, Json(body)).into_response();
     }
     if !s.is_idle.load(Ordering::Relaxed) {
@@ -1490,6 +1514,7 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
         mic_owner: s.mic_present.load(Ordering::SeqCst),
         audio_owner: s.audio_present.load(Ordering::SeqCst),
         lawyer_enabled: s.lawyer_enabled.load(Ordering::Relaxed),
+        squirt_override_ms: s.squirt_override_ms.load(Ordering::Relaxed),
         operator_armed,
         operator_active,
     }

@@ -13,6 +13,7 @@ import {
   lawyerCalling,
   operatorActive,
   operatorArmed,
+  squirtOverrideMs,
   phaseDeadlineAt,
   pleaRecordingActive,
   pleaTranscript,
@@ -177,6 +178,10 @@ export function CaseContent() {
         <span class={`lawyer-status ${lawyerCallEnabled() ? 'on' : 'off'}`}>
           ☎ {lawyerCallEnabled() ? 'ON' : 'OFF'}
         </span>
+        {/* Squirt-boost status — only shown when the override is active. */}
+        <Show when={squirtOverrideMs() > 0}>
+          <span class="squirt-status">💧 {(squirtOverrideMs() / 1000).toFixed(1)}s</span>
+        </Show>
         <span class={`case-state state-${currentState()}`}>{currentState().replace(/_/g, ' ')}</span>
       </header>
 

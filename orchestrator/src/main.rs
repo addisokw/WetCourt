@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{atomic::{AtomicBool, AtomicU8, AtomicUsize}, Arc};
+use std::sync::{atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize}, Arc};
 
 use anyhow::Result;
 use clap::Parser;
@@ -244,6 +244,12 @@ async fn main() -> Result<()> {
     };
     let auto_fire = Arc::new(display::autofire::AutoFire::new(saved_dwell_ms));
 
+    // Operator squirt-duration override (ms). 0 = off (use the calibrated
+    // fire_ms / config fallback); non-zero forces the trial FIRE duration.
+    // Toggled by the `#69` phone macro; consulted in the hardware adapter
+    // below so it wins over calibration.
+    let squirt_override_ms = Arc::new(AtomicU32::new(0));
+
     // Hardware driver (mock or tcp registry). Owns both command sources — the
     // trial state machine (via the Command::Hardware adapter) and the
     // maintenance console — plus the device snapshot and presence broadcast.
@@ -252,6 +258,7 @@ async fn main() -> Result<()> {
         let event_tx = event_tx.clone();
         let devices = devices.clone();
         let presence = display_bcast.clone();
+        let squirt_override = squirt_override_ms.clone();
         let (hw_cmd_tx, hw_cmd_rx) = mpsc::channel::<hardware::HardwareCommand>(32);
         // Adapter: unwrap Command::Hardware -> HardwareCommand for the driver.
         // Three policy edges live here, all keeping policy out of the FSM:
@@ -303,11 +310,15 @@ async fn main() -> Result<()> {
                 // if uncalibrated).
                 let hc = match hc {
                     HardwareCommand::Fire(fallback_ms) => {
-                        let reg = calibration_for_adapter.read().await;
-                        let ms = reg
-                            .get("squirt")
-                            .and_then(|c| c.fire_ms)
-                            .unwrap_or(fallback_ms);
+                        // Operator override wins over calibration/fallback.
+                        let override_ms =
+                            squirt_override.load(std::sync::atomic::Ordering::Relaxed);
+                        let ms = if override_ms != 0 {
+                            override_ms
+                        } else {
+                            let reg = calibration_for_adapter.read().await;
+                            reg.get("squirt").and_then(|c| c.fire_ms).unwrap_or(fallback_ms)
+                        };
                         HardwareCommand::Fire(ms)
                     }
                     HardwareCommand::Gavel => {
@@ -448,6 +459,7 @@ async fn main() -> Result<()> {
         mic_generation: Arc::new(AtomicUsize::new(0)),
         mic_present: Arc::new(AtomicBool::new(false)),
         audio_present: Arc::new(AtomicBool::new(false)),
+        squirt_override_ms: squirt_override_ms.clone(),
         plea_buffer: Arc::new(Mutex::new(Vec::new())),
         personas,
         crimes,

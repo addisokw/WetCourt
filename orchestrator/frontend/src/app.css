@@ -385,6 +385,14 @@ button.plea.recording:hover { background: #8b2326; }
   color: #6e7681;
 }
 
+/* Squirt-boost status in the case-header (shown only when the override is on). */
+.squirt-status {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  color: #58a6ff;
+  opacity: 0.85;
+}
+
 /* Discreet operator macro-mode indicator in the case-header menu bar: bare
    code numbers, barely brighter than the background. Armed codes are dimmest;
    the active (latched) code lifts slightly for up-close verification. */

@@ -35,6 +35,14 @@ pub const CODE_RESET: u16 = 99;
 /// cross-examination.
 pub const CODE_LAWYER_TOGGLE: u16 = 88;
 
+/// Reserved action code (not a mode): dialing `#69#` toggles a fixed
+/// squirt-duration override on/off. On forces the guilty FIRE to
+/// [`SQUIRT_BOOST_MS`] (over calibration); off restores the calibrated value.
+pub const CODE_SQUIRT_BOOST: u16 = 69;
+
+/// The squirt-duration the `#69` boost forces (ms).
+pub const SQUIRT_BOOST_MS: u32 = 1000;
+
 pub struct ModeDef {
     pub code: u16,
     pub slug: &'static str,

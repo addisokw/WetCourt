@@ -41,6 +41,10 @@ pub enum DisplayEvent {
         /// Cross-exam lawyer-call integration on/off (case-header indicator).
         #[serde(default)]
         lawyer_enabled: bool,
+        /// Operator squirt-duration override in ms (0 = off) for the header
+        /// indicator.
+        #[serde(default)]
+        squirt_override_ms: u32,
         /// Secret operator macro codes armed for the next trial / latched into
         /// this one (resync for the case monitor's discreet indicator).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -158,6 +162,9 @@ pub enum DisplayEvent {
     /// Cross-exam lawyer-call integration was toggled (via the `#88` phone
     /// macro or the console). Drives the case-header lawyer status indicator.
     LawyerIntegration { enabled: bool },
+    /// Squirt-duration override changed (via the `#69` phone macro).
+    /// `ms == 0` means off (calibrated default). Drives the header indicator.
+    SquirtOverride { ms: u32 },
 }
 
 #[derive(Debug, Clone, Deserialize)]
