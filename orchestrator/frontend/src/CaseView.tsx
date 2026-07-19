@@ -235,10 +235,28 @@ export default function CaseView() {
     const wantMic = params.has('mic');
     connect({ readOnly: true, audio: wantAudio, mic: wantMic });
     if (wantAudio) window.addEventListener('pointerdown', resumeAudio);
+
+    // Testing affordance (opt-in via ?btn=1): stand in for the hardware
+    // defendant button when it isn't wired up. Space/Enter POST the same
+    // DefendantButton event the physical switch sends — starts a trial from
+    // idle, then press-to-record during the plea window. Gated by the query
+    // param so a real kiosk can never start a trial from a stray keypress.
+    if (params.has('btn')) {
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key !== ' ' && e.key !== 'Enter') return;
+        e.preventDefault();
+        void fetch('/operator/defendant_press', { method: 'POST' });
+      };
+      window.addEventListener('keydown', onKey);
+      onCleanup(() => window.removeEventListener('keydown', onKey));
+    }
   });
   return (
     <div class={`case-view ${theaterActive() ? 'theater-active' : ''}`}>
       <CaseContent />
+      <Show when={new URLSearchParams(location.search).has('btn')}>
+        <div class="kbd-btn-hint">SPACE = button</div>
+      </Show>
     </div>
   );
 }

@@ -359,6 +359,18 @@ button.plea.recording:hover { background: #8b2326; }
   cursor: none;
   padding: clamp(1rem, 3vw, 3rem);
 }
+/* Testing affordance: keyboard-button hint (only shown with ?btn=1). */
+.kbd-btn-hint {
+  position: fixed;
+  bottom: 0.6rem;
+  left: 0.8rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: #6e7681;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 /* Discreet operator macro-mode indicator in the case-header menu bar: bare
    code numbers, barely brighter than the background. Armed codes are dimmest;
    the active (latched) code lifts slightly for up-close verification. */
