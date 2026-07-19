@@ -476,6 +476,17 @@ async fn arm_operator_mode(
         }
         return (StatusCode::OK, Json(modes_state_json(&s))).into_response();
     }
+    // Reserved reset action (`#99#` on the phone): abort the current trial back
+    // to Idle via the e-stop path. Works mid-trial (that's the point) and is a
+    // harmless no-op when already idle, so it is not idle-gated. The FSM's
+    // e-stop handling also clears any armed/active modes.
+    if body.code == crate::operator_modes::CODE_RESET {
+        info!("operator modes: reset-to-idle via #99");
+        if s.event_tx.send(Event::OperatorEmergencyStop).await.is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed").into_response();
+        }
+        return (StatusCode::OK, Json(modes_state_json(&s))).into_response();
+    }
     if !s.is_idle.load(Ordering::Relaxed) {
         return (StatusCode::CONFLICT, "modes can only be armed while the court is idle")
             .into_response();

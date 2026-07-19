@@ -24,6 +24,11 @@ pub const CODE_INNOCENT: u16 = 42;
 /// is never armable and never shown as an active indicator.
 pub const CODE_DISARM: u16 = 0;
 
+/// Reserved action code (not a mode): dialing `#99#` aborts the current trial
+/// back to Idle (the e-stop path — cancels speech, resets hardware). Works
+/// mid-trial, unlike arming; a no-op when already idle.
+pub const CODE_RESET: u16 = 99;
+
 pub struct ModeDef {
     pub code: u16,
     pub slug: &'static str,
