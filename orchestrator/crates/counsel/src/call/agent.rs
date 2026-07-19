@@ -350,6 +350,15 @@ fn maybe_post_speaker_audio(
     if !shared.cfg.audio.speaker_playback || samples.is_empty() {
         return None;
     }
+    // Hangup race: the defendant can hang up while a line is still being
+    // synthesized. The call slot is released on the BYE — before this burst
+    // exists — so posting it would play a full lawyer line over the resumed
+    // trial. The orchestrator drops out-of-call bursts too; this just saves
+    // the wasted POST.
+    if !shared.calls.busy() {
+        tracing::debug!("call over before line finished synthesizing — booth burst dropped");
+        return None;
+    }
     let burst = Duration::from_millis(samples.len() as u64 * 1000 / 8000);
     let done_by = tokio::time::Instant::now() + burst + BOOTH_PLAYBACK_MARGIN;
     let base = shared

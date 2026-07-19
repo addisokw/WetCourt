@@ -921,7 +921,13 @@ async fn lawyer_audio(
     AxumState(s): AxumState<AppState>,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
-    if !s.lawyer_speaker_playback.load(Ordering::Relaxed) || body.is_empty() {
+    // Also require a live call: counsel can finish synthesizing a line after
+    // the defendant hung up, and a burst arriving after `call_ended` (and its
+    // lawyer_audio_stop) would play a full lawyer line over the resumed judge.
+    if !s.lawyer_speaker_playback.load(Ordering::Relaxed)
+        || !s.lawyer_call_active.load(Ordering::Relaxed)
+        || body.is_empty()
+    {
         return StatusCode::NO_CONTENT;
     }
     let _ = s
