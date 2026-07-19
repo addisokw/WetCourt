@@ -161,6 +161,11 @@ pub struct AudioConfig {
     /// orchestrator's `[lawyer] speaker_playback` too. Ships OFF.
     #[serde(default)]
     pub speaker_playback: bool,
+    /// Linear gain applied to TTS speech before µ-law encoding (1.0 = unity).
+    /// Boosts the lawyer's voice on quiet handsets; samples are soft-clipped
+    /// rather than wrapped, so modest boosts stay clean.
+    #[serde(default = "d_tts_gain")]
+    pub tts_gain: f32,
 }
 
 impl Default for AudioConfig {
@@ -178,6 +183,7 @@ impl Default for AudioConfig {
             debug_rms: false,
             echo_test: false,
             speaker_playback: false,
+            tts_gain: d_tts_gain(),
         }
     }
 }
@@ -208,6 +214,9 @@ fn d_max_call_secs() -> u64 {
 }
 fn d_max_exchanges() -> usize {
     5
+}
+fn d_tts_gain() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Deserialize, Clone)]

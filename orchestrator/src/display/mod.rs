@@ -1411,6 +1411,7 @@ fn robot_params_event(p: &Persona) -> DisplayEvent {
         ring_hz: p.robot.ring_hz,
         saturation: p.robot.saturation,
         peak_hz: p.robot.peak_hz,
+        gain: p.robot.gain,
     }
 }
 

@@ -62,6 +62,10 @@ pub struct RobotParams {
     /// Resonant "honk" peaking-filter frequency (Hz).
     #[serde(default = "d_robot_peak_hz")]
     pub peak_hz: f32,
+    /// Master output gain (1 = unity); a limiter in the playback graph keeps
+    /// boosts above unity from clipping.
+    #[serde(default = "d_robot_gain")]
+    pub gain: f32,
 }
 
 fn d_robot_intensity() -> f32 { 0.72 }
@@ -69,6 +73,7 @@ fn d_robot_glitch_rate() -> f32 { 1.3 }
 fn d_robot_ring_hz() -> f32 { 52.0 }
 fn d_robot_saturation() -> f32 { 0.5 }
 fn d_robot_peak_hz() -> f32 { 2200.0 }
+fn d_robot_gain() -> f32 { 1.0 }
 
 impl Default for RobotParams {
     fn default() -> Self {
@@ -78,6 +83,7 @@ impl Default for RobotParams {
             ring_hz: d_robot_ring_hz(),
             saturation: d_robot_saturation(),
             peak_hz: d_robot_peak_hz(),
+            gain: d_robot_gain(),
         }
     }
 }
@@ -95,6 +101,7 @@ impl RobotParams {
         r("ring_hz", self.ring_hz, 10.0, 400.0)?;
         r("saturation", self.saturation, 0.0, 1.0)?;
         r("peak_hz", self.peak_hz, 500.0, 5000.0)?;
+        r("gain", self.gain, 0.0, 3.0)?;
         Ok(())
     }
 }
@@ -389,6 +396,9 @@ mod tests {
         assert!(p.validate().is_err());
         p.robot.intensity = 0.5;
         p.robot.ring_hz = 5.0;
+        assert!(p.validate().is_err());
+        p.robot.ring_hz = 52.0;
+        p.robot.gain = 3.5;
         assert!(p.validate().is_err());
         p.robot = RobotParams::default();
         assert!(p.validate().is_ok());

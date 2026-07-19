@@ -9,10 +9,14 @@
 //   in ─┬─ dry ───────────────────────────────────────────────┐
 //       └─ bandpass ─ peak ─ saturate ─ ringMod ─┬─────── wet ─┤
 //                                                └─ comb ──────┘
-//   (dry+wet) ─ tail ─► [glitch worklet: bitcrush/decimate/stutter] ─► out
+//   (dry+wet) ─ tail ─► [glitch worklet: bitcrush/decimate/stutter]
+//                     ─► master gain ─► limiter ─► out
 //
 // The glitch worklet loads asynchronously; until it's ready the tail feeds the
-// destination directly (native robot only), then we splice the worklet in.
+// master gain directly (native robot only), then we splice the worklet in.
+// The master gain boosts the whole voice (a venue-loudness knob, per-persona
+// like the rest); the limiter after it stops boosts above unity from hard-
+// clipping at the destination.
 
 import glitchUrl from './glitch-processor.js?url';
 
@@ -29,6 +33,7 @@ interface RobotChain {
   ctx: AudioContext;
   input: GainNode;
   tail: GainNode;
+  master: GainNode;
   wet: GainNode;
   dry: GainNode;
   // Live-tunable nodes, kept so the Judge Mind robot controls can adjust the
@@ -51,6 +56,7 @@ let glitchRate = ROBOT_AMOUNT * MAX_GLITCH_RATE;
 let ringHz = RING_HZ;
 let saturation = SATURATION;
 let peakHz = PEAK_HZ;
+let gain = 1;
 
 /// Soft-clip transfer curve for the WaveShaper (digital harshness without
 /// hard-clipping crunch).
@@ -121,10 +127,23 @@ export function getRobotInput(ctx: AudioContext): AudioNode {
   delay.connect(wet);
   wet.connect(tail);
 
-  // Until the worklet loads, the native chain feeds the speakers directly.
-  tail.connect(ctx.destination);
+  // Master gain then a limiter: the gain is the loudness knob, the limiter
+  // keeps boosts above unity from hard-clipping at the destination (the soft
+  // clipper upstream only shapes the wet path).
+  const master = ctx.createGain();
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -3;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.002;
+  limiter.release.value = 0.15;
+  master.connect(limiter);
+  limiter.connect(ctx.destination);
 
-  chain = { ctx, input, tail, wet, dry, peak, shaper, carrier };
+  // Until the worklet loads, the native chain feeds the master stage directly.
+  tail.connect(master);
+
+  chain = { ctx, input, tail, master, wet, dry, peak, shaper, carrier };
   applyParams();
   maybeInsertGlitch();
   return input;
@@ -138,6 +157,7 @@ function applyParams(): void {
   if (!chain) return;
   chain.wet.gain.value = intensity;
   chain.dry.gain.value = 1 - intensity;
+  chain.master.gain.value = gain;
   chain.carrier.frequency.value = ringHz;
   chain.peak.frequency.value = peakHz;
   chain.shaper.curve = makeSaturationCurve(saturation);
@@ -179,6 +199,12 @@ export function setRobotPeakHz(hz: number): void {
   peakHz = clamp(hz, 500, 5000);
   applyParams();
 }
+/// Master output gain (1 = unity). Values above 1 are caught by the limiter
+/// rather than hard-clipping.
+export function setRobotGain(amount: number): void {
+  gain = clamp(amount, 0, 3);
+  applyParams();
+}
 
 /// Begin loading the glitch worklet module. Safe to call repeatedly and before
 /// the chain exists; the splice happens once both are ready.
@@ -217,7 +243,7 @@ function maybeInsertGlitch(): void {
       });
       chain.tail.disconnect();
       chain.tail.connect(glitch);
-      glitch.connect(chain.ctx.destination);
+      glitch.connect(chain.master);
       chain.glitch = glitch;
       applyParams(); // sync the worklet's wet/glitchRate to the current params
 
