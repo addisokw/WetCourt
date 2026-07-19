@@ -15,8 +15,8 @@ port_max = 40099
 
 [audio]
 # F5: POST the lawyer's audio to the orchestrator for booth-speaker playback
-# (needs orchestrator [lawyer] speaker_playback too). OFF until a hardware pass.
-speaker_playback = false
+# (needs orchestrator [lawyer] speaker_playback too). Hardware-verified 2026-07-19.
+speaker_playback = true
 vad_rms_threshold = 100.0
 vad_hangover_ms = 700
 silence_reprompt_secs = 12

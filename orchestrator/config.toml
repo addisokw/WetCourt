@@ -146,8 +146,8 @@ base_url = "http://127.0.0.1:8092"
 # confirms the droop/slew is safe (raw tilt reaches the firmware droop position).
 neck_droop_on_call = false
 # F5: also play the lawyer's call audio over the booth speaker (phone-band).
-# Needs counsel's [audio] speaker_playback too. Motion/audio -- OFF until a hardware pass.
-speaker_playback = false
+# Needs counsel's [audio] speaker_playback too. Hardware-verified 2026-07-19 (mid-trial call plays over the case UI).
+speaker_playback = true
 
 # Idle "attract mode": while the booth sits idle, the judge periodically speaks
 # an enticement, sweeps its head a little, and cues the face. Motion + audio —
