@@ -24,19 +24,38 @@ impl LawyerBridge {
     /// waiting for pickup, and a down/busy/unregistered phone must never
     /// stall the FSM loop. The outcome is logged, not acted on: if they
     /// answer, counsel's `call_started` push pauses the clock.
+    ///
+    /// 503 (phone not registered) is retried for a while: a counsel restart
+    /// wipes its in-memory registrar and the ATA can take up to its 120 s
+    /// registration interval to come back — a one-shot ring during that
+    /// window silently died while the UI told the defendant to pick up.
     pub fn ring(&self, reason: String) {
         let url = format!("{}/call", self.base_url.trim_end_matches('/'));
         let http = self.http.clone();
         tokio::spawn(async move {
-            match http
-                .post(&url)
-                .timeout(Duration::from_secs(35))
-                .json(&serde_json::json!({ "reason": reason }))
-                .send()
-                .await
-            {
-                Ok(r) => info!(status = %r.status(), "lawyer ring-out resolved"),
-                Err(e) => warn!("lawyer ring-out failed: {e:#}"),
+            for attempt in 1..=6u32 {
+                match http
+                    .post(&url)
+                    .timeout(Duration::from_secs(35))
+                    .json(&serde_json::json!({ "reason": reason }))
+                    .send()
+                    .await
+                {
+                    Ok(r) if r.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                        && attempt < 6 =>
+                    {
+                        warn!(attempt, "lawyer phone not registered — retrying ring in 5s");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                    Ok(r) => {
+                        info!(status = %r.status(), attempt, "lawyer ring-out resolved");
+                        return;
+                    }
+                    Err(e) => {
+                        warn!("lawyer ring-out failed: {e:#}");
+                        return;
+                    }
+                }
             }
         });
     }
