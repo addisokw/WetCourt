@@ -19,6 +19,7 @@ HTTP channel is reachable over the LAN. Config via flags or BOOTH_VISION_* env.
 """
 
 import argparse
+import glob
 import os
 import threading
 import time
@@ -176,6 +177,62 @@ class Tracker:
         ]
 
 
+def _list_video_devices():
+    """Every /dev/video* node, sorted numerically (video0, video1, …)."""
+    def num(dev):
+        try:
+            return int(dev.rsplit("video", 1)[1])
+        except (ValueError, IndexError):
+            return 9999
+    return sorted(glob.glob("/dev/video*"), key=num)
+
+
+def _camera_candidates(cam):
+    """Ordered devices to try. An explicit --camera (index or /dev path) is
+    tried first; then every discovered /dev/video* node. So a fixed preference
+    still wins when present, but we fall through to whatever is actually there
+    when the webcam re-enumerates to a different node."""
+    cands = []
+    if cam not in (None, "", "auto"):
+        # Accept either a numeric index ("0") or a device path ("/dev/videoN").
+        cands.append(int(cam) if str(cam).isdigit() else cam)
+    for dev in _list_video_devices():
+        if dev not in cands:
+            cands.append(dev)
+    return cands or [0]
+
+
+def _try_open(dev, cfg):
+    """Open one device and confirm it actually yields frames. A single USB
+    camera often exposes several /dev/video* nodes (capture + metadata); only
+    the capture node produces frames, so a bare `isOpened()` isn't enough."""
+    cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        cap.release()
+        return None
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
+    for _ in range(5):  # give the sensor a few reads to warm up
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            return cap
+    cap.release()
+    return None
+
+
+def _open_camera(cfg):
+    """Probe available cameras and return the first that yields frames, or None
+    (caller shows the test pattern and retries — no camera plugged in yet, or
+    the device is mid-re-enumeration)."""
+    for dev in _camera_candidates(cfg.camera):
+        cap = _try_open(dev, cfg)
+        if cap is not None:
+            print(f"[vision] camera acquired: {dev}", flush=True)
+            return cap
+    print("[vision] no working camera found; showing test pattern, will retry", flush=True)
+    return None
+
+
 def _open_capture(cfg):
     """The camera, or a looping video file when `--video` is set.
 
@@ -185,7 +242,8 @@ def _open_capture(cfg):
     camera, no booth, and no crowd. Returns (capture, frame_interval_secs):
     a file decodes as fast as read() is called, so the loop paces itself to
     the file's native FPS to mimic a live camera (the tracker's TTL and the
-    aim stream cadence are wall-clock-based).
+    aim stream cadence are wall-clock-based). `capture` is None when no camera
+    is currently available; the loop retries.
     """
     if cfg.video:
         cap = cv2.VideoCapture(cfg.video)
@@ -198,10 +256,7 @@ def _open_capture(cfg):
         interval = 1.0 / fps if fps > 0 else 1 / 30.0
         print(f"[vision] video mode: {cfg.video} ({fps:.1f} fps, looping)", flush=True)
         return cap, interval
-    cap = cv2.VideoCapture(cfg.camera, cv2.CAP_ANY)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
-    return cap, None  # a live camera blocks at its own frame rate
+    return _open_camera(cfg), None  # a live camera blocks at its own frame rate
 
 
 def detect_loop(cfg):
@@ -245,13 +300,25 @@ def detect_loop(cfg):
     t0 = time.perf_counter()
     last_ts = -1
     next_frame_at = time.perf_counter()
+    last_reacquire = 0.0
     while True:
-        ok, frame = cap.read()
+        ok, frame = cap.read() if cap is not None else (False, None)
         if (not ok or frame is None) and cfg.video:
             # End of file: loop back to the start (endless replay).
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ok, frame = cap.read()
         if not ok or frame is None:
+            # Live camera dropped (re-enumerated to a different /dev/videoN,
+            # unplugged, or not present yet): try to re-acquire it, throttled,
+            # so it self-heals without a container restart. Test pattern
+            # meanwhile. (Video mode never reaches here except a bad file.)
+            if not cfg.video:
+                now = time.time()
+                if now - last_reacquire > 2.0:
+                    last_reacquire = now
+                    if cap is not None:
+                        cap.release()
+                    cap, _ = _open_capture(cfg)
             frame = _test_pattern(cfg.width, cfg.height)
             time.sleep(0.05)
         if frame_interval is not None:
@@ -723,7 +790,11 @@ def health():
 def main():
     p = argparse.ArgumentParser(description="Wet Court turret vision")
     p.add_argument(
-        "--camera", type=int, default=int(os.environ.get("BOOTH_VISION_CAMERA", 0))
+        "--camera",
+        default=os.environ.get("BOOTH_VISION_CAMERA", "auto"),
+        help="camera to use: 'auto' (probe available /dev/video*), a numeric "
+        "index (0), or a device path (/dev/video2). Non-'auto' values are "
+        "tried first, then auto-fallback so a re-enumerated webcam still works.",
     )
     p.add_argument(
         "--video",

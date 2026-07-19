@@ -149,12 +149,19 @@ services:
     container_name: vision
     restart: unless-stopped
     network_mode: host
-    devices:
-      - "/dev/video0:/dev/video0"
+    # Camera access. The USB webcam can re-enumerate to a different /dev/videoN
+    # across reboots/replugs, so instead of pinning one node (which breaks when
+    # it moves), grant access to ALL V4L char devices (major 81) and expose the
+    # live /dev tree. vision.py then probes for the working capture device and
+    # re-acquires it if it drops. See BOOTH_VISION_CAMERA (default "auto").
+    device_cgroup_rules:
+      - "c 81:* rmw"
     environment:
       BOOTH_VISION_PORT: "8091"
       BOOTH_VISION_ORCH: http://127.0.0.1:8080
+      BOOTH_VISION_CAMERA: "auto"
     volumes:
+      - /dev:/dev
       # Pre-downloaded pose model (vision/models/pose_landmarker_lite.task):
       # no internet needed at the venue. Tuning (gains/boresight/target) is
       # NOT stored here — the orchestrator re-pushes the saved values from
