@@ -434,6 +434,18 @@ async fn arm_operator_mode(
     AxumState(s): AxumState<AppState>,
     Json(body): Json<ArmModeReq>,
 ) -> Response {
+    // Reserved disarm action (`#0#` on the phone): clear armed modes and ack
+    // with 200 so the handset plays the accept tone. Allowed any time —
+    // clearing the armed set is always safe (it never touches a latched
+    // active mode), so this is not idle-gated like arming.
+    if body.code == crate::operator_modes::CODE_DISARM {
+        let changed = s.operator_modes.clear_armed();
+        info!(changed, "operator modes: disarmed via #0");
+        if changed {
+            broadcast_modes(&s);
+        }
+        return (StatusCode::OK, Json(modes_state_json(&s))).into_response();
+    }
     if !s.is_idle.load(Ordering::Relaxed) {
         return (StatusCode::CONFLICT, "modes can only be armed while the court is idle")
             .into_response();

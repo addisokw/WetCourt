@@ -19,6 +19,11 @@ use std::sync::Mutex;
 /// verdict prompt toward acquittal and hard-forces the parsed verdict.
 pub const CODE_INNOCENT: u16 = 42;
 
+/// Reserved action code (not a mode): dialing `#0#` on the phone clears every
+/// armed mode. Handled by the arm endpoint before the registry lookup, so it
+/// is never armable and never shown as an active indicator.
+pub const CODE_DISARM: u16 = 0;
+
 pub struct ModeDef {
     pub code: u16,
     pub slug: &'static str,
