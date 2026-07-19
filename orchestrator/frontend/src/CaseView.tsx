@@ -9,6 +9,7 @@ import {
   currentState,
   deliberation,
   lastVerdictGuilty,
+  lawyerCallEnabled,
   lawyerCalling,
   operatorActive,
   operatorArmed,
@@ -172,6 +173,10 @@ export function CaseContent() {
             <For each={operatorArmed()}>{(c) => <span class="op-mode">{c}</span>}</For>
           </span>
         </Show>
+        {/* Lawyer-call (cross-exam) on/off status. */}
+        <span class={`lawyer-status ${lawyerCallEnabled() ? 'on' : 'off'}`}>
+          ☎ {lawyerCallEnabled() ? 'ON' : 'OFF'}
+        </span>
         <span class={`case-state state-${currentState()}`}>{currentState().replace(/_/g, ' ')}</span>
       </header>
 

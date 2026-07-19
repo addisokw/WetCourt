@@ -38,6 +38,9 @@ pub enum DisplayEvent {
         /// so the operator console must mute its own TTS playback.
         #[serde(default)]
         audio_owner: bool,
+        /// Cross-exam lawyer-call integration on/off (case-header indicator).
+        #[serde(default)]
+        lawyer_enabled: bool,
         /// Secret operator macro codes armed for the next trial / latched into
         /// this one (resync for the case monitor's discreet indicator).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -152,6 +155,9 @@ pub enum DisplayEvent {
     /// `active` is latched into the current one. The case monitor renders
     /// these as a discreet bare-number indicator for operator verification.
     OperatorModes { armed: Vec<u16>, active: Vec<u16> },
+    /// Cross-exam lawyer-call integration was toggled (via the `#88` phone
+    /// macro or the console). Drives the case-header lawyer status indicator.
+    LawyerIntegration { enabled: bool },
 }
 
 #[derive(Debug, Clone, Deserialize)]

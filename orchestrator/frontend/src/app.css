@@ -371,6 +371,20 @@ button.plea.recording:hover { background: #8b2326; }
   pointer-events: none;
 }
 
+/* Cross-exam lawyer-call status in the case-header. Understated so it reads
+   as operator chrome, not audience content. */
+.lawyer-status {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  opacity: 0.75;
+}
+.lawyer-status.on {
+  color: #3fb950;
+}
+.lawyer-status.off {
+  color: #6e7681;
+}
+
 /* Discreet operator macro-mode indicator in the case-header menu bar: bare
    code numbers, barely brighter than the background. Armed codes are dimmest;
    the active (latched) code lifts slightly for up-close verification. */

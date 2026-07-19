@@ -35,6 +35,9 @@ export const [pleaRecordingActive, setPleaRecordingActive] = createSignal<boolea
 // broadcasts every change, ordered after the trial-start reset.
 export const [operatorArmed, setOperatorArmed] = createSignal<number[]>([]);
 export const [operatorActive, setOperatorActive] = createSignal<number[]>([]);
+// Cross-exam lawyer-call integration on/off (case-header indicator). Default
+// true to match the usual config; the snapshot corrects it on connect.
+export const [lawyerCallEnabled, setLawyerCallEnabled] = createSignal<boolean>(true);
 // The judge's cross-examination follow-up question (empty when no cross-exam
 // this trial). Set on the `cross_question` event, cleared at idle/reset.
 export const [crossQuestion, setCrossQuestion] = createSignal<string>('');
@@ -263,6 +266,7 @@ function handleEvent(ev: DisplayEvent) {
       setAudioOwnerPresent(Boolean(ev.audio_owner));
       setOperatorArmed(((ev.operator_armed ?? []) as unknown[]).map(Number));
       setOperatorActive(((ev.operator_active ?? []) as unknown[]).map(Number));
+      setLawyerCallEnabled(Boolean(ev.lawyer_enabled));
       // Reconnected into an open window: restart the mic (recording is
       // browser-local, so whatever was captured died with the old socket).
       if (micEnabled() && (phase === 'awaiting_plea' || crossAnswer)) void beginPlea({ auto: true });
@@ -328,6 +332,9 @@ function handleEvent(ev: DisplayEvent) {
       // Discreet macro-mode indicator (case-view header). Server-driven.
       setOperatorArmed(((ev.armed ?? []) as unknown[]).map(Number));
       setOperatorActive(((ev.active ?? []) as unknown[]).map(Number));
+      break;
+    case 'lawyer_integration':
+      setLawyerCallEnabled(Boolean(ev.enabled));
       break;
     case 'mic_owner':
       setMicOwnerPresent(Boolean(ev.present));

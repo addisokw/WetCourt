@@ -448,6 +448,15 @@ fn broadcast_modes(s: &AppState) {
         .send(DisplayMessage::Json(DisplayEvent::OperatorModes { armed, active }));
 }
 
+/// Broadcast the cross-exam lawyer-call on/off state so the case-header
+/// indicator stays live regardless of which surface toggled it.
+fn broadcast_lawyer_integration(s: &AppState) {
+    let enabled = s.lawyer_enabled.load(Ordering::Relaxed);
+    let _ = s
+        .display_bcast
+        .send(DisplayMessage::Json(DisplayEvent::LawyerIntegration { enabled }));
+}
+
 async fn get_operator_modes(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     let (armed, active) = s.operator_modes.snapshot();
     let registry: Vec<_> = crate::operator_modes::REGISTRY
@@ -494,6 +503,7 @@ async fn arm_operator_mode(
         let now = !s.lawyer_enabled.load(Ordering::Relaxed);
         s.lawyer_enabled.store(now, Ordering::Relaxed);
         info!(lawyer_enabled = now, "operator modes: lawyer-call integration toggled via #88");
+        broadcast_lawyer_integration(&s);
         let mut body = modes_state_json(&s);
         body["lawyer_enabled"] = serde_json::json!(now);
         return (StatusCode::OK, Json(body)).into_response();
@@ -941,6 +951,7 @@ async fn set_lawyer_integration(
 ) -> impl IntoResponse {
     s.lawyer_enabled.store(body.enabled, Ordering::Relaxed);
     info!(enabled = body.enabled, "lawyer trial integration toggled");
+    broadcast_lawyer_integration(&s);
     (StatusCode::OK, Json(LawyerIntegrationState { enabled: body.enabled }))
 }
 
@@ -1478,6 +1489,7 @@ fn snapshot_event(s: &AppState) -> DisplayEvent {
         maintenance: s.maintenance.load(Ordering::Relaxed),
         mic_owner: s.mic_present.load(Ordering::SeqCst),
         audio_owner: s.audio_present.load(Ordering::SeqCst),
+        lawyer_enabled: s.lawyer_enabled.load(Ordering::Relaxed),
         operator_armed,
         operator_active,
     }
