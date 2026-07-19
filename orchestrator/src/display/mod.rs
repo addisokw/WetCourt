@@ -487,6 +487,17 @@ async fn arm_operator_mode(
         }
         return (StatusCode::OK, Json(modes_state_json(&s))).into_response();
     }
+    // Reserved lawyer-integration toggle (`#88#` on the phone): flip the
+    // cross-exam lawyer-call flag on/off. Mirrors the console's lawyer
+    // integration checkbox; not idle-gated. The response carries the new state.
+    if body.code == crate::operator_modes::CODE_LAWYER_TOGGLE {
+        let now = !s.lawyer_enabled.load(Ordering::Relaxed);
+        s.lawyer_enabled.store(now, Ordering::Relaxed);
+        info!(lawyer_enabled = now, "operator modes: lawyer-call integration toggled via #88");
+        let mut body = modes_state_json(&s);
+        body["lawyer_enabled"] = serde_json::json!(now);
+        return (StatusCode::OK, Json(body)).into_response();
+    }
     if !s.is_idle.load(Ordering::Relaxed) {
         return (StatusCode::CONFLICT, "modes can only be armed while the court is idle")
             .into_response();

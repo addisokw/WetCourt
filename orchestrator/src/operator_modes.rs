@@ -29,6 +29,12 @@ pub const CODE_DISARM: u16 = 0;
 /// mid-trial, unlike arming; a no-op when already idle.
 pub const CODE_RESET: u16 = 99;
 
+/// Reserved action code (not a mode): dialing `#88#` toggles the cross-exam
+/// lawyer-call integration on/off (the same `lawyer_enabled` flag the operator
+/// console exposes). Off = no automatic "your lawyer is calling" ring during
+/// cross-examination.
+pub const CODE_LAWYER_TOGGLE: u16 = 88;
+
 pub struct ModeDef {
     pub code: u16,
     pub slug: &'static str,
