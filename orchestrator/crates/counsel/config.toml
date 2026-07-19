@@ -17,7 +17,13 @@ port_max = 40099
 # F5: POST the lawyer's audio to the orchestrator for booth-speaker playback
 # (needs orchestrator [lawyer] speaker_playback too). Hardware-verified 2026-07-19.
 speaker_playback = true
+# Quiet-room minimum; the effective gate is max(this, noise_floor * ratio).
+# The floor is the min frame RMS over the window, so it tracks the venue —
+# measured 2026-07-19: venue ambient through the handset sat at RMS 250–700,
+# which made any fixed threshold either deaf or permanently open.
 vad_rms_threshold = 100.0
+vad_floor_ratio = 2.5
+vad_floor_window_ms = 5000
 vad_hangover_ms = 700
 silence_reprompt_secs = 12
 max_call_secs = 180

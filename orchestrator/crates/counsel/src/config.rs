@@ -119,10 +119,21 @@ fn d_rtp_port_max() -> u16 {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AudioConfig {
-    /// RMS threshold (i16 scale) above which a 20 ms frame counts as speech.
-    /// Tune on the real handset; `debug_rms = true` logs per-frame values.
+    /// Minimum RMS threshold (i16 scale) above which a 20 ms frame counts as
+    /// speech. The effective threshold is `max(this, noise_floor *
+    /// vad_floor_ratio)` — the floor tracks the venue, this is the quiet-room
+    /// backstop. `debug_rms = true` logs per-frame values.
     #[serde(default = "d_vad_rms_threshold")]
     pub vad_rms_threshold: f32,
+    /// Speech must stand this factor above the rolling noise floor (the
+    /// minimum frame RMS over `vad_floor_window_ms`). Keeps the endpointer
+    /// working when a loud venue swamps any fixed threshold.
+    #[serde(default = "d_vad_floor_ratio")]
+    pub vad_floor_ratio: f32,
+    /// Window over which the noise floor is tracked (ms). Long enough that
+    /// normal speech dips keep the floor at the true ambient level.
+    #[serde(default = "d_vad_floor_window_ms")]
+    pub vad_floor_window_ms: u64,
     /// Consecutive speech frames to open an utterance.
     #[serde(default = "d_vad_start_frames")]
     pub vad_start_frames: u32,
@@ -172,6 +183,8 @@ impl Default for AudioConfig {
     fn default() -> Self {
         Self {
             vad_rms_threshold: d_vad_rms_threshold(),
+            vad_floor_ratio: d_vad_floor_ratio(),
+            vad_floor_window_ms: d_vad_floor_window_ms(),
             vad_start_frames: d_vad_start_frames(),
             vad_hangover_ms: d_vad_hangover_ms(),
             vad_preroll_ms: d_vad_preroll_ms(),
@@ -190,6 +203,12 @@ impl Default for AudioConfig {
 
 fn d_vad_rms_threshold() -> f32 {
     700.0
+}
+fn d_vad_floor_ratio() -> f32 {
+    2.5
+}
+fn d_vad_floor_window_ms() -> u64 {
+    5000
 }
 fn d_vad_start_frames() -> u32 {
     3
