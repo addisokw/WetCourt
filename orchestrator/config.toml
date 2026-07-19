@@ -71,7 +71,7 @@ history_anchor_count = 0
 # operator console can toggle this live; `enabled` here is just the startup
 # default. Skipped automatically when the defendant offered no plea.
 enabled = true
-answer_window_secs = 10
+answer_window_secs = 20
 question_timeout_secs = 12
 
 [display]
