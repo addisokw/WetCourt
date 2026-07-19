@@ -161,6 +161,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ws/view", get(view_ws_handler))
         .route("/operator/start", post(operator_start))
         .route("/operator/defendant_press", post(operator_defendant_press))
+        .route("/operator/test/inject_plea", post(operator_inject_plea))
         .route("/operator/estop", post(operator_estop))
         .route("/operator/personas", get(list_personas))
         .route("/operator/voices", get(list_voices))
@@ -238,6 +239,30 @@ async fn operator_start(AxumState(s): AxumState<AppState>) -> impl IntoResponse 
 async fn operator_defendant_press(AxumState(s): AxumState<AppState>) -> impl IntoResponse {
     info!("operator: simulated defendant press");
     if s.event_tx.send(Event::DefendantButton).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
+    }
+    (StatusCode::NO_CONTENT, "")
+}
+
+#[derive(Deserialize)]
+struct InjectPleaReq {
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// Test hook: inject a canned plea (in the plea window) or cross-answer (in the
+/// cross-answer window), bypassing the mic + STT — for driving a full trial
+/// when no booth mic is available. No-op in any other state (the FSM ignores it).
+async fn operator_inject_plea(
+    AxumState(s): AxumState<AppState>,
+    Json(body): Json<InjectPleaReq>,
+) -> impl IntoResponse {
+    let text = body
+        .text
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "I plead not guilty, your honor, on the grounds of rampant absurdity.".into());
+    info!(plea = %text, "operator: injected canned plea/answer");
+    if s.event_tx.send(Event::InjectPlea(text)).await.is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, "event channel closed");
     }
     (StatusCode::NO_CONTENT, "")

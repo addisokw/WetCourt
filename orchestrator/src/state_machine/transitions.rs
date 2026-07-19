@@ -156,6 +156,9 @@ pub fn step(
         (s @ DisplayingCharge { .. }, _) => (s, vec![]),
 
         (AwaitingPlea { charge, .. }, PleaAudioReceived(audio)) => begin_transcribing(charge, audio, cfg),
+        // Test hook: inject a canned plea transcript, skipping mic + STT, and
+        // route it exactly as a real transcript would (cross-exam or verdict).
+        (AwaitingPlea { charge, .. }, InjectPlea(text)) => after_plea(charge, text, cross_enabled, cfg),
         // The mic actually started capturing: reset the plea-window deadline so
         // they get the full talking time from the moment they start speaking.
         // (While paused on the lawyer phone the reset applies to the frozen
@@ -274,6 +277,11 @@ pub fn step(
         // Recording the answer — reuses the plea-recording machinery verbatim.
         (CrossAwaitingAnswer { charge, plea, question, .. }, PleaAudioReceived(audio)) => {
             begin_cross_transcribing(charge, plea, question, audio, cfg)
+        }
+        // Test hook: inject a canned cross-answer, skipping mic + STT, straight
+        // to deliberation with the exchange recorded.
+        (CrossAwaitingAnswer { charge, plea, question, .. }, InjectPlea(answer)) => {
+            begin_deliberating(charge, plea, Some(CrossExam { question, answer }), cfg)
         }
         (CrossAwaitingAnswer { charge, plea, question, paused_remaining, .. }, PleaRecordingStarted) => {
             let window = Duration::from_secs(cfg.cross_examination.answer_window_secs);

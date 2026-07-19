@@ -19,6 +19,10 @@ pub enum Event {
     PleaAudioReceived(Vec<u8>),
     PleaRecordingStarted,
     TranscriptReady(String),
+    /// Test hook (`POST /operator/test/inject_plea`): feed a canned plea/answer
+    /// transcript straight into the plea or cross-answer window, bypassing the
+    /// mic + STT. For driving a full trial when no booth mic is available.
+    InjectPlea(String),
     /// STT errored (distinct from a silent defendant) — the FSM falls back to
     /// "[no defense offered]" AND raises the operator PleaFallback banner.
     TranscriptFailed(String),
