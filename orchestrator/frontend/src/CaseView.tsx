@@ -26,12 +26,49 @@ import {
 // accused-facing monitor. Shows the charge, instructions on what to do, the
 // plea transcript, and the verdict. No controls, no log, no operator chrome.
 
+// The idle attractor: a billboard that teaches the whole trial in one glance,
+// readable from across the room. The pulsing lamp mirrors the blinking arcade
+// button on the booth. `connected` covers the beat between socket-open and the
+// server snapshot, which must render as attract too.
+const ATTRACT_STATES = new Set(['idle', 'connected']);
+
+function AttractScreen() {
+  return (
+    <section class="attract">
+      <p class="attract-hero">Step up. The court will hear your case.</p>
+      <ol class="attract-steps">
+        <li>
+          <span class="attract-step-num">1</span>
+          <span class="attract-step-text">
+            <strong>Press the button</strong> to stand trial.
+          </span>
+        </li>
+        <li>
+          <span class="attract-step-num">2</span>
+          <span class="attract-step-text">Hear the charge against you.</span>
+        </li>
+        <li>
+          <span class="attract-step-num">3</span>
+          <span class="attract-step-text">
+            <strong>Press to talk.</strong> <strong>Press again</strong> when done.
+          </span>
+        </li>
+        <li>
+          <span class="attract-step-num">4</span>
+          <span class="attract-step-text">The judge rules. The guilty get soaked.</span>
+        </li>
+      </ol>
+      <div class="attract-cta">
+        <span class="attract-lamp" />
+        <span>Press the button to begin</span>
+      </div>
+    </section>
+  );
+}
+
 function StateInstruction() {
   return (
     <Switch>
-      <Match when={currentState() === 'idle' || currentState() === 'connected'}>
-        <p class="instruction big">PRESS THE BUTTON TO STAND TRIAL</p>
-      </Match>
       <Match when={currentState() === 'displaying_charge'}>
         <p class="instruction">Listen carefully to the charge against you.</p>
       </Match>
@@ -186,6 +223,10 @@ export function CaseContent() {
       </header>
 
       <main class="case-main">
+        <Show when={ATTRACT_STATES.has(currentState())}>
+          <AttractScreen />
+        </Show>
+
         <Show when={showCharge()}>
           <section class="charge-block">
             <div class="charge-label">YOU ARE CHARGED WITH</div>
